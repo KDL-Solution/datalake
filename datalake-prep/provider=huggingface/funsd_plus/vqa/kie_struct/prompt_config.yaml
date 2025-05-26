@@ -1,0 +1,7 @@
+query_template: |
+  {% if doc_type %}
+  This is a {{ doc_type }} document.
+  {% else %}
+  This is a document image.
+  {% endif %}
+  Please extract the following fields and return the result in the same JSON 

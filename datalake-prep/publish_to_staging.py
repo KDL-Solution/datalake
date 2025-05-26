@@ -1,0 +1,175 @@
+#!/usr/bin/env python3
+"""
+tl-publish
+==========
+
+  _staging/{task}/{provider}/{dataset}/
+      images/…                       ← 모든 variant 공통
+      {variant}/{k1=v1}/{k2=v2}/<uuid>/
+          ├── data.parquet
+          └── _meta.json
+
+필수 입력
+---------
+  --parquet : data.parquet 경로
+  --provider / --dataset / --task / --variant / --partitions
+
+옵션 입력
+---------
+  --images  : 실제 이미지 폴더 (없으면 이미지 업로드 생략)
+
+data.parquet 규칙
+-----------------
+  • `image_path` 컬럼 필수
+  • `images` 루트 바로 아래 상대 경로만 기록
+      예) 'ea/0001.jpg' (OK)   'images/ea/0001.jpg' (X)
+"""
+import datetime
+import hashlib
+import json
+import shutil
+import subprocess
+import sys
+import uuid
+from pathlib import Path
+
+from config import (
+    validate_provider,
+    validate_parts,
+    parse_to_parts,
+    build_dst_root,
+    build_images_root,
+)
+
+# NAS 설정 -------------------------------------------------
+NAS_ROOT = Path("/mnt/AI_NAS/datalake")
+STAGING  = NAS_ROOT / "_staging"
+RSYNC_OPTS = ["-a", "-z", "--no-perms", "--omit-dir-times"]
+
+# 유틸 ------------------------------------------------------
+def sha256_file(fp: Path) -> str:
+    h = hashlib.sha256()
+    with fp.open("rb") as f:
+        for chunk in iter(lambda: f.read(1 << 20), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+def rsync_dir(src: Path, dst: Path):
+    subprocess.check_call(["rsync", *RSYNC_OPTS, f"{src}/", f"{dst}/"])
+
+# 메인 ------------------------------------------------------
+def publish(
+    provider: str,
+    dataset: str,
+    task: str,
+    variant: str,
+    partitions: str,
+    parquet_path: Path,
+    images_path: Path | None,
+) -> None:
+
+    # ───── 검증 ─────
+    if not NAS_ROOT.is_dir():
+        sys.exit(f"NAS_ROOT not mounted: {NAS_ROOT}")
+
+    if not parquet_path.is_file():
+        sys.exit(f"parquet not found: {parquet_path}")
+
+    schema_path = parquet_path.with_suffix(".json")
+    if not schema_path.is_file():
+        sys.exit(f"schema.json not found next to parquet: {schema_path}")
+    with schema_path.open("r") as f:
+        schema = json.load(f)
+
+    parts = parse_to_parts(partitions)
+    
+    validate_provider(provider)
+    validate_parts(task, parts)
+
+    uuid_str  = uuid.uuid4().hex
+    dst_images = build_images_root(
+        base_root=STAGING, 
+        provider=provider, 
+        dataset=dataset
+    )
+    dst_label = build_dst_root(
+        base_root=STAGING, 
+        provider=provider, 
+        dataset=dataset, 
+        task=task, 
+        variant=variant, 
+        parts=parts
+    ).joinpath(uuid_str)
+    dst_parquet = dst_label / "data.parquet"
+
+    dst_label.mkdir(parents=True, exist_ok=True)
+    if any(dst_label.iterdir()):
+        raise RuntimeError(f"staging folder not empty: {dst_label}")
+
+    # ───── 이미지 복사(선택) ─────
+    copied_images = False
+    if images_path and images_path.is_dir() and any(images_path.iterdir()):
+        print(f"copying images → {dst_images}")
+        dst_images.mkdir(parents=True, exist_ok=True)
+        rsync_dir(images_path, dst_images)
+        print("images copied")
+        copied_images = True
+    else:
+        print("no images to upload; skipping image stage")
+
+    # ───── Parquet 복사 ─────
+    print(f"copying parquet → {dst_parquet}")
+    shutil.copy2(parquet_path, dst_parquet)
+    print("parquet copied")
+
+    # ───── 메타 작성 ─────
+    meta = {
+        "provider": provider,
+        "dataset": dataset,
+        "task": task,
+        "variant": variant,
+        "uuid": uuid_str,
+        "partitions": partitions,
+        "build_time": datetime.datetime.now().isoformat(),
+        "schema": schema,
+        "schema_version": sha256_file(schema_path),
+        "parquet_sha256": sha256_file(dst_parquet),
+    }
+    (dst_label / "_meta.json").write_text(json.dumps(meta, indent=2))
+
+    # ───── 출력 ─────
+    print(f"✅  staging upload → {dst_label}")
+    if copied_images:
+        print(f"• img    : {_short(dst_images)}")
+    print(f"• parquet: {_short(dst_parquet)}")
+    print(f"• meta   : {_short(dst_label / '_meta.json')}")
+
+def _short(p: Path) -> str:
+    return str(p).replace(str(NAS_ROOT), "")
+
+# CLI -------------------------------------------------------
+if __name__ == "__main__":
+    import argparse
+
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--provider",   required=True)
+    ap.add_argument("--dataset",    required=True)
+    ap.add_argument("--task",       required=True)
+    ap.add_argument("--variant",    required=True)
+    ap.add_argument("--partitions", required=True,
+                    help="comma list e.g. lang=ko,src=real")
+    ap.add_argument("--parquet",    required=True, type=Path,
+                    help="/path/to/data.parquet")
+    ap.add_argument("--images",     type=Path, default=None,
+                    help="optional image folder path")
+    args = ap.parse_args()
+
+    publish(
+        provider=args.provider,
+        dataset=args.dataset,
+        task=args.task,
+        variant=args.variant,
+        partitions=args.partitions,
+        parquet_path=args.parquet,
+        images_path=args.images,
+    )
