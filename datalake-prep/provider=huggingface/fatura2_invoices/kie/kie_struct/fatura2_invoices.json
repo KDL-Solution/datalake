@@ -1,6 +1,6 @@
 {
-  "schema_name": "invoice_kie",
-  "created": "2025-05-27T05:19:10+00:00Z",
+  "schema_name": "fatura2_invoices",
+  "created": "2025-05-27T06:23:26+00:00Z",
   "columns": [
     {
       "name": "image_path",
@@ -25,13 +25,7 @@
       "type": "string",
       "nullable": true,
       "source": "name:label"
-    },
-    {
-      "name": "date",
-      "type": "string",
-      "nullable": true,
-      "source": "name:date"
     }
   ],
-  "version_sha256": "b080547f600a1133df913a5f344944caa50f401301cff5d243cd361fa856dffb"
+  "version_sha256": "5a0ff46c79d6c555400e11203e608388c62a02f2cea4eb606b67feee543bc95e"
 }

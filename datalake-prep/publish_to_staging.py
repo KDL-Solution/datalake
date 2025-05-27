@@ -58,6 +58,33 @@ def rsync_dir(src: Path, dst: Path):
     subprocess.check_call(["rsync", *RSYNC_OPTS, f"{src}/", f"{dst}/"])
 
 # 메인 ------------------------------------------------------
+def check_existing_versions(provider: str, dataset: str, task: str, variant: str, partitions: str) -> list:
+    """
+    같은 데이터셋(provider, dataset, task, variant, partitions)의 버전이
+    이미 staging에 있는지 확인합니다.
+    
+    Returns:
+        list: 발견된 기존 버전 경로 목록
+    """
+    base_path = build_dst_root(
+        base_root=STAGING, 
+        provider=provider, 
+        dataset=dataset, 
+        task=task, 
+        variant=variant, 
+        parts=parse_to_parts(partitions)
+    )
+    
+    if not base_path.exists():
+        return []
+    
+    existing_versions = []
+    for uuid_dir in base_path.iterdir():
+        if uuid_dir.is_dir() and (uuid_dir / "data.parquet").exists():
+            existing_versions.append(uuid_dir)
+    
+    return existing_versions
+
 def publish(
     provider: str,
     dataset: str,
@@ -66,6 +93,7 @@ def publish(
     partitions: str,
     parquet_path: Path,
     images_path: Path | None,
+    force: bool = False,
 ) -> None:
 
     # ───── 검증 ─────
@@ -85,8 +113,30 @@ def publish(
     
     validate_provider(provider)
     validate_parts(task, parts)
+    
+    # ───── 중복 검사 ─────
+    existing_versions = check_existing_versions(provider, dataset, task, variant, partitions)
+    if existing_versions and not force:
+        print(f"⚠️  경고: 동일한 데이터셋이 이미 {len(existing_versions)}개 존재합니다:")
+        for i, version_path in enumerate(existing_versions, 1):
+            meta_path = version_path / "_meta.json"
+            build_time = "알 수 없음"
+            if meta_path.exists():
+                with meta_path.open() as f:
+                    try:
+                        meta_data = json.load(f)
+                        build_time = meta_data.get("build_time", "알 수 없음")
+                    except:
+                        pass
+            print(f"  {i}. {version_path} (생성일: {build_time})")
+        
+        user_input = input("계속 진행하시겠습니까? 기존 버전은 유지되며 새 버전이 추가됩니다. (y/n): ")
+        if user_input.lower() != 'y':
+            print("작업을 취소합니다.")
+            sys.exit(0)
+        print("기존 버전을 유지하고 새 버전을 추가합니다.")
 
-    uuid_str  = uuid.uuid4().hex
+    uuid_str = uuid.uuid4().hex
     dst_images = build_images_root(
         base_root=STAGING, 
         provider=provider, 
@@ -162,6 +212,8 @@ if __name__ == "__main__":
                     help="/path/to/data.parquet")
     ap.add_argument("--images",     type=Path, default=None,
                     help="optional image folder path")
+    ap.add_argument("--force",      action="store_true",
+                    help="중복 발견 시 확인 없이 강제로 진행")
     args = ap.parse_args()
 
     publish(
@@ -172,4 +224,5 @@ if __name__ == "__main__":
         partitions=args.partitions,
         parquet_path=args.parquet,
         images_path=args.images,
+        force=args.force,
     )
