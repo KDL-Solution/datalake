@@ -1,0 +1,31 @@
+{
+  "schema_name": "invoice_kie",
+  "created": "2025-05-27T04:57:26+00:00Z",
+  "columns": [
+    {
+      "name": "image_path",
+      "type": "string",
+      "nullable": true,
+      "source": "name:image_path"
+    },
+    {
+      "name": "width",
+      "type": "int64",
+      "nullable": true,
+      "source": "name:width"
+    },
+    {
+      "name": "height",
+      "type": "int64",
+      "nullable": true,
+      "source": "name:height"
+    },
+    {
+      "name": "label",
+      "type": "string",
+      "nullable": true,
+      "source": "name:label"
+    }
+  ],
+  "version_sha256": "7fd6c9fe9331e44a0d2bfafcaba44e536d1ccc5e558e85037dfb22f3c1879250"
+}

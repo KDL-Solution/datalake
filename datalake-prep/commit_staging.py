@@ -172,13 +172,13 @@ def commit_all():
         merge_images(filtered_paths, staging_images, catalog_images)
         
         dst_parquet_fp = dst_root / "data.parquet"
-        update_parquet_paths(parquet_fp, dst_parquet_fp, catalog_images)
         if dst_parquet_fp.exists():
             # backup with timestamp
             timestamp = datetime.datetime.now().strftime("%Y%m%d%H%M%S")
             backup_fp = dst_parquet_fp.with_suffix(f".{timestamp}.bak")
             print(f"[WARN] {dst_parquet_fp} already exists; backing up to {backup_fp}")
             shutil.copy2(dst_parquet_fp, backup_fp)
+        update_parquet_paths(parquet_fp, dst_parquet_fp, catalog_images)
         print(f"writing parquet → {dst_parquet_fp}")
         shutil.copy2(meta_fp, dst_root / "_meta.json")
         print(f"✅ committed: {dst_parquet_fp}")
