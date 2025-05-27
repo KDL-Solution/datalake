@@ -27,7 +27,8 @@ DeepDocs 데이터 레이크는 다양한 출처의 문서 처리 데이터셋�
 | gangdong_kyunghee_hospital | 강동경희대병원 | inhouse | OCR/KIE | 3,672  | [상세](#gangdong_kyunghee_hospital) |
 | tourism_food_menu_board | 관광 음식메뉴판 데이터 | aihub | OCR/KIE | 90,085 | [상세](#tourism_food_menu_board)  |
 | pubtabnet_otsl | ds4sd/pubtabnet_otsl | huggingface | DocConv | 394,944 | [상세](#pubtabnet_otsl)  |
-| invoice_kie | GokulRajaR/invoice-ocr-json | huggingface | KIE | 5,189 | [상세](#invoice_kie)  |
+| invoice_kie | GokulRajaR/invoice-ocr-json, ikram98ai/invoice_img2json | huggingface | KIE | 5,189 | [상세](#invoice_kie)  |
+| fatura2_invoices | arlind0xbb/Fatura2-invoices-original-strat1, arlind0xbb/Fatura2-invoices-original-strat2 | huggingface | KIE | 5,250 | [상세](#fatura2_invoices)  |
 
 ## 📂 데이터셋 상세
 
@@ -70,10 +71,22 @@ DeepDocs 데이터 레이크는 다양한 출처의 문서 처리 데이터셋�
 <details>
 <summary id="invoice_kie"><b>invoice_kie</b></summary>
 
-- **데이터셋명**: GokulRajaR/invoice-ocr-json
+- **데이터셋명**: GokulRajaR/invoice-ocr-json, ikram98ai/invoice_img2json
 - **경로**: source/provider=huggingface/invoice_kie
 - **수집일**: 2025-05-27
 - **샘플 수**: 5,189
+- **주요 폴더/파일**:
+- **라벨 포맷/주요 필드**: kie
+- **비고**: 
+  - 2025-05-27 1차 수집
+</details>
+<details>
+<summary id="fatura2_invoices"><b>fatura2_invoices</b></summary>
+
+- **데이터셋명**: arlind0xbb/Fatura2-invoices-original-strat1, arlind0xbb/Fatura2-invoices-original-strat2
+- **경로**: source/provider=huggingface/fatura2_invoices
+- **수집일**: 2025-05-27
+- **샘플 수**: 5,250
 - **주요 폴더/파일**:
 - **라벨 포맷/주요 필드**: kie
 - **비고**: 
