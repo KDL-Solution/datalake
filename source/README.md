@@ -27,6 +27,7 @@ DeepDocs 데이터 레이크는 다양한 출처의 문서 처리 데이터셋�
 | gangdong_kyunghee_hospital | 강동경희대병원 | inhouse | OCR/KIE | 3,672  | [상세](#gangdong_kyunghee_hospital) |
 | tourism_food_menu_board | 관광 음식메뉴판 데이터 | aihub | OCR/KIE | 90,085 | [상세](#tourism_food_menu_board)  |
 | pubtabnet_otsl | ds4sd/pubtabnet_otsl | huggingface | DocConv | 394,944 | [상세](#pubtabnet_otsl)  |
+| invoice_kie | GokulRajaR/invoice-ocr-json | huggingface | KIE | 5,189 | [상세](#invoice_kie)  |
 
 ## 📂 데이터셋 상세
 
@@ -64,6 +65,19 @@ DeepDocs 데이터 레이크는 다양한 출처의 문서 처리 데이터셋�
 - **라벨 포맷/주요 필드**: otsl, html, cell
 - **비고**: 
   - 2025-05-23 1차 수집
+</details>
+
+<details>
+<summary id="invoice_kie"><b>invoice_kie</b></summary>
+
+- **데이터셋명**: GokulRajaR/invoice-ocr-json
+- **경로**: source/provider=huggingface/invoice_kie
+- **수집일**: 2025-05-27
+- **샘플 수**: 5,189
+- **주요 폴더/파일**:
+- **라벨 포맷/주요 필드**: kie
+- **비고**: 
+  - 2025-05-27 1차 수집
 </details>
 
 
