@@ -81,8 +81,8 @@ def merge_images(filtered_paths: list[Path], src_images: Path, dst_images: Path)
     
     with alive_bar(len(filtered_paths), title="Merging images") as bar:
         for rel_img_path in filtered_paths:
-            src_fp = src_images / rel_img_path.name
-            dst_fp = dst_images / rel_img_path.name
+            src_fp = src_images / rel_img_path
+            dst_fp = dst_images / rel_img_path
             
             dst_fp.parent.mkdir(parents=True, exist_ok=True)  # 대상 디렉토리 생성
             
