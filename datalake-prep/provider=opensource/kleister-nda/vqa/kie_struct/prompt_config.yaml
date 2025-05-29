@@ -1,0 +1,12 @@
+query_template: |
+  This is a non-disclosure agreement.
+  Please extract the following fields:
+  {% for key in keys %}
+  - {{ key }}
+  {% endfor %}
+  Return the result in the following JSON format:
+  {
+    "<|key|>": {
+      "<|value|>": string
+    }
+  }
