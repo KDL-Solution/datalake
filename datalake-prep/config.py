@@ -4,14 +4,14 @@ PARTITION_ORDER = {
     "ocr":        ["lang", "src"],
     "kie":        ["lang", "src"],
     "vqa":        ["lang", "src"],
-    "layout":     ["lang", "src", "mod"],
-    "document_conversion": ["lang", "src"],
+    "layout":     ["lang", "src"],
+    "document_conversion": ["lang", "src", "mod"],
 }
 
 ALLOWED_VALUES = {
     "lang": {"ko", "en", "ja", "multi"},  # multi = 다국어 혼합
     "src":  {"real", "synthetic"},
-    "mod":  {"image", "html", "layout", "table", "chart", "doctag"},
+    "mod":  {"page", "table", "chart"},
 }
 
 ALLOWED_PROVIDERS = [
