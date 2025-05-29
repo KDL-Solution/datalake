@@ -94,6 +94,20 @@ DeepDocs 데이터 레이크는 다양한 출처의 문서 처리 데이터셋�
 </details>
 
 
+<details>
+<summary id="funsd_plus"><b>funsd_plus</b></summary>
+
+- **데이터셋명**: funsd_plus  
+- **경로**: source/provider=huggingface/funsd_plus  
+- **수집일**: 2025-05-28  
+- **샘플 수**: 1,139  
+- **주요 폴더/파일**:
+- **라벨 포맷/주요 필드**: JSON (bbox, text, class 등 KIE 라벨)  
+- **비고**:  
+  - 2025-05-28 1차 수집  
+  - 원래는 VQA 용(question-answer 쌍 기반) 구조였으나 KIE 태스크로 변환  
+  - OCR 기반 KIE 데이터셋으로 사용됨  
+  - FUNSD를 확장한 구조적 key-value 태깅 포함  
 </details>
 
 ---
@@ -107,7 +121,7 @@ DeepDocs 데이터 레이크는 다양한 출처의 문서 처리 데이터셋�
 - **데이터셋명(한글)**: 강동경희대병원 진료/처방 OCR
 - **경로**: source/provider=inhouse/gangdong_kyunghee_hospital
 - **수집일**: 2024-08-13
-- **샘플 수**: 3,672
+- **샘플 수**: 159,153
 - **주요 폴더/파일**:
   ```
   data/
@@ -121,5 +135,35 @@ DeepDocs 데이터 레이크는 다양한 출처의 문서 처리 데이터셋�
 </details>
 
 </details>
+<details>
+<summary><b>📄 opensource</b></summary>
 
+<details>
+<summary id="real_kie"><b>real-kie</b></summary>
+
+- **데이터셋명**: real-kie  
+- **경로**: source/provider=opensource/real-kie  
+- **수집일**: 2025-05-28  
+- **샘플 수**: 23,187  
+- **주요 폴더/파일**:
+  ```
+  charities           : 8,370
+  fcc_invoices        : 1,812
+  nda                 : 2,574
+  resource_contracts  : 33,868
+  s1                  : 86,371
+  s1_pages            : 13,079
+  s1_trimmed          : 0
+  s1_truncated        : 13,079
+  ```
+- **라벨 포맷/주요 필드**: JSON (label[text, start, end], ocr[token, bbox])  
+- **비고**:  
+  - 2025-05-28 1차 수집 완료  
+  - 도메인 단위(폴더별)로 문서 유형이 나뉘어 있음  
+  - 각 폴더별 `train.csv`, `val.csv`, `test.csv` 형태로 OCR + KIE 라벨 존재  
+  - OCR 결과는 `ocr/*.json.gz`로 존재하며, `image_files` 열로 이미지 경로와 연결  
+  - 원본 PDF는 s1_pages, s1_trimmed 등 별도 폴더에 포함됨
+</details>
+
+</details>
 ---
