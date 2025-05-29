@@ -30,7 +30,7 @@ DeepDocs 데이터 레이크는 다양한 출처의 문서 처리 데이터셋�
 | invoice_kie | GokulRajaR/invoice-ocr-json, ikram98ai/invoice_img2json | huggingface | KIE | 5,189 | [상세](#invoice_kie)  |
 | fatura2_invoices | arlind0xbb/Fatura2-invoices-original-strat1, arlind0xbb/Fatura2-invoices-original-strat2 | huggingface | KIE | 1,250 | [상세](#fatura2_invoices)  |
 | synth_invoices_en | Nabin1995/invoice-dataset-layoutlmv3 | huggingface | Layout | 10,000 | [상세](#synth_invoices_en)  |
-
+| admindocs_mrc | 행정 문서 대상 기계독해 데이터 | aihub | DocConv | 50,073 | [상세](#admindocs_mrc)  |
 ## 📂 데이터셋 상세
 
 <details>
@@ -47,6 +47,19 @@ DeepDocs 데이터 레이크는 다양한 출처의 문서 처리 데이터셋�
 - **라벨 포맷/주요 필드**: JSON (bbox, text)
 - **비고**: 
   - 2025-05-23 1차 수집
+</details>
+
+<details>
+<summary id="admindocs_mrc"><b>admindocs_mrc</b></summary>
+
+- **데이터셋명(한글)**: 행정 문서 대상 기계독해 데이터
+- **경로**: source/provider=aihub/admindocs_mrc
+- **수집일**: 2025-05-29
+- **샘플 수**: 50,073
+- **주요 폴더/파일**:
+- **라벨 포맷/주요 필드**: html
+- **비고**: 
+  - 2025-05-29 1차 수집
 </details>
 
 </details>
