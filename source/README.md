@@ -159,6 +159,10 @@ DeepDocs 데이터 레이크는 다양한 출처의 문서 처리 데이터셋�
   - 2025-05-26 metadata.jsonl 추가 (kie)
 </details>
 
+</details>
+
+---
+
 <details>
 <summary><b>📄 opensource</b></summary>
 
@@ -190,4 +194,5 @@ DeepDocs 데이터 레이크는 다양한 출처의 문서 처리 데이터셋�
 </details>
 
 </details>
+
 ---
