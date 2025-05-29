@@ -18,7 +18,7 @@ DeepDocs 데이터 레이크는 다양한 출처의 문서 처리 데이터셋�
 
 - **총 데이터셋 수**: 3개 (2025년 5월 27일 기준)
 - **주요 제공처**: aihub, huggingface, inhouse
-- **데이터 유형**: OCR, KIE, VQA, DocConv 등
+- **데이터 유형**: OCR, KIE, VQA, DocConv, Layout 등
 
 ## 📚 데이터셋 카탈로그
 
@@ -28,7 +28,8 @@ DeepDocs 데이터 레이크는 다양한 출처의 문서 처리 데이터셋�
 | tourism_food_menu_board | 관광 음식메뉴판 데이터 | aihub | OCR/KIE | 90,085 | [상세](#tourism_food_menu_board)  |
 | pubtabnet_otsl | ds4sd/pubtabnet_otsl | huggingface | DocConv | 394,944 | [상세](#pubtabnet_otsl)  |
 | invoice_kie | GokulRajaR/invoice-ocr-json, ikram98ai/invoice_img2json | huggingface | KIE | 5,189 | [상세](#invoice_kie)  |
-| fatura2_invoices | arlind0xbb/Fatura2-invoices-original-strat1, arlind0xbb/Fatura2-invoices-original-strat2 | huggingface | KIE | 5,250 | [상세](#fatura2_invoices)  |
+| fatura2_invoices | arlind0xbb/Fatura2-invoices-original-strat1, arlind0xbb/Fatura2-invoices-original-strat2 | huggingface | KIE | 1,250 | [상세](#fatura2_invoices)  |
+| synth_invoices_en | Nabin1995/invoice-dataset-layoutlmv3 | huggingface | Layout | 10,000 | [상세](#synth_invoices_en)  |
 
 ## 📂 데이터셋 상세
 
@@ -86,9 +87,21 @@ DeepDocs 데이터 레이크는 다양한 출처의 문서 처리 데이터셋�
 - **데이터셋명**: arlind0xbb/Fatura2-invoices-original-strat1, arlind0xbb/Fatura2-invoices-original-strat2
 - **경로**: source/provider=huggingface/fatura2_invoices
 - **수집일**: 2025-05-27
-- **샘플 수**: 5,250
+- **샘플 수**: 1,250
 - **주요 폴더/파일**:
 - **라벨 포맷/주요 필드**: kie
+- **비고**: 
+  - 2025-05-27 1차 수집, 중복 제거
+</details>
+<details>
+<summary id="synth_invoices_en"><b>synth_invoices_en</b></summary>
+
+- **데이터셋명**: Nabin1995/invoice-dataset-layoutlmv3
+- **경로**: source/provider=huggingface/synth_invoices_en
+- **수집일**: 2025-05-27
+- **샘플 수**: 10,000
+- **주요 폴더/파일**:
+- **라벨 포맷/주요 필드**: layout
 - **비고**: 
   - 2025-05-27 1차 수집
 </details>
