@@ -56,13 +56,6 @@ def prepare_dataset(
     images_dir = script_dir / "images"
     data_dir = NAS_ROOT / f"source/provider={provider}/{dataset}"
 
-    rows = []
-    # for split in [
-    #     "Training",
-    #     "Validation",
-    # ]:
-    # target_dir = NAS_ROOT / f"source/provider={provider}/{dataset}/19.시각화_자료_질의응답_데이터/3.개방데이터/1.데이터/{split}"
-
     if unzip:
         unzip_all_zips_in_dir(
             target_dir=data_dir,
@@ -78,6 +71,7 @@ def prepare_dataset(
     assert len(doc_ids) == len(set(doc_ids))
 
     # doc id와 page별로 이미지의 경로를 저장:
+    rows = []
     data_dict = defaultdict(dict)
     for pdf_path in data_dir.glob("**/*.pdf"):
         if "원천데이터" not in pdf_path.parent.as_posix():
@@ -121,8 +115,6 @@ def prepare_dataset(
                     "height": height,
                 }
 
-    # tot_cnt = 0
-    # cnt = 0
     for gt_path in tqdm(gt_paths):
         with open(gt_path, "r", encoding="utf-8") as f:
             data = json.load(f)
@@ -131,14 +123,10 @@ def prepare_dataset(
 
         for row in data["source_data_info"]:
             pages = row["page_no"]
-            # .pdf에 없는 페이지가 명시되어 있는지 확인:
-            # assert all(i <= num_pages for i in pages)
 
             # QA와 짝지어진 페이지가 여럿인 경우는 제외:
             if len(pages) != 1:
-                # cnt += 1
                 continue
-            # tot_cnt += 1
 
             for qa in row["qa_data"]:
                 user_prompt = qa["question"]
@@ -150,7 +138,6 @@ def prepare_dataset(
                         "label": assistant_prompt,
                     } | data_dict[doc_id][pages[0]]
                 )
-    # print(len(rows), tot_cnt, cnt)
 
     df = pd.DataFrame(rows)
     df.to_parquet(
