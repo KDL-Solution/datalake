@@ -81,7 +81,6 @@ DeepDocs 데이터 레이크는 다양한 출처의 문서 처리 데이터셋�
 - **비고**: 
   - 2025-05-23 1차 수집
 </details>
-
 <details>
 <summary id="invoice_kie"><b>invoice_kie</b></summary>
 
@@ -118,8 +117,6 @@ DeepDocs 데이터 레이크는 다양한 출처의 문서 처리 데이터셋�
 - **비고**: 
   - 2025-05-27 1차 수집
 </details>
-
-
 <details>
 <summary id="funsd_plus"><b>funsd_plus</b></summary>
 
@@ -134,6 +131,8 @@ DeepDocs 데이터 레이크는 다양한 출처의 문서 처리 데이터셋�
   - 원래는 VQA 용(question-answer 쌍 기반) 구조였으나 KIE 태스크로 변환  
   - OCR 기반 KIE 데이터셋으로 사용됨  
   - FUNSD를 확장한 구조적 key-value 태깅 포함  
+</details>
+
 </details>
 
 ---
@@ -160,7 +159,6 @@ DeepDocs 데이터 레이크는 다양한 출처의 문서 처리 데이터셋�
   - 2025-05-26 metadata.jsonl 추가 (kie)
 </details>
 
-</details>
 <details>
 <summary><b>📄 opensource</b></summary>
 
