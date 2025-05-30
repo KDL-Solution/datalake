@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 make_schema_from_parquet.py
-  usage:  python make_schema_from_parquet.py data.parquet --name kie_kv_struct_v1
+    usage:  python make_schema_from_parquet.py data.parquet --name kie_kv_struct_v1
 결과:  같은 폴더에 data.json 생성
 """
 import json, hashlib, argparse, datetime
@@ -9,7 +9,9 @@ from pathlib import Path
 import pyarrow.parquet as pq
 
 
-def pa_type_to_str(pa_type):
+def pa_type_to_str(
+    pa_type: str,
+) -> str:
     """PyArrow → Glue 호환 문자열(간단 매핑)"""
     if pa_type == "string":
         return "string"
@@ -22,7 +24,10 @@ def pa_type_to_str(pa_type):
     return "string"  # fallback
 
 
-def main(parquet_path: Path, schema_name: str):
+def main(
+    parquet_path: Path,
+    schema_name: str,
+) -> None:
     schema = pq.read_schema(parquet_path)
     cols = []
     for f in schema:

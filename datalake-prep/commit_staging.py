@@ -2,7 +2,6 @@ import argparse
 import json
 import shutil
 import datetime
-import os
 from pathlib import Path
 from config import build_images_root, build_dst_root
 import pandas as pd
@@ -12,11 +11,19 @@ STAGING = NAS_ROOT / "_staging"
 CATALOG = NAS_ROOT / "catalog"
 TRASH = NAS_ROOT / "_trash"
 
-def safe_move(src, dst):
+
+def safe_move(
+    src,
+    dst,
+):
     dst.parent.mkdir(parents=True, exist_ok=True)
     shutil.move(str(src), str(dst))
 
-def trash_backup(path, dry_run=False):
+
+def trash_backup(
+    path,
+    dry_run=False,
+):
     backup_path = TRASH / f"{path.name}.{datetime.datetime.now().strftime('%Y%m%d%H%M%S')}"
     if dry_run:
         print(f"[DRY-RUN] Would move {path} → {backup_path}")
@@ -24,7 +31,11 @@ def trash_backup(path, dry_run=False):
         safe_move(path, backup_path)
         print(f"[TRASH] {path} → {backup_path}")
 
-def check_catalog_integrity(catalog_parquet, catalog_meta):
+
+def check_catalog_integrity(
+    catalog_parquet,
+    catalog_meta,
+):
     if not catalog_parquet.exists() or not catalog_meta.exists():
         print(f"[ERROR] Missing {catalog_parquet} or {catalog_meta}")
         return False
@@ -40,7 +51,12 @@ def check_catalog_integrity(catalog_parquet, catalog_meta):
         print(f"[ERROR] Catalog integrity check failed: {e}")
         return False
 
-def commit_dataset(staging_root, catalog_root, dry_run=False):
+
+def commit_dataset(
+    staging_root,
+    catalog_root,
+    dry_run=False,
+):
     all_parquets = list(staging_root.rglob("data.parquet"))
     print(f"[INFO] Found {len(all_parquets)} parquet files in staging.")
 
@@ -114,6 +130,16 @@ def commit_dataset(staging_root, catalog_root, dry_run=False):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--dry-run", action="store_true", help="Simulate the commit process without any actual file operations.")
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Simulate the commit process without any actual file operations.",
+    )
     args = parser.parse_args()
-    commit_dataset(STAGING, CATALOG, TRASH, dry_run=args.dry_run)
+
+    commit_dataset(
+        STAGING,
+        CATALOG,
+        TRASH,
+        dry_run=args.dry_run,
+    )
