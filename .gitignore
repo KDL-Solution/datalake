@@ -178,11 +178,20 @@ poetry.toml
 pyrightconfig.json
 
 # End of https://www.toptal.com/developers/gitignore/api/python
+
+# 이미지 확장자
 *.png
 *.jpg
 *.jpeg
 
+# 파일 포맷
+*.parquet
+*.json
+*.csv
+*.zip
+
+# 특정 디렉토리 전체 무시
 **/images/
 **/data/
-data.json
-data.parquet
+
+search.py

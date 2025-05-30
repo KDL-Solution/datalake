@@ -45,7 +45,7 @@ def sanity_img_check(
 ):
     tbl = pd.read_parquet(parquet_fp)
     if "image_path" not in tbl.columns:
-        raise ValueError(f"parquet file {parquet_fp} does not contain 'image_path' column.")
+        return []
     
     paths = tbl["image_path"].dropna().unique().tolist()
     filtered_paths = []
@@ -137,7 +137,8 @@ def update_parquet_paths(
     date_str = datetime.date.today().strftime("%Y-%m-%d")
     df = pd.read_parquet(parquet_fp)
     dst_images_prefix = str(dst_images)
-    df["image_path"] = df["image_path"].apply(lambda p: f"{dst_images_prefix}/{p}")
+    if "image_path" in df.columns:
+        df["image_path"] = df["image_path"].apply(lambda p: f"{dst_images_prefix}/{p}")
     df["date"] = date_str
     return df.to_parquet(dst_parquet_fp, index=False)
 

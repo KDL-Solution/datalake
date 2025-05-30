@@ -18,7 +18,7 @@ DeepDocs 데이터 레이크는 다양한 출처의 문서 처리 데이터셋�
 
 - **총 데이터셋 수**: 3개 (2025년 5월 27일 기준)
 - **주요 제공처**: aihub, huggingface, inhouse
-- **데이터 유형**: OCR, KIE, VQA, DocConv 등
+- **데이터 유형**: OCR, KIE, VQA, DocConv, Layout 등
 
 ## 📚 데이터셋 카탈로그
 
@@ -30,6 +30,9 @@ DeepDocs 데이터 레이크는 다양한 출처의 문서 처리 데이터셋�
 | invoice_kie | GokulRajaR/invoice-ocr-json, ikram98ai/invoice_img2json | huggingface | KIE | 5,189 | [상세](#invoice_kie)  |
 | fatura2_invoices | arlind0xbb/Fatura2-invoices-original-strat1, arlind0xbb/Fatura2-invoices-original-strat2 | huggingface | KIE | 5,250 | [상세](#fatura2_invoices)  |
 | vis_qa | 시각화 자료 질의응답 데이터 | aihub | VQA | 129,213 | [상세](#vis_qa)  |
+| fatura2_invoices | arlind0xbb/Fatura2-invoices-original-strat1, arlind0xbb/Fatura2-invoices-original-strat2 | huggingface | KIE | 1,250 | [상세](#fatura2_invoices)  |
+| synth_invoices_en | Nabin1995/invoice-dataset-layoutlmv3 | huggingface | Layout | 10,000 | [상세](#synth_invoices_en) |
+| admindocs_mrc | 행정 문서 대상 기계독해 데이터 | aihub | DocConv | 50,073 | [상세](#admindocs_mrc)  |
 
 ## 📂 데이터셋 상세
 
@@ -63,6 +66,19 @@ DeepDocs 데이터 레이크는 다양한 출처의 문서 처리 데이터셋�
   - .png의 출처가 되는 .pdf를 알아낼 수 있으나 몇 페이지에서 온 것인지 알 수 없음.
 </details>
 
+<details>
+<summary id="admindocs_mrc"><b>admindocs_mrc</b></summary>
+
+- **데이터셋명(한글)**: 행정 문서 대상 기계독해 데이터
+- **경로**: source/provider=aihub/admindocs_mrc
+- **수집일**: 2025-05-29
+- **샘플 수**: 50,073
+- **주요 폴더/파일**:
+- **라벨 포맷/주요 필드**: html
+- **비고**: 
+  - 2025-05-29 1차 수집
+</details>
+
 </details>
 
 --- 
@@ -82,7 +98,6 @@ DeepDocs 데이터 레이크는 다양한 출처의 문서 처리 데이터셋�
 - **비고**: 
   - 2025-05-23 1차 수집
 </details>
-
 <details>
 <summary id="invoice_kie"><b>invoice_kie</b></summary>
 
@@ -101,13 +116,39 @@ DeepDocs 데이터 레이크는 다양한 출처의 문서 처리 데이터셋�
 - **데이터셋명**: arlind0xbb/Fatura2-invoices-original-strat1, arlind0xbb/Fatura2-invoices-original-strat2
 - **경로**: source/provider=huggingface/fatura2_invoices
 - **수집일**: 2025-05-27
-- **샘플 수**: 5,250
+- **샘플 수**: 1,250
 - **주요 폴더/파일**:
 - **라벨 포맷/주요 필드**: kie
 - **비고**: 
+  - 2025-05-27 1차 수집, 중복 제거
+</details>
+<details>
+<summary id="synth_invoices_en"><b>synth_invoices_en</b></summary>
+
+- **데이터셋명**: Nabin1995/invoice-dataset-layoutlmv3
+- **경로**: source/provider=huggingface/synth_invoices_en
+- **수집일**: 2025-05-27
+- **샘플 수**: 10,000
+- **주요 폴더/파일**:
+- **라벨 포맷/주요 필드**: layout
+- **비고**: 
   - 2025-05-27 1차 수집
 </details>
+<details>
+<summary id="funsd_plus"><b>funsd_plus</b></summary>
 
+- **데이터셋명**: funsd_plus  
+- **경로**: source/provider=huggingface/funsd_plus  
+- **수집일**: 2025-05-28  
+- **샘플 수**: 1,139  
+- **주요 폴더/파일**:
+- **라벨 포맷/주요 필드**: JSON (bbox, text, class 등 KIE 라벨)  
+- **비고**:  
+  - 2025-05-28 1차 수집  
+  - 원래는 VQA 용(question-answer 쌍 기반) 구조였으나 KIE 태스크로 변환  
+  - OCR 기반 KIE 데이터셋으로 사용됨  
+  - FUNSD를 확장한 구조적 key-value 태깅 포함  
+</details>
 
 </details>
 
@@ -122,7 +163,7 @@ DeepDocs 데이터 레이크는 다양한 출처의 문서 처리 데이터셋�
 - **데이터셋명(한글)**: 강동경희대병원 진료/처방 OCR
 - **경로**: source/provider=inhouse/gangdong_kyunghee_hospital
 - **수집일**: 2024-08-13
-- **샘플 수**: 3,672
+- **샘플 수**: 159,153
 - **주요 폴더/파일**:
   ```
   data/
@@ -133,6 +174,40 @@ DeepDocs 데이터 레이크는 다양한 출처의 문서 처리 데이터셋�
 - **비고**: 
   - 2024-08-13 1차 수집 (ocr)
   - 2025-05-26 metadata.jsonl 추가 (kie)
+</details>
+
+</details>
+
+---
+
+<details>
+<summary><b>📄 opensource</b></summary>
+
+<details>
+<summary id="real_kie"><b>real-kie</b></summary>
+
+- **데이터셋명**: real-kie  
+- **경로**: source/provider=opensource/real-kie  
+- **수집일**: 2025-05-28  
+- **샘플 수**: 23,187  
+- **주요 폴더/파일**:
+  ```
+  charities           : 8,370
+  fcc_invoices        : 1,812
+  nda                 : 2,574
+  resource_contracts  : 33,868
+  s1                  : 86,371
+  s1_pages            : 13,079
+  s1_trimmed          : 0
+  s1_truncated        : 13,079
+  ```
+- **라벨 포맷/주요 필드**: JSON (label[text, start, end], ocr[token, bbox])  
+- **비고**:  
+  - 2025-05-28 1차 수집 완료  
+  - 도메인 단위(폴더별)로 문서 유형이 나뉘어 있음  
+  - 각 폴더별 `train.csv`, `val.csv`, `test.csv` 형태로 OCR + KIE 라벨 존재  
+  - OCR 결과는 `ocr/*.json.gz`로 존재하며, `image_files` 열로 이미지 경로와 연결  
+  - 원본 PDF는 s1_pages, s1_trimmed 등 별도 폴더에 포함됨
 </details>
 
 </details>

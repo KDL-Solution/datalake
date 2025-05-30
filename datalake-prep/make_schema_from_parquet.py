@@ -21,7 +21,8 @@ def pa_type_to_str(
         return "int64"
     if pa_type == "boolean":
         return "boolean"
-    return "string"          # fallback
+    return "string"  # fallback
+
 
 def main(
     parquet_path: Path,
@@ -30,27 +31,29 @@ def main(
     schema = pq.read_schema(parquet_path)
     cols = []
     for f in schema:
-        cols.append({
-            "name":      f.name,
-            "type":      pa_type_to_str(str(f.type)),
-            "nullable":  f.nullable,
-            "source":    f"name:{f.name}"      
-        })
+        cols.append(
+            {
+                "name": f.name,
+                "type": pa_type_to_str(str(f.type)),
+                "nullable": f.nullable,
+                "source": f"name:{f.name}",
+            }
+        )
 
     draft = {
-        "schema_name":     schema_name,
-        "created":         datetime.datetime.now(
-            datetime.timezone.utc,
-        ).isoformat(timespec="seconds") + "Z",
-        "columns":         cols,
-        "version_sha256":  ""  # SHA-256 계산 후 삽입
+        "schema_name": schema_name,
+        "created": datetime.datetime.now(datetime.timezone.utc)
+        .isoformat(timespec="seconds")
+        .replace("+00:00", "Z"),
+        "columns": cols,
+        "version_sha256": "",  # SHA-256 계산 후 삽입
     }
 
     # SHA-256 계산 후 삽입
     draft_str = json.dumps(draft, separators=(",", ":"), ensure_ascii=False)
     draft["version_sha256"] = hashlib.sha256(draft_str.encode()).hexdigest()
 
-    #out = parquet_path.with_name(".json")
+    # out = parquet_path.with_name(".json")
     out = parquet_path.with_suffix(".json")
     out.write_text(json.dumps(draft, indent=2, ensure_ascii=False))
     print(f"Schema saved to {out}")

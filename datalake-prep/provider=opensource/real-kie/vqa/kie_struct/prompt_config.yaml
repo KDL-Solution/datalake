@@ -1,0 +1,9 @@
+query_template: |
+  This is a document image.
+  Please extract the following fields:
+  Return the result in the following JSON format:
+  {
+    "<|key|>": {
+      "<|value|>": string
+    }
+  } 

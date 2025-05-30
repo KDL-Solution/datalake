@@ -1,6 +1,6 @@
 {
-  "schema_name": "fatura2_invoices",
-  "created": "2025-05-27T07:55:19+00:00Z",
+  "schema_name": "synth_invoices_en",
+  "created": "2025-05-27T08:22:20+00:00Z",
   "columns": [
     {
       "name": "image_path",
@@ -27,5 +27,5 @@
       "source": "name:label"
     }
   ],
-  "version_sha256": "373f44576b0a8ae50f1849fa15a17c976bf13d7380ef4039cc5e5fd6b30705ef"
+  "version_sha256": "15b1b74867e37f13206c66d5701d4eb727bbb0c83ed21a254179182be0b31091"
 }

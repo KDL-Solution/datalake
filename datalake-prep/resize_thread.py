@@ -6,7 +6,12 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 BASE_DIR = "tourism_images/images"
 OUTPUT_DIR = "tourism_images/resized"
 log_txt = "resize_log.txt"
-def resize_image(image_path, max_size=2048):
+
+
+def resize_image(
+    image_path,
+    max_size=2048,
+):
     try:
         with Image.open(image_path) as img:
             
@@ -30,6 +35,7 @@ def resize_image(image_path, max_size=2048):
     except Exception as e:
         return f"Error: {save_path} ({str(e)})"
 
+
 def main():
     root = Path(BASE_DIR)
     image_paths = list(root.glob("**/*.jpg"))
@@ -39,6 +45,7 @@ def main():
         futures = {executor.submit(resize_image, str(p)): p for p in image_paths}
         for future in as_completed(futures):
             print(future.result())
+
 
 if __name__ == "__main__":
     main()
