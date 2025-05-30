@@ -2,6 +2,10 @@
 # Edit at https://www.toptal.com/developers/gitignore?templates=python
 
 ### Python ###
+.history
+data/
+scripts/
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
@@ -175,9 +179,17 @@ pyrightconfig.json
 
 # End of https://www.toptal.com/developers/gitignore/api/python
 
-*.parquet
-*.zip
+# 이미지 확장자
+*.png
 *.jpg
 *.jpeg
-*.png
+
+# 파일 포맷
+*.parquet
+*.json
 *.csv
+*.zip
+
+# 특정 디렉토리 전체 무시
+**/images/
+**/data/

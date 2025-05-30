@@ -156,7 +156,7 @@ python s3_upload_parquet.py --parquet /mnt/AI_NAS/datalake/catalog/provider=aihu
    - document_conversion: lang, src
 
 3. **허용 값**:
-   - lang: ko, en, ja, multi
+   - lang: ko, en, ja, multi, zxx
    - src: real, synthetic
    - mod: image, html, layout, table, chart, doctag
 

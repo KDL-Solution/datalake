@@ -1,16 +1,26 @@
-from pathlib import Path
-import ast, json
-from collections.abc import Iterable
+import ast
+import json
 import pandas as pd
 import numpy as np
-from PIL import Image
 import matplotlib.pyplot as plt
 import matplotlib.patches as patches
 import ipywidgets as widgets
+from pathlib import Path
+from collections.abc import Iterable
+from PIL import Image
+
+# NAS 설정 -------------------------------------------------
+NAS_ROOT = Path("/mnt/AI_NAS/datalake")
+STAGING = NAS_ROOT / "_staging"
 
 
 class KIEVisualizer:
-    def __init__(self, parquet_path, base_dir=None, margin=450):
+    def __init__(
+        self,
+        parquet_path,
+        base_dir=None,
+        margin=450,
+    ):
         self.df = pd.read_parquet(parquet_path)
         self.base = Path(base_dir or Path(parquet_path).parent)
         self.margin = margin
@@ -18,7 +28,9 @@ class KIEVisualizer:
         self.val_c = (0.1, 0.1, 0.9)
 
     @staticmethod
-    def _loads(raw):
+    def _loads(
+        raw,
+    ):
         if isinstance(raw, (dict, list)):
             return raw
         try:
@@ -29,7 +41,10 @@ class KIEVisualizer:
             except json.JSONDecodeError:
                 return {}
 
-    def _triples(self, d):
+    def _triples(
+        self,
+        d,
+    ):
         for k, vs in d.items():
 
             if vs is None:
@@ -60,13 +75,19 @@ class KIEVisualizer:
                 if len(bb) == 4 and any(float(c) != 0 for c in bb):
                     yield k, v.get("value", ""), bb
 
-    def _img(self, rel):
+    def _img(
+        self,
+        rel,
+    ):
         p = Path(rel)
         if p.is_absolute():
             return p
         return (self.base / p).resolve()
 
-    def _draw(self, idx):
+    def _draw(
+        self,
+        idx,
+    ):
         r = self.df.iloc[idx]
         img = Image.open(self._img(r["image_path"]))
         W, H = img.size
@@ -113,7 +134,10 @@ class KIEVisualizer:
                 ha="left",
                 va="center",
                 bbox=dict(
-                    boxstyle="round,pad=0.3", fc=self.key_c, ec=self.key_c, lw=1.5
+                    boxstyle="round,pad=0.3",
+                    fc=self.key_c,
+                    ec=self.key_c,
+                    lw=1.5,
                 ),
             )
             bb_key = txt.get_window_extent(fig.canvas.get_renderer())
@@ -134,6 +158,14 @@ class KIEVisualizer:
         ax.axis("off")
         plt.show()
 
-    def render(self):
-        slider = widgets.IntSlider(0, 0, len(self.df) - 1, 1, continuous_update=False)
+    def render(
+        self,
+    ):
+        slider = widgets.IntSlider(
+            0,
+            0,
+            len(self.df) - 1,
+            1,
+            continuous_update=False,
+        )
         widgets.interact(lambda i: self._draw(i), i=slider)
