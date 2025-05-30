@@ -1,26 +1,26 @@
-# 📊 DeepDocs 데이터 레이크 - 데이터셋 소스
+# 📊 DeepDocs 데이터 레이크 - 원본 데이터셋 소스
 
-> 문서 처리를 위한 원본 데이터셋 관리 저장소
+> 전처리 이전의 원본 데이터셋 관리 저장소
 
 ## 📋 목차
 
-- [데이터셋 개요](#overview)
-- [데이터셋 카탈로그](#dataset-catalog)
-- [데이터셋 상세](#datasets)
+- [원본 데이터셋 개요](#overview)
+- [원본 데이터셋 카탈로그](#dataset-catalog)
+- [원본 데이터셋 상세](#datasets)
 
 ---
 
 
-## 📑 데이터셋 개요
+## 📑 원본 데이터셋 개요 <a id="overview"></a>
 
-DeepDocs 데이터 레이크는 다양한 출처의 문서 처리 데이터셋을 통합 관리합니다.
-데이터는 NAS  `/volume1/datalake/source/` 에 저장됩니다.
+DeepDocs 데이터 레이크는 다양한 출처의 문서 처리 원본 데이터셋을 통합 관리합니다.
+원본 데이터는 NAS `/AI_NAS/datalake/source/` 에 저장되며, 전처리 이전의 수집 상태로 유지됩니다.
 
-- **총 데이터셋 수**: 3개 (2025년 5월 27일 기준)
-- **주요 제공처**: aihub, huggingface, inhouse
-- **데이터 유형**: OCR, KIE, VQA, DocConv, Layout 등
+- **총 원본 데이터셋 수**: 12개 (2025년 5월 29일 기준)
+- **주요 제공처**: aihub(5), huggingface(6), inhouse(1), opensource(1)
+- **데이터 유형**: OCR, KIE, MRC, DocConv, Layout, 테이블 등
 
-## 📚 데이터셋 카탈로그
+## 📚 원본 데이터셋 카탈로그 <a id="dataset-catalog"></a>
 
 | 폴더명(영문)| 데이터셋 명| 제공처| 유형| 샘플 수| 상세정보|
 |------------|-----------|-------|----|--------|--------|
@@ -31,7 +31,9 @@ DeepDocs 데이터 레이크는 다양한 출처의 문서 처리 데이터셋�
 | fatura2_invoices | arlind0xbb/Fatura2-invoices-original-strat1, arlind0xbb/Fatura2-invoices-original-strat2 | huggingface | KIE | 1,250 | [상세](#fatura2_invoices)  |
 | synth_invoices_en | Nabin1995/invoice-dataset-layoutlmv3 | huggingface | Layout | 10,000 | [상세](#synth_invoices_en)  |
 | admindocs_mrc | 행정 문서 대상 기계독해 데이터 | aihub | DocConv | 50,073 | [상세](#admindocs_mrc)  |
-## 📂 데이터셋 상세
+| tech_sci_mrc | 기술과학 문서 기계독해 데이터 | aihub | DocConv | 8,148 | [상세](#tech_sci_mrc)  |
+| table_qa | 표 정보 질의응답 데이터 | aihub | DocConv | 176,631 | [상세](#table_qa)  |
+## 📂 원본 데이터셋 상세 <a id="datasets"></a>
 
 <details>
 <summary><b>🏛️ aihub</b></summary>
@@ -48,7 +50,6 @@ DeepDocs 데이터 레이크는 다양한 출처의 문서 처리 데이터셋�
 - **비고**: 
   - 2025-05-23 1차 수집
 </details>
-
 <details>
 <summary id="admindocs_mrc"><b>admindocs_mrc</b></summary>
 
@@ -60,6 +61,30 @@ DeepDocs 데이터 레이크는 다양한 출처의 문서 처리 데이터셋�
 - **라벨 포맷/주요 필드**: html
 - **비고**: 
   - 2025-05-29 1차 수집
+</details>
+<details>
+<summary id="tech_sci_mrc"><b>tech_sci_mrc</b></summary>
+
+- **데이터셋명(한글)**: 기술과학 문서 기계독해 데이터
+- **경로**: source/provider=aihub/tech_sci_mrc
+- **수집일**: 2025-05-29
+- **샘플 수**: 8,148
+- **주요 폴더/파일**:
+- **라벨 포맷/주요 필드**: html
+- **비고**: 
+  - 2025-05-29 1차 수집
+</details>
+<details>
+<summary id="table_qa"><b>table_qa</b></summary>
+
+- **데이터셋명(한글)**: 표 정보 질의응답 데이터
+- **경로**: source/provider=aihub/table_qa
+- **수집일**: 2025-05-29
+- **샘플 수**: 176,631
+- **주요 폴더/파일**:
+- **라벨 포맷/주요 필드**: html
+- **비고**: 
+  - 2025-05-30 1차 수집
 </details>
 
 </details>

@@ -1,0 +1,13 @@
+{
+  "schema_name": "table_qa",
+  "created": "2025-05-29T23:54:56Z",
+  "columns": [
+    {
+      "name": "html",
+      "type": "string",
+      "nullable": true,
+      "source": "name:html"
+    }
+  ],
+  "version_sha256": "fb71126adcf2729a5a99ee0364416118b734581d8790ce31a12437c48d66ea7a"
+}

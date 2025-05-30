@@ -1,0 +1,13 @@
+{
+  "schema_name": "admindocs_mrc_tables",
+  "created": "2025-05-29T07:30:18Z",
+  "columns": [
+    {
+      "name": "html",
+      "type": "string",
+      "nullable": true,
+      "source": "name:html"
+    }
+  ],
+  "version_sha256": "f4ee7a0dbdbe7fecaa9bc3c5fa327508959cf26fa162e4b4cf11a39f11d932ff"
+}
