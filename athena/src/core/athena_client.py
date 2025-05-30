@@ -11,6 +11,7 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '.
 from src.config.queries.json_queries import JSONQueries
 from src.core import DEFAULT_DATABASE, DEFAULT_S3_OUTPUT
 
+
 class AthenaClient:
     """Athena 쿼리 실행을 위한 클라이언트
     
@@ -237,7 +238,21 @@ class AthenaClient:
             variants=variants,
             query_func=query_func
         )
-    
+
+    def retrieve_num_samples(
+        self,
+    ) -> pd.DataFrame:
+        """데이터셋별로 샘플 수를 조회
+        """
+        return self.execute_query(
+            sql="""
+            SELECT task, provider, dataset, COUNT(*) AS num_samples
+            FROM catalog
+            GROUP BY task, provider, dataset
+            ORDER BY task, provider, dataset
+            """
+        )
+
     def run_crawler(
         self,
         crawler_name: str,
