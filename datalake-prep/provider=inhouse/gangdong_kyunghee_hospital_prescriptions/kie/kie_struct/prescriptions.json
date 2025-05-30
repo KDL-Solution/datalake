@@ -1,0 +1,31 @@
+{
+  "schema_name": "gangdong_kyunghee_hospital_prescriptions",
+  "created": "2025-05-30T06:53:10Z",
+  "columns": [
+    {
+      "name": "image_path",
+      "type": "string",
+      "nullable": true,
+      "source": "name:image_path"
+    },
+    {
+      "name": "width",
+      "type": "int64",
+      "nullable": true,
+      "source": "name:width"
+    },
+    {
+      "name": "height",
+      "type": "int64",
+      "nullable": true,
+      "source": "name:height"
+    },
+    {
+      "name": "label",
+      "type": "string",
+      "nullable": true,
+      "source": "name:label"
+    }
+  ],
+  "version_sha256": "5d5d13edfe3be2284f4c583b72febbe3af06ecaeef7eec39fd8ba79f49dc61eb"
+}

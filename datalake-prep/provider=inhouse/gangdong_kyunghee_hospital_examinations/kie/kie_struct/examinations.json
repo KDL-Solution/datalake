@@ -1,0 +1,31 @@
+{
+  "schema_name": "gangdong_kyunghee_hospital_examinations",
+  "created": "2025-05-30T06:50:20Z",
+  "columns": [
+    {
+      "name": "image_path",
+      "type": "string",
+      "nullable": true,
+      "source": "name:image_path"
+    },
+    {
+      "name": "width",
+      "type": "int64",
+      "nullable": true,
+      "source": "name:width"
+    },
+    {
+      "name": "height",
+      "type": "int64",
+      "nullable": true,
+      "source": "name:height"
+    },
+    {
+      "name": "label",
+      "type": "string",
+      "nullable": true,
+      "source": "name:label"
+    }
+  ],
+  "version_sha256": "2dcae357f364c9245d6a2a7d6131d8de4382b6ffe3ec510b958d1bbfab095f45"
+}

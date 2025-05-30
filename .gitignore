@@ -175,10 +175,9 @@ pyrightconfig.json
 
 # End of https://www.toptal.com/developers/gitignore/api/python
 
-
-**.parquet
-**.zip
-**.jpg
-**.jpeg
-**.png
-**.csv
+*.parquet
+*.zip
+*.jpg
+*.jpeg
+*.png
+*.csv
