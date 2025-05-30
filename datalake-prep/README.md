@@ -117,6 +117,7 @@ python s3_upload_parquet.py --parquet /mnt/AI_NAS/datalake/catalog/provider=aihu
 - `--nas-root`: NAS 루트 경로 (기본값: /mnt/AI_NAS/datalake)
 - `--bucket`: S3 버킷 이름 (기본값: kdl-data-lake)
 - `--s3-prefix`: S3 키 접두사 (선택)
+- `--run_crawler`: Crawler 실행
 
 ## 전체 작업 흐름 예시
 
@@ -156,7 +157,7 @@ python s3_upload_parquet.py --parquet /mnt/AI_NAS/datalake/catalog/provider=aihu
    - document_conversion: lang, src
 
 3. **허용 값**:
-   - lang: ko, en, ja, multi
+   - lang: ko, en, ja, multi, zxx
    - src: real, synthetic
    - mod: image, html, layout, table, chart, doctag
 

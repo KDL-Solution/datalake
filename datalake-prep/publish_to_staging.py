@@ -33,6 +33,7 @@ import sys
 import uuid
 from pathlib import Path
 
+from utils import NAS_ROOT, STAGING
 from config import (
     validate_provider,
     validate_parts,
@@ -42,25 +43,36 @@ from config import (
 )
 
 # NAS 설정 -------------------------------------------------
-NAS_ROOT = Path("/mnt/AI_NAS/datalake")
-STAGING  = NAS_ROOT / "_staging"
 RSYNC_OPTS = ["-a", "-z", "--no-perms", "--omit-dir-times"]
 
 # 유틸 ------------------------------------------------------
-def sha256_file(fp: Path) -> str:
+def sha256_file(
+    fp: Path,
+) -> str:
     h = hashlib.sha256()
     with fp.open("rb") as f:
         for chunk in iter(lambda: f.read(1 << 20), b""):
             h.update(chunk)
     return h.hexdigest()
 
-def rsync_dir(src: Path, dst: Path):
+
+def rsync_dir(
+    src: Path,
+    dst: Path,
+):
     subprocess.check_call(["rsync", *RSYNC_OPTS, f"{src}/", f"{dst}/"])
 
+
 # 메인 ------------------------------------------------------
-def check_existing_versions(provider: str, dataset: str, task: str, variant: str, partitions: str) -> list:
+def check_existing_versions(
+    provider: str, 
+    dataset: str, 
+    task: str,
+    variant: str, 
+    parts: dict
+) -> list:
     """
-    같은 데이터셋(provider, dataset, task, variant, partitions)의 버전이
+    같은 데이터셋(provider, dataset, task, variant, parts)의 버전이
     이미 staging에 있는지 확인합니다.
     
     Returns:
@@ -72,7 +84,7 @@ def check_existing_versions(provider: str, dataset: str, task: str, variant: str
         dataset=dataset, 
         task=task, 
         variant=variant, 
-        parts=parse_to_parts(partitions)
+        parts=parts
     )
     
     if not base_path.exists():
@@ -110,12 +122,12 @@ def publish(
         schema = json.load(f)
 
     parts = parse_to_parts(partitions)
-    
+
     validate_provider(provider)
     validate_parts(task, parts)
-    
+
     # ───── 중복 검사 ─────
-    existing_versions = check_existing_versions(provider, dataset, task, variant, partitions)
+    existing_versions = check_existing_versions(provider, dataset, task, variant, parts)
     if existing_versions and not force:
         print(f"⚠️  경고: 동일한 데이터셋이 이미 {len(existing_versions)}개 존재합니다:")
         for i, version_path in enumerate(existing_versions, 1):
@@ -190,12 +202,15 @@ def publish(
     # ───── 출력 ─────
     print(f"✅  staging upload → {dst_label}")
     if copied_images:
-        print(f"• img    : {_short(dst_images)}")
+        print(f"• images    : {_short(dst_images)}")
     print(f"• parquet: {_short(dst_parquet)}")
     print(f"• meta   : {_short(dst_label / '_meta.json')}")
 
-def _short(p: Path) -> str:
+def _short(
+    p: Path,
+) -> str:
     return str(p).replace(str(NAS_ROOT), "")
+
 
 # CLI -------------------------------------------------------
 if __name__ == "__main__":

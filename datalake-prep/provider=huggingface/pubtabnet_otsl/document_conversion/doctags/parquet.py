@@ -131,7 +131,7 @@ def export_to_parquet(
 
 
 if __name__ == "__main__":
-    NAS_ROOT = Path("/mnt/AI_NAS/datalake")
+    from utils import NAS_ROOT
 
     provider = "huggingface"
     dataset = "pubtabnet_otsl"
@@ -146,8 +146,6 @@ if __name__ == "__main__":
         split=[
             "train",
             "val",
-            # "train[:4]",
-            # "val[:4]",
         ],
     )
 

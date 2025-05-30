@@ -193,5 +193,3 @@ pyrightconfig.json
 # 특정 디렉토리 전체 무시
 **/images/
 **/data/
-
-search.py

@@ -28,8 +28,10 @@ DeepDocs 데이터 레이크는 다양한 출처의 문서 처리 원본 데이�
 | tourism_food_menu_board | 관광 음식메뉴판 데이터 | aihub | OCR/KIE | 90,085 | [상세](#tourism_food_menu_board)  |
 | pubtabnet_otsl | ds4sd/pubtabnet_otsl | huggingface | DocConv | 394,944 | [상세](#pubtabnet_otsl)  |
 | invoice_kie | GokulRajaR/invoice-ocr-json, ikram98ai/invoice_img2json | huggingface | KIE | 5,189 | [상세](#invoice_kie)  |
+| fatura2_invoices | arlind0xbb/Fatura2-invoices-original-strat1, arlind0xbb/Fatura2-invoices-original-strat2 | huggingface | KIE | 5,250 | [상세](#fatura2_invoices)  |
+| vis_qa | 시각화 자료 질의응답 데이터 | aihub | VQA | 129,213 | [상세](#vis_qa)  |
 | fatura2_invoices | arlind0xbb/Fatura2-invoices-original-strat1, arlind0xbb/Fatura2-invoices-original-strat2 | huggingface | KIE | 1,250 | [상세](#fatura2_invoices)  |
-| synth_invoices_en | Nabin1995/invoice-dataset-layoutlmv3 | huggingface | Layout | 10,000 | [상세](#synth_invoices_en)  |
+| synth_invoices_en | Nabin1995/invoice-dataset-layoutlmv3 | huggingface | Layout | 10,000 | [상세](#synth_invoices_en) |
 | admindocs_mrc | 행정 문서 대상 기계독해 데이터 | aihub | DocConv | 50,073 | [상세](#admindocs_mrc)  |
 | tech_sci_mrc | 기술과학 문서 기계독해 데이터 | aihub | DocConv | 8,148 | [상세](#tech_sci_mrc)  |
 | table_qa | 표 정보 질의응답 데이터 | aihub | DocConv | 176,631 | [상세](#table_qa)  |
@@ -50,6 +52,20 @@ DeepDocs 데이터 레이크는 다양한 출처의 문서 처리 원본 데이�
 - **비고**: 
   - 2025-05-23 1차 수집
 </details>
+<details>
+<summary id="vis_qa"><b>vis_qa</b></summary>
+
+- **데이터셋명**: 시각화 자료 질의응답 데이터
+- **경로**: source/provider=aihub/pubtabnet_otsl
+- **수집일**: 2025-05-23
+- **샘플 수**: 129,213
+- **주요 폴더/파일**:
+- **라벨 포맷/주요 필드**: query, label
+- **비고**: 
+  - 표, 차트, 플로우 차트 등이 포함된 문서.
+  - .png의 출처가 되는 .pdf를 알아낼 수 있으나 몇 페이지에서 온 것인지 알 수 없음.
+</details>
+
 <details>
 <summary id="admindocs_mrc"><b>admindocs_mrc</b></summary>
 
