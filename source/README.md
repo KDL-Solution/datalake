@@ -29,6 +29,7 @@ DeepDocs 데이터 레이크는 다양한 출처의 문서 처리 데이터셋�
 | pubtabnet_otsl | ds4sd/pubtabnet_otsl | huggingface | DocConv | 394,944 | [상세](#pubtabnet_otsl)  |
 | invoice_kie | GokulRajaR/invoice-ocr-json, ikram98ai/invoice_img2json | huggingface | KIE | 5,189 | [상세](#invoice_kie)  |
 | fatura2_invoices | arlind0xbb/Fatura2-invoices-original-strat1, arlind0xbb/Fatura2-invoices-original-strat2 | huggingface | KIE | 5,250 | [상세](#fatura2_invoices)  |
+| vis_qa | 시각화 자료 질의응답 데이터 | aihub | VQA | 129,213 | [상세](#vis_qa)  |
 
 ## 📂 데이터셋 상세
 
@@ -46,6 +47,20 @@ DeepDocs 데이터 레이크는 다양한 출처의 문서 처리 데이터셋�
 - **라벨 포맷/주요 필드**: JSON (bbox, text)
 - **비고**: 
   - 2025-05-23 1차 수집
+</details>
+
+<details>
+<summary id="vis_qa"><b>vis_qa</b></summary>
+
+- **데이터셋명**: 시각화 자료 질의응답 데이터
+- **경로**: source/provider=aihub/pubtabnet_otsl
+- **수집일**: 2025-05-23
+- **샘플 수**: 129,213
+- **주요 폴더/파일**:
+- **라벨 포맷/주요 필드**: query, label
+- **비고**: 
+  - 표, 차트, 플로우 차트 등이 포함된 문서.
+  - .png의 출처가 되는 .pdf를 알아낼 수 있으나 몇 페이지에서 온 것인지 알 수 없음.
 </details>
 
 </details>

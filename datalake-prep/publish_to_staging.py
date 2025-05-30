@@ -202,7 +202,7 @@ def publish(
     # ───── 출력 ─────
     print(f"✅  staging upload → {dst_label}")
     if copied_images:
-        print(f"• img    : {_short(dst_images)}")
+        print(f"• images    : {_short(dst_images)}")
     print(f"• parquet: {_short(dst_parquet)}")
     print(f"• meta   : {_short(dst_label / '_meta.json')}")
 

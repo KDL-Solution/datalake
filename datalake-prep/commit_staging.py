@@ -25,7 +25,12 @@ from pathlib import Path
 from alive_progress import alive_bar
 import pandas as pd
 import os
-from config import validate_parts, parse_to_parts, build_images_root, build_dst_root
+from config import (
+    validate_parts,
+    parse_to_parts,
+    build_images_root,
+    build_dst_root,
+)
 
 NAS_ROOT = Path("/mnt/AI_NAS/datalake")
 STAGING = NAS_ROOT / "_staging"
@@ -46,9 +51,9 @@ def sanity_img_check(
     filtered_paths = []
     if not paths:
         return
+
     with alive_bar(len(paths), title="image_path sanity check") as bar:
         for rel_path in paths:
-            
             rel_img_path = Path(rel_path)
             # images/aaa.jpg 또는 images/bucket/hash.jpg 형태 지원
             # 상대경로가 images/부터 시작하는지 체크 필요
@@ -61,7 +66,7 @@ def sanity_img_check(
                     f"image_path missing: {rel_path} (checked {staging_fp} and {catalog_fp})"
                 )
             if staging_fp.exists():
-                filtered_paths.append(staging_fp)
+                filtered_paths.append(rel_img_path)
             bar()
     return filtered_paths
 
@@ -88,29 +93,34 @@ def merge_images(
     if not filtered_paths:
         print("[INFO] No images to merge")
         return
-        
+
     src_images.mkdir(parents=True, exist_ok=True)
     dst_images.mkdir(parents=True, exist_ok=True)
-    is_same_system = same_filesystem(src_images, dst_images)
-    
+    is_same_system = same_filesystem(
+        src_images,
+        dst_images,
+    )
+
     with alive_bar(len(filtered_paths), title="Merging images") as bar:
         for rel_img_path in filtered_paths:
             src_fp = src_images / rel_img_path
             dst_fp = dst_images / rel_img_path
-            
+
             dst_fp.parent.mkdir(parents=True, exist_ok=True)  # 대상 디렉토리 생성
-            
+
             if is_same_system:
                 # 같은 파일시스템: os.rename 사용 (최고속)
                 try:
                     os.rename(src_fp, dst_fp)
                     print(f"[MOVE] {src_fp} → {dst_fp}")
+                    pass
                 except Exception as e:
                     print(f"[ERROR][MOVE] {src_fp} → {dst_fp} : {e}")
             else:
                 # 다른 파일시스템: shutil copy 후 원본 삭제
                 try:
                     import shutil
+
                     shutil.copy2(src_fp, dst_fp)
                     os.remove(src_fp)
                     print(f"[COPY+DELETE] {src_fp} → {dst_fp}")
@@ -247,7 +257,7 @@ def clean_staging():
 
     for provider_dir in providers:
         print(f"[INFO] {provider_dir} 내의 모든 파일 및 디렉토리 삭제 중...")
-        
+
         # provider 디렉토리 내의 모든 내용을 삭제
         for item in provider_dir.iterdir():
             try:
@@ -305,7 +315,10 @@ def commit_all():
         variant = meta["variant"]
         partitions = meta["partitions"]
         parts = parse_to_parts(partitions)
-        validate_parts(task, parts)
+        validate_parts(
+            task=task,
+            parts=parts,
+        )
 
         dst_root = build_dst_root(
             base_root=CATALOG,
@@ -329,8 +342,16 @@ def commit_all():
             dataset=dataset
         )
 
-        filtered_paths = sanity_img_check(parquet_fp, staging_images, catalog_images)
-        merge_images(filtered_paths, staging_images, catalog_images)
+        filtered_paths = sanity_img_check(
+            parquet_fp,
+            staging_images,
+            catalog_images,
+        )
+        merge_images(
+            filtered_paths=filtered_paths,
+            src_images=staging_images,
+            dst_images=catalog_images,
+        )
 
         dst_parquet_fp = dst_root / "data.parquet"
         if dst_parquet_fp.exists():

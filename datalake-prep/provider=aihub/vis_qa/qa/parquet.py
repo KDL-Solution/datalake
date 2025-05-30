@@ -1,5 +1,3 @@
-# datalake/datalake-prep에서 실행하시오: e.g., `python -m provider=aihub.vis_qa.qa.parquet`.
-
 import zipfile
 import json
 import pdfplumber
@@ -147,6 +145,7 @@ def prepare_dataset(
 
 
 if __name__ == "__main__":
+    # datalake/datalake-prep에서 실행하시오: e.g., `python -m provider=aihub.vis_qa.qa.parquet`.
     import fire
 
     fire.Fire(prepare_dataset)
