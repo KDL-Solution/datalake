@@ -135,7 +135,7 @@ python publish_to_staging.py --provider aihub --dataset kor_docs \
                           --images ./processed/images
 
 # 4. 스테이징 커밋
-python commit_staging.py
+python commit_staging.py # --dry-run 을 할 경우, 시뮬레이션.
 
 # 5. S3 업로드 (선택사항)
 python s3_upload_parquet.py --parquet /mnt/AI_NAS/datalake/catalog/provider=aihub/dataset=kor_docs/task=ocr/variant=base/lang=ko/src=real/data.parquet
@@ -146,6 +146,7 @@ python s3_upload_parquet.py --parquet /mnt/AI_NAS/datalake/catalog/provider=aihu
 1. **Parquet 형식 요구사항**:
    - `image_path` 컬럼 필수
    - 이미지 경로는 images/ 폴더 하위의 상대 경로여야 함
+     - ex) ea/ea1ddg181122214.jpg
 
 2. **파티션 형식**:
    - task별 필수 파티션 키가 다름

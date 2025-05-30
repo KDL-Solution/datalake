@@ -3,6 +3,7 @@ import json
 import shutil
 import datetime
 from pathlib import Path
+from config import build_images_root, build_dst_root
 import pandas as pd
 
 NAS_ROOT = Path("/mnt/AI_NAS/datalake")
@@ -77,10 +78,10 @@ def commit_dataset(
         meta = json.load(meta_fp.open())
         provider, dataset = meta["provider"], meta["dataset"]
         task, variant, partitions = meta["task"], meta["variant"], meta["partitions"]
-        catalog_dir = catalog_root / provider / dataset / task / variant / partitions
+        catalog_dir = build_dst_root(catalog_root, provider, dataset, task, variant, partitions)
         catalog_dir.mkdir(parents=True, exist_ok=True)
-        images_dir = staging_root / provider / dataset / "images"
-        catalog_images_dir = catalog_root / provider / dataset / "images"
+        images_dir = build_images_root(staging_root, provider, dataset)
+        catalog_images_dir = build_images_root(catalog_dir, provider, dataset)
         catalog_images_dir.mkdir(parents=True, exist_ok=True)
 
         catalog_parquet = catalog_dir / "data.parquet"
