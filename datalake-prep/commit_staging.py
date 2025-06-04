@@ -139,6 +139,7 @@ def commit_dataset(
                 new_image_paths.append(dst_file.relative_to(NAS_ROOT).as_posix())
             
             df["image_path"] = new_image_paths
+            df["date"] = datetime.datetime.now().strftime("%Y-%m-%d")
             print(f"[INFO] Updated image_path column with relative paths")
 
         # parquet/meta copy
