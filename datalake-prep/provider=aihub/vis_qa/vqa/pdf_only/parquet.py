@@ -43,20 +43,18 @@ def sha256_pil_image(
     return h.hexdigest()
 
 
-def prepare_dataset(
+def main(
     unzip: bool = True,
     save_images: bool = True,
     dpi: int = 144,
 ) -> None:
-    provider = "aihub"
-    dataset = "vis_qa"
     script_dir = Path(__file__).resolve().parent
+    data_dir = script_dir / "data"
     images_dir = script_dir / "images"
-    data_dir = NAS_ROOT / f"source/provider={provider}/{dataset}"
 
     if unzip:
         unzip_all_zips_in_dir(
-            target_dir=data_dir,
+            target_dir=NAS_ROOT / f"source/{script_dir.parents[2].stem}/{script_dir.parents[1].stem}",
             save_dir=script_dir / "data",
         )
 
@@ -148,4 +146,4 @@ if __name__ == "__main__":
     # datalake/datalake-prep에서 실행하시오: e.g., `python -m provider=aihub.vis_qa.qa.parquet`.
     import fire
 
-    fire.Fire(prepare_dataset)
+    fire.Fire(main)
