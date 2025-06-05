@@ -2,6 +2,7 @@ import os
 import sys
 import time
 from typing import Optional, Dict, Union, List
+import re
 
 import awswrangler as wr
 import pandas as pd
@@ -10,6 +11,25 @@ import boto3
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..')))
 from src.config.queries.json_queries import JSONQueries
 from src.core import DEFAULT_DATABASE, DEFAULT_S3_OUTPUT
+
+
+def _normalize_where_clauses(
+    sql: str,
+) -> str:
+    # Extract the LIMIT clause (if it exists):
+    limit_match = re.search(r'\bLIMIT\s+\d+', sql, flags=re.IGNORECASE)
+    limit_clause = limit_match.group() if limit_match else ""
+    # Remove all LIMITs for now:
+    sql_no_limit = re.sub(r'\bLIMIT\s+\d+', '', sql, flags=re.IGNORECASE)
+    # Find all WHERE clauses and extract the conditions:
+    where_clauses = re.findall(r'\bWHERE\s+(.*?)(?=\bWHERE|\Z)', sql_no_limit, flags=re.IGNORECASE | re.DOTALL)
+    # Remove all WHERE clauses from the base SQL:
+    sql_base = re.sub(r'\bWHERE\s+.*?(?=\bWHERE|\Z)', '', sql_no_limit, flags=re.IGNORECASE | re.DOTALL).strip()
+    # Merge WHERE conditions:
+    where_clause = f"WHERE {' AND '.join([w.strip() for w in where_clauses])}" if where_clauses else ""
+    # Reconstruct final query:
+    parts = [sql_base, where_clause, limit_clause]
+    return " ".join(part for part in parts if part).strip()
 
 
 class AthenaClient:
@@ -236,11 +256,47 @@ class AthenaClient:
         """
         return self.execute_query(
             sql="""
-            SELECT task, provider, dataset, COUNT(*) AS num_samples
+            SELECT task, variant, provider, dataset, COUNT(*) AS num_samples
             FROM catalog
-            GROUP BY task, provider, dataset
-            ORDER BY task, provider, dataset
+            GROUP BY task, variant, provider, dataset
+            ORDER BY task, variant, provider, dataset
             """
+        )
+
+    def retrieve_with_exsting_cols(
+        self,
+        tasks: List = [],
+        variants: List = [],
+    ) -> pd.DataFrame:
+        """존재하는 컬럼만 포함해서 조회.
+        """
+        where_task = ""
+        if tasks:
+            where_task = "\nWHERE " + " OR ".join(
+                [f"task = '{i}'" for i in tasks]
+            )
+        where_variant = ""
+        if variants:
+            where_variant = "\nWHERE " + " OR ".join(
+                [f"variant = '{i}'" for i in variants]
+            )
+
+        sql_for_cols = f"""
+        SELECT *
+        FROM catalog{where_task}{where_variant}"""
+        sql_for_cols += "\nLIMIT 1"
+        sql_for_cols = _normalize_where_clauses(sql_for_cols)
+        df_cols = self.execute_query(
+            sql=sql_for_cols
+        )
+        cols = [k for k, v in df_cols.iloc[0].to_dict().items() if v is not None]
+
+        sql = f"""
+        SELECT {", ".join(cols)}
+        FROM catalog{where_task}{where_variant}"""
+        sql = _normalize_where_clauses(sql)
+        return self.execute_query(
+            sql=sql
         )
 
     def run_crawler(
