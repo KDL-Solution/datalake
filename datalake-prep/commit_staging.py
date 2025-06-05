@@ -3,6 +3,7 @@ import shutil
 import datetime
 from pathlib import Path
 from config import build_images_root, build_dst_root, parse_to_parts
+from alive_progress import alive_bar
 import pandas as pd
 import os
 
@@ -106,50 +107,56 @@ def commit_dataset(
         df = pd.read_parquet(parquet_fp)
 
         # 이미지 복사 및 경로 처리를 함께 진행
+
         if "image_path" in df.columns:
             # 이미지 경로를 처리할 새로운 리스트 준비
             new_image_paths = []
 
             # 각 이미지에 대해 복사 및 경로 변환 처리
-            for img_path in df["image_path"]:
-                if img_path is None or not isinstance(img_path, str):
-                    new_image_paths.append(
-                        img_path
-                    )  # None이나 문자열이 아닌 경우 그대로 유지
-                    continue
+            with alive_bar(
+                len(df),
+                title="Processing images",
+            ) as bar:
+                for img_path in df["image_path"]:
+                    if img_path is None or not isinstance(img_path, str):
+                        new_image_paths.append(
+                            img_path
+                        )  # None이나 문자열이 아닌 경우 그대로 유지
+                        continue
 
-                # 원본 이미지 경로 (절대 경로)
-                src_img_path = Path(img_path)
+                    # 원본 이미지 경로 (절대 경로)
+                    src_img_path = Path(img_path)
 
-                # 상대 경로 생성 (NAS_ROOT 제거)
-                if str(src_img_path).startswith(str(NAS_ROOT)):
-                    # NAS_ROOT 경로 제거한 상대 경로
-                    rel_img_path = src_img_path.relative_to(NAS_ROOT)
-                    if str(rel_img_path).startswith("images/"):
-                        rel_img_path = rel_img_path.relative_to("images")
-                else:
-                    rel_img_path = src_img_path
-
-                src_file = staging_images_dir / rel_img_path
-                dst_file = catalog_images_dir / rel_img_path
-                # 카탈로그에 이미지 복사
-                dst_file.parent.mkdir(parents=True, exist_ok=True)
-                # print(dst_file)
-                # exit()
-                if not dst_file.exists():
-                    if src_file.exists():
-                        if dry_run:
-                            print(f"[DRY-RUN] Would copy {src_file} → {dst_file}")
-                        try:
-                            shutil.copy2(src_file, dst_file)
-                            print(f"[OK] {src_file} → {dst_file}")
-                        except Exception as e:
-                            print(f"[❌ERROR] {src_file} → {dst_file}: {e}")
+                    # 상대 경로 생성 (NAS_ROOT 제거)
+                    if str(src_img_path).startswith(str(NAS_ROOT)):
+                        # NAS_ROOT 경로 제거한 상대 경로
+                        rel_img_path = src_img_path.relative_to(NAS_ROOT)
+                        if str(rel_img_path).startswith("images/"):
+                            rel_img_path = rel_img_path.relative_to("images")
                     else:
-                        print(f"[❌ERROR] Source file does not exist: {src_file}")
+                        rel_img_path = src_img_path
 
-                # 새 DataFrame에는 상대 경로 저장 (images/ 접두사 포함)
-                new_image_paths.append(dst_file.relative_to(NAS_ROOT).as_posix())
+                    src_file = staging_images_dir / rel_img_path
+                    dst_file = catalog_images_dir / rel_img_path
+                    # 카탈로그에 이미지 복사
+                    dst_file.parent.mkdir(parents=True, exist_ok=True)
+                    # print(dst_file)
+                    # exit()
+                    if not dst_file.exists():
+                        if src_file.exists():
+                            if dry_run:
+                                bar.text = f"[DRY-RUN] Would copy {src_file} → {dst_file}"
+                            try:
+                                shutil.copy2(src_file, dst_file)
+                                bar.text = f"[OK] {src_file} → {dst_file}"
+                            except Exception as e:
+                                bar.text = f"[❌ERROR] {src_file} → {dst_file} failed"
+                        else:
+                            bar.text = f"[❌ERROR] Source file does not exist: {src_file}"
+
+                    # 새 DataFrame에는 상대 경로 저장 (images/ 접두사 포함)
+                    new_image_paths.append(dst_file.relative_to(NAS_ROOT).as_posix())
+                    bar()
 
             df["image_path"] = new_image_paths
             df["date"] = datetime.datetime.now().strftime("%Y-%m-%d")
@@ -185,7 +192,15 @@ def commit_dataset(
 
 
 if __name__ == "__main__":
-
+    import argparse
+    parser = argparse.ArgumentParser(description="Commit staging datasets to catalog.")
+    parser.add_argument(
+        "--skip-dry",
+        action="store_true",
+        help="Skip dry run and commit directly to catalog.",
+    )
+    args = parser.parse_args()
+    
     def run_with_error_handling(dry_run=True):
         """에러 처리와 함께 커밋 작업을 수행합니다"""
         try:
@@ -198,21 +213,21 @@ if __name__ == "__main__":
             print(f"\n❌ [{stage_text}] 오류 발생: {e}")
             print(f"   {stage_text} 작업이 중단되었습니다.")
             return False
+    proceed = "y" if args.skip_dry else "n"
+    if not args.skip_dry:
+        print("\n=== 1단계: Dry Run 실행 ===")
+        if not run_with_error_handling(dry_run=True):
+            exit(1)
 
-    # 1단계: Dry Run 실행
-    print("\n=== 1단계: Dry Run 실행 ===")
-    if not run_with_error_handling(dry_run=True):
-        exit(1)
-
-    # 2단계: 사용자 확인
-    print("\n=== 2단계: 사용자 확인 ===")
-    proceed = (
-        input(
-            "Dry Run이 성공적으로 완료되었습니다.\n실제 커밋을 진행하려면 'y'를 입력하세요 (그 외 입력 시 취소): "
+        # 2단계: 사용자 확인
+        print("\n=== 2단계: 사용자 확인 ===")
+        proceed = (
+            input(
+                "Dry Run이 성공적으로 완료되었습니다.\n실제 커밋을 진행하려면 'y'를 입력하세요 (그 외 입력 시 취소): "
+            )
+            .strip()
+            .lower()
         )
-        .strip()
-        .lower()
-    )
 
     # 3단계: 실제 커밋 실행 (사용자 확인 후)
     if proceed == "y":

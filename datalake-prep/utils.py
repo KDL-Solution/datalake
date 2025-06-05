@@ -34,8 +34,6 @@ def get_sha256_size(img_input):
     ).hexdigest()
     return hash_val, width, height
 
-
-class KIEVisualizer:
 class KIEVisualizer(object):
     def __init__(
         self,

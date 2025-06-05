@@ -43,6 +43,7 @@ DeepDocs 데이터 레이크는 다양한 출처의 문서 처리 원본 데이�
 | realkie_s1_pages | real-kie: S1 Pages | opensource | KIE/OCR | 13,079 | [상세](#realkie_s1_pages) |
 | realkie_s1_truncated | real-kie: S1 Truncated | opensource | KIE/OCR | 13,079 | [상세](#realkie_s1_truncated) |
 | doclaynet           | DocLayNet (core subset)  | huggingface | Layout     | 80,863     | [상세](#doclaynet_core)      |
+| table_image_text_pair           | 표 이미지-텍스트 쌍 데이터  | aihub | DocConv| 361761     | [상세](#table_image_text_pair)      |
 
 ## 📂 원본 데이터셋 상세 <a id="datasets"></a>
 
@@ -111,6 +112,19 @@ DeepDocs 데이터 레이크는 다양한 출처의 문서 처리 원본 데이�
 - **비고**: 
   - 2025-05-30 1차 수집
 </details>
+<details>
+<summary id="table_image_text_pair"><b>table_image_text_pair</b></table_image_text_pair>
+
+- **데이터셋명(한글)**: 표 이미지-텍스트 쌍 데이터
+- **경로**: source/provider=aihub/table_image_text_pair
+- **수집일**: 2025-06-05
+- **샘플 수**: 361,761
+- **주요 폴더/파일**:
+- **라벨 포맷/주요 필드**: html
+- **비고**: 
+  - 2025-06-05 1차 수집
+</details>
+
 
 </details>
 
