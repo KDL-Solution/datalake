@@ -62,7 +62,7 @@ if __name__ == "__main__":
         "--run_crawler",
         required=False,
         action="store_true",
-        help="Crawler 실행하려면 사용 (optional)",
+        help="Crawler 실행. (optional)",
     )
 
     args = parser.parse_args()
