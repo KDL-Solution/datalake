@@ -8,10 +8,30 @@ import ipywidgets as widgets
 from pathlib import Path
 from collections.abc import Iterable
 from PIL import Image
-
+import hashlib
 # NAS 설정 -------------------------------------------------
 NAS_ROOT = Path("/mnt/AI_NAS/datalake")
 STAGING = NAS_ROOT / "_staging"
+
+
+
+def get_sha256_size(img_input):
+    """
+    img_input: 파일 경로(str) 또는 PIL.Image.Image 객체 모두 지원
+    리턴: (hash, width, height)
+    """
+    if isinstance(img_input, str):
+        img = Image.open(img_input).convert("RGB")
+    elif isinstance(img_input, Image.Image):
+        img = img_input.convert("RGB")
+    else:
+        raise ValueError("img_input은 파일 경로나 PIL.Image 객체여야 합니다.")
+    width, height = img.size
+    arr = np.array(img)
+    hash_val = hashlib.sha256(
+        arr.tobytes() + str(arr.shape).encode() + str(arr.dtype).encode()
+    ).hexdigest()
+    return hash_val, width, height
 
 
 class KIEVisualizer:
