@@ -5,6 +5,7 @@ import datetime
 from pathlib import Path
 from config import build_images_root, build_dst_root, parse_to_parts
 import pandas as pd
+import os
 
 NAS_ROOT = Path("/mnt/AI_NAS/datalake")
 STAGING = NAS_ROOT / "_staging"
@@ -24,7 +25,9 @@ def trash_backup(
     path,
     dry_run=False,
 ):
-    backup_path = TRASH / f"{path.name}.{datetime.datetime.now().strftime('%Y%m%d%H%M%S')}"
+    backup_path = (
+        TRASH / f"{path.name}.{datetime.datetime.now().strftime('%Y%m%d%H%M%S')}"
+    )
     if dry_run:
         print(f"[DRY-RUN] Would move {path} → {backup_path}")
     else:
@@ -60,7 +63,11 @@ def commit_dataset(
     catalog_root,
     dry_run=False,
 ):
-    all_parquets = list(staging_root.rglob("data.parquet"))
+    all_parquets = [
+        p
+        for p in staging_root.rglob("data.parquet")
+        if os.stat(p).st_uid == os.getuid()
+    ]
     print(f"[INFO] Found {len(all_parquets)} parquet files in staging.")
 
     by_dataset = {}
@@ -81,9 +88,13 @@ def commit_dataset(
         meta = json.load(meta_fp.open())
         provider, dataset = meta["provider"], meta["dataset"]
         task, variant, partitions = meta["task"], meta["variant"], meta["partitions"]
-        print(f"[INFO] Provider: {provider}, Dataset: {dataset}, Task: {task}, Variant: {variant}, Partitions: {partitions}")
+        print(
+            f"[INFO] Provider: {provider}, Dataset: {dataset}, Task: {task}, Variant: {variant}, Partitions: {partitions}"
+        )
         parts = parse_to_parts(partitions)
-        catalog_dir = build_dst_root(catalog_root, provider, dataset, task, variant, parts)
+        catalog_dir = build_dst_root(
+            catalog_root, provider, dataset, task, variant, parts
+        )
         catalog_dir.mkdir(parents=True, exist_ok=True)
         staging_images_dir = build_images_root(staging_root, provider, dataset)
         catalog_images_dir = build_images_root(catalog_root, provider, dataset)
@@ -94,21 +105,23 @@ def commit_dataset(
 
         # 파케트 파일 읽기
         df = pd.read_parquet(parquet_fp)
-        
+
         # 이미지 복사 및 경로 처리를 함께 진행
         if "image_path" in df.columns:
             # 이미지 경로를 처리할 새로운 리스트 준비
             new_image_paths = []
-            
+
             # 각 이미지에 대해 복사 및 경로 변환 처리
             for img_path in df["image_path"]:
                 if img_path is None or not isinstance(img_path, str):
-                    new_image_paths.append(img_path)  # None이나 문자열이 아닌 경우 그대로 유지
+                    new_image_paths.append(
+                        img_path
+                    )  # None이나 문자열이 아닌 경우 그대로 유지
                     continue
-                    
+
                 # 원본 이미지 경로 (절대 경로)
                 src_img_path = Path(img_path)
-                
+
                 # 상대 경로 생성 (NAS_ROOT 제거)
                 if str(src_img_path).startswith(str(NAS_ROOT)):
                     # NAS_ROOT 경로 제거한 상대 경로
@@ -117,7 +130,7 @@ def commit_dataset(
                         rel_img_path = rel_img_path.relative_to("images")
                 else:
                     rel_img_path = src_img_path
-                
+
                 src_file = staging_images_dir / rel_img_path
                 dst_file = catalog_images_dir / rel_img_path
                 # 카탈로그에 이미지 복사
@@ -135,10 +148,10 @@ def commit_dataset(
                             print(f"[❌ERROR] {src_file} → {dst_file}: {e}")
                     else:
                         print(f"[❌ERROR] Source file does not exist: {src_file}")
-                
+
                 # 새 DataFrame에는 상대 경로 저장 (images/ 접두사 포함)
                 new_image_paths.append(dst_file.relative_to(NAS_ROOT).as_posix())
-            
+
             df["image_path"] = new_image_paths
             df["date"] = datetime.datetime.now().strftime("%Y-%m-%d")
             print(f"[INFO] Updated image_path column with relative paths")
@@ -157,7 +170,9 @@ def commit_dataset(
         # catalog integrity check
         if not dry_run:
             if not check_catalog_integrity(catalog_parquet, catalog_meta):
-                print(f"[❌ERROR] Catalog integrity check failed for {key}. Skipping staging deletion!")
+                print(
+                    f"[❌ERROR] Catalog integrity check failed for {key}. Skipping staging deletion!"
+                )
                 continue
 
         # trash backup
@@ -169,7 +184,9 @@ def commit_dataset(
 
     print("\n[INFO] Commit process finished.")
 
+
 if __name__ == "__main__":
+
     def run_with_error_handling(dry_run=True):
         """에러 처리와 함께 커밋 작업을 수행합니다"""
         try:
@@ -182,16 +199,22 @@ if __name__ == "__main__":
             print(f"\n❌ [{stage_text}] 오류 발생: {e}")
             print(f"   {stage_text} 작업이 중단되었습니다.")
             return False
-    
+
     # 1단계: Dry Run 실행
     print("\n=== 1단계: Dry Run 실행 ===")
     if not run_with_error_handling(dry_run=True):
         exit(1)
-        
+
     # 2단계: 사용자 확인
     print("\n=== 2단계: 사용자 확인 ===")
-    proceed = input("Dry Run이 성공적으로 완료되었습니다.\n실제 커밋을 진행하려면 'y'를 입력하세요 (그 외 입력 시 취소): ").strip().lower()
-    
+    proceed = (
+        input(
+            "Dry Run이 성공적으로 완료되었습니다.\n실제 커밋을 진행하려면 'y'를 입력하세요 (그 외 입력 시 취소): "
+        )
+        .strip()
+        .lower()
+    )
+
     # 3단계: 실제 커밋 실행 (사용자 확인 후)
     if proceed == "y":
         print("\n=== 3단계: 실제 커밋 실행 ===")
