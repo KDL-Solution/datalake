@@ -131,11 +131,11 @@ def export_to_parquet(
 
 
 if __name__ == "__main__":
+    # datalake/datalake-prep에서 실행하시오: e.g., `python -m provider=huggingface.dataset=pubtabnet_otsl.task=document_conversion.variant=table_image_otsl.parquet`.
     from utils import NAS_ROOT
 
-    provider = "huggingface"
-    dataset = "pubtabnet_otsl"
-    data_dir = NAS_ROOT / f"source/provider={provider}/{dataset}"
+    script_dir = Path(__file__).resolve().parent
+    data_dir = NAS_ROOT / f"source/{script_dir.parents[2].stem}/{script_dir.parents[1].stem}"
 
     train_dataset, val_dataset = load_dataset(
         "parquet",
