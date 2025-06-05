@@ -35,6 +35,14 @@ DeepDocs 데이터 레이크는 다양한 출처의 문서 처리 원본 데이�
 | tech_sci_mrc | 기술과학 문서 기계독해 데이터 | aihub | DocConv | 8,148 | [상세](#tech_sci_mrc)  |
 | table_qa | 표 정보 질의응답 데이터 | aihub | DocConv | 176,631 | [상세](#table_qa)  |
 | finance_legal_mrc_merged_table | didi0di/finance-legal-mrc_merged-table | huggingface | DocConv | 2,192 | [상세](#finance_legal_mrc_merged_table)  |
+| realkie_charities | real-kie: Charities | opensource | KIE/OCR | 8,370 | [상세](#realkie_charities) |
+| realkie_fcc_invoices | real-kie: FCC Invoices | opensource | KIE/OCR | 1,812 | [상세](#realkie_fcc_invoices) |
+| realkie_nda | real-kie: NDA | opensource | KIE/OCR | 2,574 | [상세](#realkie_nda) |
+| realkie_resource_contracts | real-kie: Resource Contracts | opensource | KIE/OCR | 33,868 | [상세](#realkie_resource_contracts) |
+| realkie_s1 | real-kie: S1 | opensource | KIE/OCR | 86,371 | [상세](#realkie_s1) |
+| realkie_s1_pages | real-kie: S1 Pages | opensource | KIE/OCR | 13,079 | [상세](#realkie_s1_pages) |
+| realkie_s1_truncated | real-kie: S1 Truncated | opensource | KIE/OCR | 13,079 | [상세](#realkie_s1_truncated) |
+| doclaynet           | DocLayNet (core subset)  | huggingface | Layout     | 80,863     | [상세](#doclaynet_core)      |
 
 ## 📂 원본 데이터셋 상세 <a id="datasets"></a>
 

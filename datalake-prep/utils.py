@@ -2,7 +2,8 @@ import ast
 import json
 import pandas as pd
 import numpy as np
-import matplotlib.pyplot as plt
+
+# import matplotlib.pyplot as plt
 import matplotlib.patches as patches
 import ipywidgets as widgets
 from pathlib import Path
@@ -35,6 +36,7 @@ def get_sha256_size(img_input):
 
 
 class KIEVisualizer:
+class KIEVisualizer(object):
     def __init__(
         self,
         parquet_path,
