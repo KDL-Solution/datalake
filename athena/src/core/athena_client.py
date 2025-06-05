@@ -2,6 +2,7 @@ import os
 import sys
 import time
 from typing import Optional, Dict, Union, List
+import re
 
 import awswrangler as wr
 import pandas as pd
@@ -227,6 +228,77 @@ class AthenaClient:
         return self._process_variants(
             variants=variants,
             query_func=query_func
+        )
+
+    def retrieve_num_samples(
+        self,
+    ) -> pd.DataFrame:
+        """데이터셋별로 샘플 수를 조회
+        """
+        return self.execute_query(
+            sql="""
+            SELECT task, variant, provider, dataset, COUNT(*) AS num_samples
+            FROM catalog
+            GROUP BY task, variant, provider, dataset
+            ORDER BY task, variant, provider, dataset
+            """
+        )
+
+    def retrieve_with_existing_cols(
+        self,
+        tasks: List = [],
+        variants: List = [],
+        datasets: List = [],
+    ) -> pd.DataFrame:
+        """존재하는 컬럼만 포함해서 조회.
+        """
+        sql_for_cols = f"""
+        SELECT *
+        FROM catalog"""
+
+        if tasks:
+            sql_for_cols += f" WHERE"
+            where_task = " OR ".join(
+                [f"task = '{i}'" for i in tasks]
+            )
+            sql_for_cols += f" ({where_task})"
+
+        if variants:
+            variant_key = "AND" if tasks else "WHERE"
+            sql_for_cols += f" {variant_key}"
+            where_variant = " OR ".join(
+                [f"variant = '{i}'" for i in variants]
+            )
+            sql_for_cols += f" ({where_variant})"
+
+        if datasets:
+            dataset_key = "AND" if tasks or variants else "WHERE"
+            sql_for_cols += f" {dataset_key}"
+            where_dataset = " OR ".join(
+                [f"dataset = '{i}'" for i in datasets]
+            )
+            sql_for_cols += f" ({where_dataset})"
+
+        sql_for_cols += "\nLIMIT 1"
+        df_cols = self.execute_query(
+            sql=sql_for_cols
+        )
+        cols = [k for k, v in df_cols.iloc[0].to_dict().items() if v is not None]
+
+        sql = f"""
+        SELECT {", ".join(cols)}
+        FROM catalog"""
+
+        if tasks:
+            sql += f" WHERE ({where_task})"
+
+        if variants:
+            sql += f" {variant_key} ({where_variant})"
+
+        if datasets:
+            sql += f" {dataset_key} ({where_dataset})"
+        return self.execute_query(
+            sql=sql
         )
 
     def run_crawler(

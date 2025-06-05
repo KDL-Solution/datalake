@@ -15,7 +15,7 @@ NAS_ROOT = Path("/mnt/AI_NAS/datalake")
 STAGING = NAS_ROOT / "_staging"
 
 
-class KIEVisualizer:
+class KIEVisualizer(object):
     def __init__(
         self,
         parquet_path,

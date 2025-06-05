@@ -96,7 +96,7 @@ python commit_staging.py
 2. 각 파일 옆의 _meta.json 파일에서 메타데이터 읽기
 3. 경로를 카탈로그 규칙에 맞게 변환하여 이관
 4. 이미지 파일의 무결성 검사 및 카탈로그 영역으로 이관
-5. Parquet 파일의 image_path를 카탈로그 절대경로로 업데이트
+5. Parquet 파일의 image_path를 카탈로그 절대경로 (/mnt/AI_NAS/datalake의 뒷부분)로 업데이트
 6. date 컬럼 추가
 7. 스테이징 영역의 처리된 파일 정리
 
@@ -117,6 +117,7 @@ python s3_upload_parquet.py --parquet /mnt/AI_NAS/datalake/catalog/provider=aihu
 - `--nas-root`: NAS 루트 경로 (기본값: /mnt/AI_NAS/datalake)
 - `--bucket`: S3 버킷 이름 (기본값: kdl-data-lake)
 - `--s3-prefix`: S3 키 접두사 (선택)
+- `--run_crawler`: Crawler 실행
 
 ## 전체 작업 흐름 예시
 
