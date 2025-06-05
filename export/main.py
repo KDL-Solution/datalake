@@ -76,6 +76,7 @@ class KIEDataExporter(object):
     def _blank_value_and_bbox(
         self,
         json_str: str,
+        indent: int = 0,
     ) -> str:
         def recursively_blank(d):
             if isinstance(d, dict):
@@ -94,7 +95,7 @@ class KIEDataExporter(object):
         return json.dumps(
             blanked,
             ensure_ascii=False,
-            indent=2,
+            indent=indent,
         )
 
     def _process_kie_label(
@@ -127,7 +128,10 @@ class KIEDataExporter(object):
             indent=indent,
             ensure_ascii=False,
         )
-        return self._blank_value_and_bbox(label_str)
+        return self._blank_value_and_bbox(
+            label_str,
+            indent=indent,
+        )
 
     def export(
         self,
@@ -136,17 +140,19 @@ class KIEDataExporter(object):
         save_path: str,
         indent: int = 0,
     ) -> None:
-        df["image_path"] = df["image_path"].apply(
+        df_copied = df.copy()
+
+        df_copied["image_path"] = df_copied["image_path"].apply(
             lambda x: (Path(datalake_dir) / x).as_posix(),
         )
-        df["query"] = df.apply(
+        df_copied["query"] = df_copied.apply(
             lambda x: KIE_STRUCT_PROMPT + "\n" + self._make_target_schema(
                 x["label"],
                 indent=indent,
             ),
             axis=1,
         )
-        df["label"] = df.apply(
+        df_copied["label"] = df_copied.apply(
             lambda x: self._process_kie_label(
                 label=x["label"],
                 width=x["width"],
@@ -156,13 +162,13 @@ class KIEDataExporter(object):
             axis=1,
         )
         save_df_as_jsonl(
-            df=df,
+            df=df_copied,
             save_path=save_path,
         )
 
 
 if __name__ == "__main__":
-    sys.path.insert(0, "/home/eric/workspace/datalake/athena")
+    sys.path.insert(0, "/home/eric/workspace/datalake/")
     from athena.src.core.athena_client import AthenaClient
 
     client = AthenaClient()
@@ -177,27 +183,6 @@ if __name__ == "__main__":
     exporter.export(
         df=df,
         datalake_dir="/mnt/AI_NAS/datalake",
-        save_path="/home/eric/workspace/funsd_plus.jsonl",
+        save_path="/home/eric/workspace/Qwen-SFT/funsd_plus.jsonl",
         indent=0,
     )
-
-
-#     sql = """
-#     SELECT *
-#     FROM catalog
-#     WHERE dataset = 'pubtabnet_otsl_test'
-#     """
-#     df = client.execute_query(
-#         sql=sql
-#     )
-#     df
-
-#     DATALAKE = Path("/mnt/AI_NAS/datalake")
-#     df["image_path"] = df["image_path"].apply(lambda x: (DATALAKE / x).as_posix())
-#     df = df[["image_path", "query", "label"]]
-#     df.iloc[0].to_dict()
-
-#     save_df_as_jsonl(
-#         df=df,
-#         save_path="/home/eric/workspace/Qwen-SFT/vis_qa.jsonl",
-#     )
