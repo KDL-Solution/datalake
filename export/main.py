@@ -1,75 +1,17 @@
 # https://swift.readthedocs.io/en/latest/Customization/Custom-dataset.html
 import json
-from PIL import Image
-from pathlib import Path
 import json
 import re
-
 import sys
+from PIL import Image
+from pathlib import Path
 import pandas as pd
+from typing import List, Dict
+
+from utils import save_df_as_jsonl, denormalize_bboxes
 
 
 KIE_STRUCT_PROMPT = "Extract the following information from the image. Return the result in the following structured JSON format (formatted with newlines and 2-space indentation), filling in both <|value|> and <|bbox|>:"
-
-
-def to_chat_format(
-    image_path,
-    user_prompt,
-    system_prompt,
-):
-    return {
-        "messages": [
-            {
-                "role": "user",
-                "content": f"<image>{user_prompt}",
-            },
-            {
-                "role": "assistant",
-                "content": system_prompt,
-            },
-        ],
-        "images": [
-            image_path,
-        ],
-    }
-
-
-def save_df_as_jsonl(
-    df: pd.DataFrame,
-    save_path: str,
-) -> None:
-    with open(save_path, "w", encoding="utf-8") as f:
-        for row in df.itertuples(index=False):
-            json_obj = to_chat_format(
-                image_path=row.image_path,
-                user_prompt=row.query,
-                system_prompt=row.label,
-            )
-            f.write(json.dumps(json_obj, ensure_ascii=False) + "\n")
-
-
-def denormalize_bboxes(
-    json_str: str,
-    width: int,
-    height: int,
-) -> str:
-    def replacer(
-        match,
-    ):
-        bbox = eval(match.group(1))  # e.g., [0.1, 0.2, 0.3, 0.4]
-        x1, y1, x2, y2 = bbox
-        abs_bbox = [
-            round(x1 * width),
-            round(y1 * height),
-            round(x2 * width),
-            round(y2 * height)
-        ]
-        return f'"<|bbox|>": {abs_bbox}'
-    return re.sub(
-        r'"<\|bbox\|>":\s*(\[[^\]]+\])',
-        replacer,
-        json_str,
-    )
 
 
 class KIEDataExporter(object):
@@ -115,6 +57,7 @@ class KIEDataExporter(object):
             label_str,
             width=width,
             height=height,
+            bbox_key="<|bbox|>",
         )
 
     def _make_target_schema(
@@ -161,6 +104,62 @@ class KIEDataExporter(object):
             ),
             axis=1,
         )
+
+        save_df_as_jsonl(
+            df=df_copied,
+            save_path=save_path,
+        )
+
+
+class LayoutDataExporter(object):
+    def _elements_to_label(
+        self,
+        elements: List[Dict[str, str]],
+        width: int,
+        height: int,
+        indent: int = 0,
+    ):
+        elements = [
+            {k: i.get(k) for k in ["type", "bbox"]}
+            for i in elements
+        ]
+        label = json.dumps(
+            elements,
+            ensure_ascii=False,
+            indent=indent,
+        )
+        return denormalize_bboxes(
+            label,
+            width=width,
+            height=height,
+            bbox_key="bbox",
+        )
+
+    def export(
+        self,
+        df: pd.DataFrame,
+        datalake_dir: str,
+        save_path: str,
+        indent: int = 0,
+    ) -> None:
+        df_copied = df.copy()
+
+        df_copied["label"] = df_copied.apply(
+            lambda x: self._elements_to_label(
+                json.loads(
+                    x["label"],
+                )["elements"],
+                width=x["width"],
+                height=x["height"],
+                indent=indent,
+            ),
+            axis=1,
+        )
+        df_copied["image_path"] = df_copied["image_path"].apply(
+            lambda x: (Path(datalake_dir) / x).as_posix(),
+        )
+        df_copied["query"] = "Parse the reading order of this document."
+
         save_df_as_jsonl(
             df=df_copied,
             save_path=save_path,
@@ -184,5 +183,16 @@ if __name__ == "__main__":
         df=df,
         datalake_dir="/mnt/AI_NAS/datalake",
         save_path="/home/eric/workspace/Qwen-SFT/funsd_plus.jsonl",
+        indent=0,
+    )
+
+    df = client.retrieve_with_existing_cols(
+        datasets=["office_docs"],
+    )
+    exporter = LayoutDataExporter()
+    exporter.export(
+        df=df,
+        datalake_dir="/mnt/AI_NAS/datalake",
+        save_path="/home/eric/workspace/Qwen-SFT/office_docs.jsonl",
         indent=0,
     )

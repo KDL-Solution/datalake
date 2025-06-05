@@ -55,7 +55,7 @@ def generate_doctags(
 
 
 def extract_dimensions_batch(
-    examples: Dict[str, List[Any]],  # batched format: column-wise dict
+    examples: Dict[str, List[Any]],
     images_dir: str,
 ) -> Dict[str, List[str]]:
     images_dir = Path(images_dir)
@@ -64,27 +64,34 @@ def extract_dimensions_batch(
     widths = []
     heights = []
     labels = []
+    exclude_indices = set()
 
-    for image in examples["image"]:
-        width, height = image.size
-        image_hash = sha256_pil_image(image)
-        image_path = (images_dir / image_hash[:2] / image_hash).with_suffix(".jpeg")
-        
-        if not image_path.exists():  # Only save if it doesn't exist
-            image_path.parent.mkdir(parents=True, exist_ok=True)
-            image.save(
-                image_path,
-                format="JPEG",
-            )
+    for idx, image in enumerate(examples["image"]):
+        try:
+            width, height = image.size
+            image_hash = sha256_pil_image(image)
+            image_path = (images_dir / image_hash[:2] / image_hash).with_suffix(".jpeg")
 
-        image_paths.append(str(image_path))
-        widths.append(width)
-        heights.append(height)
+            if not image_path.exists():  # Only save if it doesn't exist
+                image_path.parent.mkdir(parents=True, exist_ok=True)
+                image.save(
+                    image_path,
+                    format="JPEG",
+                )
 
-    for example in zip(*examples.values()):
-        example_dict = dict(zip(examples.keys(), example))
+            image_paths.append(str(image_path))
+            widths.append(width)
+            heights.append(height)
+
+        except OSError:
+            exclude_indices.add(idx)
+            continue
+
+    for idx in range(len(examples["image"])):
+        if idx in exclude_indices:
+            continue
+        example_dict = {k: examples[k][idx] for k in examples}
         labels.append(generate_doctags(example_dict))
-
     return {
         "image_path": image_paths,
         "width": widths,
