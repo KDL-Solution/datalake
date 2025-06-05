@@ -11,8 +11,7 @@ from natsort import natsorted
 from typing import List, Dict, Any
 from multiprocessing import Pool
 
-# from utils import NAS_ROOT
-NAS_ROOT = Path("W:/datalake")
+from utils import NAS_ROOT
 
 
 def unzip_all_zips_in_dir(
@@ -106,6 +105,7 @@ def process_image(
         ori_image = Image.open(image_path).convert("RGB")
         ori_w, ori_h = ori_image.size
 
+        # DPI 300 -> DPI 144 변환:
         w = int(ori_w * 0.48)
         h = int(ori_h * 0.48)
         image = ori_image.resize((w, h), resample=Image.LANCZOS)
@@ -166,7 +166,7 @@ def process_image(
 
 
 def main(
-    cpu_cnt: int,
+    cpu_cnt: int = 32,
     unzip: bool = True,
     save_images: bool = True,
 ) -> None:
@@ -184,7 +184,6 @@ def main(
         (image_path, data_dir, images_dir, save_images)
         for image_path in natsorted(list(Path(data_dir).glob("**/*.jpg")))
     ]
-    # args_ls = args_ls[: 500]
 
     elements_dict = defaultdict(list)
     image_info_dict = {}
@@ -219,10 +218,13 @@ def main(
         }
         rows.append(
             {
-                "image_path": rel_image_path,
-                "width": image_info_dict[image_path]["width"],
-                "height": image_info_dict[image_path]["height"],
-                "label": label,
+                "image_path": rel_image_path,  # `str`.
+                "width": image_info_dict[image_path]["width"],  # `int`.
+                "height": image_info_dict[image_path]["height"],  # `int`.
+                "label": json.dumps(
+                    label,
+                    ensure_ascii=False,
+                ),  # `str`.
             }
         )
 
