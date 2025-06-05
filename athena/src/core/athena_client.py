@@ -13,25 +13,6 @@ from src.config.queries.json_queries import JSONQueries
 from src.core import DEFAULT_DATABASE, DEFAULT_S3_OUTPUT
 
 
-def _normalize_where_clauses(
-    sql: str,
-) -> str:
-    # Extract the LIMIT clause (if it exists):
-    limit_match = re.search(r'\bLIMIT\s+\d+', sql, flags=re.IGNORECASE)
-    limit_clause = limit_match.group() if limit_match else ""
-    # Remove all LIMITs for now:
-    sql_no_limit = re.sub(r'\bLIMIT\s+\d+', '', sql, flags=re.IGNORECASE)
-    # Find all WHERE clauses and extract the conditions:
-    where_clauses = re.findall(r'\bWHERE\s+(.*?)(?=\bWHERE|\Z)', sql_no_limit, flags=re.IGNORECASE | re.DOTALL)
-    # Remove all WHERE clauses from the base SQL:
-    sql_base = re.sub(r'\bWHERE\s+.*?(?=\bWHERE|\Z)', '', sql_no_limit, flags=re.IGNORECASE | re.DOTALL).strip()
-    # Merge WHERE conditions:
-    where_clause = f"WHERE {' AND '.join([w.strip() for w in where_clauses])}" if where_clauses else ""
-    # Reconstruct final query:
-    parts = [sql_base, where_clause, limit_clause]
-    return " ".join(part for part in parts if part).strip()
-
-
 class AthenaClient:
     """Athena 쿼리 실행을 위한 클라이언트
 
@@ -263,29 +244,42 @@ class AthenaClient:
             """
         )
 
-    def retrieve_with_exsting_cols(
+    def retrieve_with_existing_cols(
         self,
         tasks: List = [],
         variants: List = [],
+        datasets: List = [],
     ) -> pd.DataFrame:
         """존재하는 컬럼만 포함해서 조회.
         """
-        where_task = ""
-        if tasks:
-            where_task = "\nWHERE " + " OR ".join(
-                [f"task = '{i}'" for i in tasks]
-            )
-        where_variant = ""
-        if variants:
-            where_variant = "\nWHERE " + " OR ".join(
-                [f"variant = '{i}'" for i in variants]
-            )
-
         sql_for_cols = f"""
         SELECT *
-        FROM catalog{where_task}{where_variant}"""
+        FROM catalog"""
+
+        if tasks:
+            sql_for_cols += f" WHERE"
+            where_task = " OR ".join(
+                [f"task = '{i}'" for i in tasks]
+            )
+            sql_for_cols += f" ({where_task})"
+
+        if variants:
+            variant_key = "AND" if tasks else "WHERE"
+            sql_for_cols += f" {variant_key}"
+            where_variant = " OR ".join(
+                [f"variant = '{i}'" for i in variants]
+            )
+            sql_for_cols += f" ({where_variant})"
+
+        if datasets:
+            dataset_key = "AND" if tasks or variants else "WHERE"
+            sql_for_cols += f" {dataset_key}"
+            where_dataset = " OR ".join(
+                [f"dataset = '{i}'" for i in datasets]
+            )
+            sql_for_cols += f" ({where_dataset})"
+
         sql_for_cols += "\nLIMIT 1"
-        sql_for_cols = _normalize_where_clauses(sql_for_cols)
         df_cols = self.execute_query(
             sql=sql_for_cols
         )
@@ -293,8 +287,16 @@ class AthenaClient:
 
         sql = f"""
         SELECT {", ".join(cols)}
-        FROM catalog{where_task}{where_variant}"""
-        sql = _normalize_where_clauses(sql)
+        FROM catalog"""
+
+        if tasks:
+            sql += f" WHERE ({where_task})"
+
+        if variants:
+            sql += f" {variant_key} ({where_variant})"
+
+        if datasets:
+            sql += f" {dataset_key} ({where_dataset})"
         return self.execute_query(
             sql=sql
         )
