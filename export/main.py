@@ -1,17 +1,45 @@
 # https://swift.readthedocs.io/en/latest/Customization/Custom-dataset.html
 import json
-import json
 import re
 import sys
 from PIL import Image
 from pathlib import Path
 import pandas as pd
-from typing import List, Dict
+from typing import List, Dict, Any
 
-from utils import save_df_as_jsonl, denormalize_bboxes
+sys.path.insert(0, "/home/eric/workspace/datalake/")
+from export.utils import save_df_as_jsonl, denormalize_bboxes
 
 
-KIE_STRUCT_PROMPT = "Extract the following information from the image. Return the result in the following structured JSON format (formatted with newlines and 2-space indentation), filling in both <|value|> and <|bbox|>:"
+KIE_STRUCT_PROMPT = "Extract the following information from the image. Return the result in the following structured JSON format (formatted with newlines and zero-space indentation), filling in both <|value|> and <|bbox|>:"
+
+
+def remove_none_values(obj: Any) -> Any:
+    if isinstance(obj, dict):
+        return {
+            k: remove_none_values(v)
+            for k, v in obj.items()
+            if v is not None
+        }
+    elif isinstance(obj, list):
+        return [remove_none_values(item) for item in obj]
+    else:
+        return obj
+
+
+def truncate_lists(obj: Any) -> Any:
+    if isinstance(obj, dict):
+        return {
+            k: truncate_lists(v)
+            for k, v in obj.items()
+        }
+    elif isinstance(obj, list):
+        if len(obj) > 1:
+            return [truncate_lists(obj[0])]
+        else:
+            return [truncate_lists(obj[0])] if obj else []
+    else:
+        return obj
 
 
 class KIEDataExporter(object):
@@ -19,18 +47,25 @@ class KIEDataExporter(object):
         self,
         json_str: str,
         indent: int = 0,
+        value_key: str = "value",
+        bbox_key: str = "bbox",
     ) -> str:
-        def recursively_blank(d):
+        def recursively_blank(
+            d: Dict[str, Any],
+        ) -> Dict[str, Any]:
             if isinstance(d, dict):
                 return {
                     k: (
-                        "" if k == "<|value|>" else
-                        [] if k == "<|bbox|>" else
+                        "" if k == value_key else
+                        [] if k == bbox_key else
                         recursively_blank(v)
                     )
                     for k, v in d.items()
                 }
-            return d
+            elif isinstance(d, list):
+                return [recursively_blank(item) for item in d]
+            else:
+                return d
 
         data = json.loads(json_str)
         blanked = recursively_blank(data)
@@ -46,8 +81,10 @@ class KIEDataExporter(object):
         width: int,
         height: int,
         indent: int = 0,
+        bbox_key: str = "bbox",
     ) -> str:
         label_dict = json.loads(label)
+        label_dict = remove_none_values(label_dict)
         label_str = json.dumps(
             label_dict,
             indent=indent,
@@ -57,15 +94,19 @@ class KIEDataExporter(object):
             label_str,
             width=width,
             height=height,
-            bbox_key="<|bbox|>",
+            bbox_key=bbox_key,
         )
 
     def _make_target_schema(
         self,
         label: str,
         indent: int = 0,
+        value_key: str = "value",
+        bbox_key: str = "bbox",
     ) -> str:
         label_dict = json.loads(label)
+        label_dict = remove_none_values(label_dict)
+        label_dict = truncate_lists(label_dict)
         label_str = json.dumps(
             label_dict,
             indent=indent,
@@ -74,6 +115,8 @@ class KIEDataExporter(object):
         return self._blank_value_and_bbox(
             label_str,
             indent=indent,
+            value_key=value_key,
+            bbox_key=bbox_key,
         )
 
     def export(
@@ -81,9 +124,14 @@ class KIEDataExporter(object):
         df: pd.DataFrame,
         datalake_dir: str,
         save_path: str,
+        value_key: str = "value",
+        bbox_key: str = "bbox",
         indent: int = 0,
     ) -> None:
         df_copied = df.copy()
+        # df_copied["query"] = df_copied["query"].str.replace("value", "<|value|>", regex=False).str.replace("bbox", "<|bbox|>", regex=False)
+        df_copied["label"] = df_copied["label"].str.replace('"value"', '"<|value|>"', regex=False).str.replace('"bbox"', '"<|bbox|>"', regex=False)
+        df_copied["image_path"] = df_copied["image_path"].str.replace('images/images', 'images', regex=False)
 
         df_copied["image_path"] = df_copied["image_path"].apply(
             lambda x: (Path(datalake_dir) / x).as_posix(),
@@ -92,6 +140,8 @@ class KIEDataExporter(object):
             lambda x: KIE_STRUCT_PROMPT + "\n" + self._make_target_schema(
                 x["label"],
                 indent=indent,
+                value_key=value_key,
+                bbox_key=bbox_key,
             ),
             axis=1,
         )
@@ -101,6 +151,7 @@ class KIEDataExporter(object):
                 width=x["width"],
                 height=x["height"],
                 indent=indent,
+                bbox_key=bbox_key,
             ),
             axis=1,
         )
@@ -167,19 +218,18 @@ class LayoutDataExporter(object):
 
 
 if __name__ == "__main__":
-    sys.path.insert(0, "/home/eric/workspace/datalake/")
     from athena.src.core.athena_client import AthenaClient
 
     client = AthenaClient()
+
+    kie_exporter = KIEDataExporter()
 
     df = client.retrieve_with_existing_cols(
         tasks=["vqa"],
         variants=["kie_struct"],
         datasets=["funsd_plus"],
     )
-
-    exporter = KIEDataExporter()
-    exporter.export(
+    kie_exporter.export(
         df=df,
         datalake_dir="/mnt/AI_NAS/datalake",
         save_path="/home/eric/workspace/Qwen-SFT/funsd_plus.jsonl",
@@ -187,12 +237,49 @@ if __name__ == "__main__":
     )
 
     df = client.retrieve_with_existing_cols(
+        variants=["kie_struct"],
+        providers=["opensource"],
+    )
+    kie_exporter.export(
+        df=df,
+        datalake_dir="/mnt/AI_NAS/datalake",
+        save_path="/home/eric/workspace/Qwen-SFT/real_kie.jsonl",
+        indent=0,
+    )
+
+
+    df = client.retrieve_with_existing_cols(
         datasets=["office_docs"],
     )
-    exporter = LayoutDataExporter()
-    exporter.export(
+    layout_exporter = LayoutDataExporter()
+    layout_exporter.export(
         df=df,
         datalake_dir="/mnt/AI_NAS/datalake",
         save_path="/home/eric/workspace/Qwen-SFT/office_docs.jsonl",
         indent=0,
     )
+    
+    
+#     idx = 0
+#     label = df.iloc[idx].to_dict()["label"]
+#     indent = 4
+#     label_dict = json.loads(label)
+#     label_dict
+#     label_dict = remove_none_values(label_dict)
+#     label_str = json.dumps(
+#         label_dict,
+#         indent=indent,
+#         ensure_ascii=False,
+#     )
+#     print(label_str)
+    
+#     label_str = _blank_value_and_bbox(
+#         label_str,
+#         indent=indent,
+#     )
+#     print(label_str)    
+    
+#         image_path = df.iloc[5].to_dict()["image_path"]
+#     image_path = image_path.replace("images/images", "images")
+#     image = Image.open(image_path).convert("RGB")
+#     image.save("/home/eric/workspace/sample.jpg")
