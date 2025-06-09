@@ -1,11 +1,9 @@
 # https://swift.readthedocs.io/en/latest/Customization/Custom-dataset.html
 import json
-import sys
 from pathlib import Path
 import pandas as pd
 from typing import Dict, Any
 
-# sys.path.insert(0, "/home/eric/workspace/datalake/")
 from export.utils import save_df_as_jsonl, denormalize_bboxes
 
 
