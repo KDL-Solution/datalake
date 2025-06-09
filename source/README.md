@@ -30,11 +30,11 @@ DeepDocs 데이터 레이크는 다양한 출처의 문서 처리 원본 데이�
 | invoice_kie | GokulRajaR/invoice-ocr-json, ikram98ai/invoice_img2json | huggingface | KIE | 5,189 | [상세](#invoice_kie)  |
 | fatura2_invoices | arlind0xbb/Fatura2-invoices-original-strat1, arlind0xbb/Fatura2-invoices-original-strat2 | huggingface | KIE | 5,250 | [상세](#fatura2_invoices)  |
 | vis_qa | 시각화 자료 질의응답 데이터 | aihub | VQA | 129,213 | [상세](#vis_qa)  |
-| fatura2_invoices | arlind0xbb/Fatura2-invoices-original-strat1, arlind0xbb/Fatura2-invoices-original-strat2 | huggingface | KIE | 1,250 | [상세](#fatura2_invoices)  |
 | synth_invoices_en | Nabin1995/invoice-dataset-layoutlmv3 | huggingface | Layout | 10,000 | [상세](#synth_invoices_en) |
 | admindocs_mrc | 행정 문서 대상 기계독해 데이터 | aihub | DocConv | 50,073 | [상세](#admindocs_mrc)  |
 | tech_sci_mrc | 기술과학 문서 기계독해 데이터 | aihub | DocConv | 8,148 | [상세](#tech_sci_mrc)  |
 | table_qa | 표 정보 질의응답 데이터 | aihub | DocConv | 176,631 | [상세](#table_qa)  |
+| finance_legal_mrc_merged_table | didi0di/finance-legal-mrc_merged-table | huggingface | DocConv | 2,192 | [상세](#finance_legal_mrc_merged_table)  |
 | realkie_charities | real-kie: Charities | opensource | KIE/OCR | 8,370 | [상세](#realkie_charities) |
 | realkie_fcc_invoices | real-kie: FCC Invoices | opensource | KIE/OCR | 1,812 | [상세](#realkie_fcc_invoices) |
 | realkie_nda | real-kie: NDA | opensource | KIE/OCR | 2,574 | [상세](#realkie_nda) |
@@ -43,6 +43,7 @@ DeepDocs 데이터 레이크는 다양한 출처의 문서 처리 원본 데이�
 | realkie_s1_pages | real-kie: S1 Pages | opensource | KIE/OCR | 13,079 | [상세](#realkie_s1_pages) |
 | realkie_s1_truncated | real-kie: S1 Truncated | opensource | KIE/OCR | 13,079 | [상세](#realkie_s1_truncated) |
 | doclaynet           | DocLayNet (core subset)  | huggingface | Layout     | 80,863     | [상세](#doclaynet_core)      |
+| table_image_text_pair           | 표 이미지-텍스트 쌍 데이터  | aihub | DocConv| 361761     | [상세](#table_image_text_pair)      |
 
 ## 📂 원본 데이터셋 상세 <a id="datasets"></a>
 
@@ -111,6 +112,19 @@ DeepDocs 데이터 레이크는 다양한 출처의 문서 처리 원본 데이�
 - **비고**: 
   - 2025-05-30 1차 수집
 </details>
+<details>
+<summary id="table_image_text_pair"><b>table_image_text_pair</b></table_image_text_pair>
+
+- **데이터셋명(한글)**: 표 이미지-텍스트 쌍 데이터
+- **경로**: source/provider=aihub/table_image_text_pair
+- **수집일**: 2025-06-05
+- **샘플 수**: 361,761
+- **주요 폴더/파일**:
+- **라벨 포맷/주요 필드**: html
+- **비고**: 
+  - 2025-06-05 1차 수집
+</details>
+
 
 </details>
 
@@ -182,6 +196,19 @@ DeepDocs 데이터 레이크는 다양한 출처의 문서 처리 원본 데이�
   - OCR 기반 KIE 데이터셋으로 사용됨  
   - FUNSD를 확장한 구조적 key-value 태깅 포함  
 </details>
+<details>
+<summary id="finance_legal_mrc_merged_table"><b>finance_legal_mrc_merged_table</b></summary>
+
+- **데이터셋명**: didi0di/finance-legal-mrc_merged-table  
+- **경로**: source/provider=huggingface/finance_legal_mrc_merged_table  
+- **수집일**: 2025-06-05
+- **샘플 수**: 2,192
+- **주요 폴더/파일**:
+- **라벨 포맷/주요 필드**: html 
+- **비고**:  
+  - 2025-06-05 1차 수집  
+</details>
+
 
 </details>
 
