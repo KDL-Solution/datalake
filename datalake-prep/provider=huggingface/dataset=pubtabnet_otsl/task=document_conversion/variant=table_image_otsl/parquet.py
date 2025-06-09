@@ -23,7 +23,7 @@ def sha256_pil_image(
         image.save(
             buffer,
             format="JPEG",
-        )  # or "JPEG", depending on consistency needed
+        )
         h.update(buffer.getvalue())
     return h.hexdigest()
 
@@ -69,11 +69,15 @@ def save_images_and_generate_labels(
 
     for idx, image in enumerate(examples["image"]):
         try:
+            if isinstance(image, dict):
+                image = Image.open(BytesIO(image["bytes"])).convert("RGB")
+            assert isinstance(image, Image.Image)
+
             width, height = image.size
             image_hash = sha256_pil_image(image)
             image_path = (images_dir / image_hash[:2] / image_hash).with_suffix(".jpeg")
 
-            if not image_path.exists():  # Only save if it doesn't exist
+            if not image_path.exists():  # Only save if it doesn't exist.
                 image_path.parent.mkdir(parents=True, exist_ok=True)
                 image.save(
                     image_path,
@@ -111,13 +115,12 @@ def export_to_parquet(
 ) -> None:
     parquet_path = Path(parquet_path)
 
-    dataset = dataset[240000:]  ### TEMP ###
     dataset = dataset.cast_column(
         "image",
         datasets.Image(
             decode=False,
         ),
-    )  # Lazy decoding으로 .map() 전에 이미 PIL로 이미지가 로드되지 않도록 함.
+    )  # Lazy decoding으로 .map() 전에 PIL로 이미지가 로드되지 않도록 함.
     dataset = dataset.map(
         partial(
             save_images_and_generate_labels,
@@ -147,8 +150,7 @@ def export_to_parquet(
     )
 
 
-if __name__ == "__main__":
-    # datalake/datalake-prep에서 실행하시오: e.g., `python -m provider=huggingface.dataset=pubtabnet_otsl.task=document_conversion.variant=table_image_otsl.parquet`.
+def main():
     from utils import NAS_ROOT
 
     script_dir = Path(__file__).resolve().parent
@@ -176,3 +178,8 @@ if __name__ == "__main__":
         images_dir=script_dir / "images_val",
         parquet_path=(script_dir / "val.parquet").as_posix(),
     )
+
+
+if __name__ == "__main__":
+    # datalake/datalake-prep에서 실행하시오: e.g., `python -m provider=huggingface.dataset=pubtabnet_otsl.task=document_conversion.variant=table_image_otsl.parquet`.
+    main()
