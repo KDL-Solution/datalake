@@ -1,4 +1,5 @@
 import hashlib
+import datasets
 from datasets import load_dataset
 from io import BytesIO
 from pathlib import Path
@@ -54,7 +55,7 @@ def generate_doctags(
     return "".join(label)
 
 
-def extract_dimensions_batch(
+def save_images_and_generate_labels(
     examples: Dict[str, List[Any]],
     images_dir: str,
 ) -> Dict[str, List[str]]:
@@ -85,11 +86,13 @@ def extract_dimensions_batch(
 
         except OSError:
             exclude_indices.add(idx)
+            print(f"Skipping corrupt image of index {idx}: {e}")
             continue
 
     for idx in range(len(examples["image"])):
         if idx in exclude_indices:
             continue
+
         example_dict = {k: examples[k][idx] for k in examples}
         labels.append(generate_doctags(example_dict))
     return {
@@ -104,13 +107,20 @@ def export_to_parquet(
     dataset: Dict[str, Any],
     images_dir: str,
     parquet_path: str,
-    batch_size=16,
+    batch_size=32,
 ) -> None:
     parquet_path = Path(parquet_path)
 
+    dataset = dataset[240000:]  ### TEMP ###
+    dataset = dataset.cast_column(
+        "image",
+        datasets.Image(
+            decode=False,
+        ),
+    )  # Lazy decoding으로 .map() 전에 이미 PIL로 이미지가 로드되지 않도록 함.
     dataset = dataset.map(
         partial(
-            extract_dimensions_batch,
+            save_images_and_generate_labels,
             images_dir=images_dir,
         ),
         batched=True,
@@ -156,15 +166,13 @@ if __name__ == "__main__":
         ],
     )
 
-    script_dir = Path(__file__).resolve().parent
-    images_dir = script_dir / "images"
     export_to_parquet(
         dataset=train_dataset,
-        images_dir=images_dir,
+        images_dir=script_dir / "images_train",
         parquet_path=(script_dir / "train.parquet").as_posix(),
     )
     export_to_parquet(
         dataset=val_dataset,
-        images_dir=images_dir,
+        images_dir=script_dir / "images_val",
         parquet_path=(script_dir / "val.parquet").as_posix(),
     )
