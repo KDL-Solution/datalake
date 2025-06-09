@@ -83,13 +83,13 @@ def set_bbox_at_path(
     last_key = keys[-1]
     # print(last_key)
     # Wrap if not already wrapped
-    print(last_key)
-    if isinstance(sub_d, list):
-        print(text)
+    # print(last_key)
+    # if isinstance(sub_d, list):
+        # print(text)
         # print(sub_d)
-        for el in sub_d:
+        # for el in sub_d:
             # print(el.keys())
-            print(el[last_key])
+            # print(el[last_key])
     if not isinstance(sub_d[last_key], dict) or "<|bbox|>" not in sub_d[last_key]:
         sub_d[last_key] = {
             "<|value|>": sub_d[last_key],
@@ -149,38 +149,80 @@ def generate_label(
     ground_truth: str,
     indent: int = None,
 ):
+    idx = 6
+    example = test_dataset[idx]
+    image = Image.open(BytesIO(example["image"]["bytes"])).convert("RGB")
+    image.save("/home/eric/workspace/sample.jpg")
+    ground_truth=example["ground_truth"]
+    
+    
     gt_dict = json.loads(ground_truth)
     gt_parse = gt_dict["gt_parse"]
     # print_dict(gt_parse)
     label = wrap_values_with_bbox(gt_parse)
-    # print_dict(label)
+    print_dict(label)
+    label_str = json.dumps(
+        label,
+        indent=indent,
+        ensure_ascii=False,
+    )
 
     # for row in gt_dict["valid_line"]:
         # print(row["category"])
         # print(row["words"])
         # print(text)
-    for row in gt_dict["valid_line"]:
-        text = " ".join([word["text"] for word in row["words"]])
-        bbox = union_bboxes(
-            [
-                quad_to_ltrb(
-                    word["quad"],
-                )
-                for word in row["words"]
-                if not word["is_key"]
-            ],
+    import re
+    value_pattern = r'"<\|value\|>":\s*"([^"]*?)"'
+    valid_line = gt_dict["valid_line"]
+    valid_line.sort(key=lambda x: x["group_id"])
+    gt_parse
+    for row, value in zip(valid_line, re.findall(value_pattern, label_str)):
+        # for word in row["words"]:
+        #     if word["is_key"] != 0:
+        #         continue
+
+        #     text = word["text"]
+        #     quad = word["quad"]
+        #     text
+        text = " ".join(
+            [word["text"] for word in row["words"] if not word["is_key"]],
         )
-        set_bbox_at_path(
-            d=label,
-            text=text,
-            key_str=row["category"],
-            bbox_value=list(bbox),
-        )
-    return json.dumps(
-        label,
-        indent=indent,
-        ensure_ascii=False,
-    )
+        text, value
+        assert text == value
+        # if text != value:
+        #     print(f"|{text}|")
+        #     print(f"|{value}|")
+
+        try:
+            bbox = union_bboxes(
+                [
+                    quad_to_ltrb(
+                        word["quad"],
+                    )
+                    for word in row["words"]
+                    if word["is_key"] == 0
+                ],
+            )
+        except:
+            print(text)
+            print([(word["quad"], word["is_key"]) for word in row["words"]])
+
+
+        label_str = label_str.replace('"<|bbox|>": ""', f'"<|bbox|>": "{list(bbox)}"', 1)
+    # print_dict(json.loads(label_str))
+    #     print(text)
+        # set_bbox_at_path(
+        #     d=label,
+        #     text=text,
+        #     key_str=row["category"],
+        #     bbox_value=list(bbox),
+        # )
+    return label_str
+    # return json.dumps(
+    #     label,
+    #     indent=indent,
+    #     ensure_ascii=False,
+    # )
 
 
 def save_image_and_generate_label(
@@ -264,18 +306,17 @@ def main(
         ],
     )
 
-
     save_dir = Path(save_dir)
-    export_to_parquet(
-        dataset=train_dataset,
-        images_dir=save_dir / "images_train",
-        parquet_path=(save_dir / "train.parquet").as_posix(),
-    )
-    export_to_parquet(
-        dataset=val_dataset,
-        images_dir=save_dir / "images_val",
-        parquet_path=(save_dir / "val.parquet").as_posix(),
-    )
+    # export_to_parquet(
+    #     dataset=train_dataset,
+    #     images_dir=save_dir / "images_train",
+    #     parquet_path=(save_dir / "train.parquet").as_posix(),
+    # )
+    # export_to_parquet(
+    #     dataset=val_dataset,
+    #     images_dir=save_dir / "images_val",
+    #     parquet_path=(save_dir / "val.parquet").as_posix(),
+    # )
     export_to_parquet(
         dataset=test_dataset,
         images_dir=save_dir / "images_test",
