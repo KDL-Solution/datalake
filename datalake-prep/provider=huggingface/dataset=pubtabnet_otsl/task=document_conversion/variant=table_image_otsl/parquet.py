@@ -90,7 +90,7 @@ def save_images_and_generate_labels(
 
         except OSError:
             exclude_indices.add(idx)
-            print(f"Skipping corrupt image of index {idx}: {e}")
+            print(f"Skipping corrupt image of index {idx}")
             continue
 
     for idx in range(len(examples["image"])):
