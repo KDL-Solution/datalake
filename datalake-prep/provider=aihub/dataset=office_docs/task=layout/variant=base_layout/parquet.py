@@ -11,7 +11,7 @@ from natsort import natsorted
 from typing import List, Dict, Any
 from multiprocessing import Pool
 
-from utils import NAS_ROOT
+from utils import DATALAKE_DIR
 
 
 def unzip_all_zips_in_dir(
@@ -176,7 +176,7 @@ def main(
 
     if unzip:
         unzip_all_zips_in_dir(
-            target_dir=NAS_ROOT / f"source/{script_dir.parents[2].stem}/{script_dir.parents[1].stem}",
+            target_dir=DATALAKE_DIR / f"source/{script_dir.parents[2].stem}/{script_dir.parents[1].stem}",
             save_dir=data_dir,
         )
 

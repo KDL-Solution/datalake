@@ -11,8 +11,8 @@ from collections.abc import Iterable
 from PIL import Image
 import hashlib
 # NAS 설정 -------------------------------------------------
-NAS_ROOT = Path("/mnt/AI_NAS/datalake")
-STAGING = NAS_ROOT / "_staging"
+DATALAKE_DIR = Path("/mnt/AI_NAS/datalake")
+STAGING = DATALAKE_DIR / "_staging"
 
 
 

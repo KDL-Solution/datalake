@@ -151,10 +151,10 @@ def export_to_parquet(
 
 
 def main():
-    from utils import NAS_ROOT
+    from utils import DATALAKE_DIR
 
     script_dir = Path(__file__).resolve().parent
-    data_dir = NAS_ROOT / f"source/{script_dir.parents[2].stem}/{script_dir.parents[1].stem}"
+    data_dir = DATALAKE_DIR / f"source/{script_dir.parents[2].stem}/{script_dir.parents[1].stem}"
 
     train_dataset, val_dataset = load_dataset(
         "parquet",
