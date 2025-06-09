@@ -11,7 +11,7 @@ from natsort import natsorted
 from typing import List, Dict, Any
 from multiprocessing import Pool
 
-from utils import DATALAKE_DIR
+from utils import DATALAKE_DIR, sha256_pil_image
 
 
 def unzip_all_zips_in_dir(
@@ -84,16 +84,6 @@ TYPE_DICT = {
     "V04": "picture",
     "V05": "figure",
 }
-
-
-def sha256_pil_image(
-    image: Image.Image,
-) -> str:
-    h = hashlib.sha256()
-    with BytesIO() as buffer:
-        image.save(buffer, format="JPEG")
-        h.update(buffer.getvalue())
-    return h.hexdigest()
 
 
 def process_image(
@@ -169,6 +159,7 @@ def main(
     cpu_cnt: int = 32,
     unzip: bool = True,
     save_images: bool = True,
+    indent: int = None,
 ) -> None:
     script_dir = Path(__file__).resolve().parent
     data_dir = script_dir / "data"
@@ -223,6 +214,7 @@ def main(
                 "height": image_info_dict[image_path]["height"],  # `int`.
                 "label": json.dumps(
                     label,
+                    indent=indent,
                     ensure_ascii=False,
                 ),  # `str`.
             }

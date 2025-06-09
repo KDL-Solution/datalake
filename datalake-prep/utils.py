@@ -2,18 +2,19 @@ import ast
 import json
 import pandas as pd
 import numpy as np
+from io import BytesIO
 
-# import matplotlib.pyplot as plt
+import matplotlib.pyplot as plt
 import matplotlib.patches as patches
 import ipywidgets as widgets
 from pathlib import Path
 from collections.abc import Iterable
 from PIL import Image
 import hashlib
+
 # NAS 설정 -------------------------------------------------
 DATALAKE_DIR = Path("/mnt/AI_NAS/datalake")
 STAGING = DATALAKE_DIR / "_staging"
-
 
 
 def get_sha256_size(img_input):
@@ -33,6 +34,20 @@ def get_sha256_size(img_input):
         arr.tobytes() + str(arr.shape).encode() + str(arr.dtype).encode()
     ).hexdigest()
     return hash_val, width, height
+
+
+def sha256_pil_image(
+    image: Image.Image,
+) -> str:
+    h = hashlib.sha256()
+    with BytesIO() as buffer:
+        image.save(
+            buffer,
+            format="JPEG",
+        )
+        h.update(buffer.getvalue())
+    return h.hexdigest()
+
 
 class KIEVisualizer(object):
     def __init__(

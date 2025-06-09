@@ -7,7 +7,7 @@ from typing import Dict, Any, List
 from functools import partial
 from PIL import Image
 
-from utils import DATALAKE_DIR
+from utils import DATALAKE_DIR, sha256_pil_image
 
 SYMBOLS_TO_FILTER = [
     "<b>",
@@ -15,19 +15,6 @@ SYMBOLS_TO_FILTER = [
     "<i>",
     "</i>",
 ]
-
-
-def sha256_pil_image(
-    image: Image.Image,
-) -> str:
-    h = hashlib.sha256()
-    with BytesIO() as buffer:
-        image.save(
-            buffer,
-            format="JPEG",
-        )
-        h.update(buffer.getvalue())
-    return h.hexdigest()
 
 
 def generate_doctags(
@@ -57,6 +44,11 @@ def generate_doctags(
     return "".join(label)
 
 
+from PIL import Image
+from io import BytesIO
+from typing import Dict, List, Any
+from pathlib import Path
+
 def save_images_and_generate_labels(
     examples: Dict[str, List[Any]],
     images_dir: str,
@@ -67,45 +59,41 @@ def save_images_and_generate_labels(
     widths = []
     heights = []
     labels = []
-    exclude_indices = set()
 
-    for idx, image in enumerate(examples["image"]):
+    for image in examples["image"]:
         try:
             if isinstance(image, dict):
                 image = Image.open(BytesIO(image["bytes"])).convert("RGB")
             assert isinstance(image, Image.Image)
 
-            width, height = image.size
-            image_hash = sha256_pil_image(image)
-            image_path = (images_dir / image_hash[:2] / image_hash).with_suffix(".jpeg")
-
-            if not image_path.exists():  # Only save if it doesn't exist.
-                image_path.parent.mkdir(parents=True, exist_ok=True)
-                image.save(
-                    image_path,
-                    format="JPEG",
-                )
-
-            image_paths.append(str(image_path))
-            widths.append(width)
-            heights.append(height)
-
         except OSError:
-            exclude_indices.add(idx)
-            print(f"Skipping corrupt image of index {idx}")
-            continue
+            print(f"[Warning] Corrupt image.")
+            # Create white canvas instead (default size 256x256)
+            image = Image.new(
+                "RGB",
+                (256, 256),
+                color="white",
+            )
 
-    for idx in range(len(examples["image"])):
-        if idx in exclude_indices:
-            continue
+        width, height = image.size
+        image_hash = sha256_pil_image(image)
+        image_path = images_dir / image_hash[:2] / image_hash / ".jpeg"
+        if not image_path.exists():
+            image_path.parent.mkdir(parents=True, exist_ok=True)
+            image.save(image_path, format="JPEG")
 
-        example_dict = {k: examples[k][idx] for k in examples}
+        image_paths.append(str(image_path))
+        widths.append(width)
+        heights.append(height)
+
+    for example in zip(*examples.values()):
+        example_dict = dict(zip(examples.keys(), example))
         labels.append(generate_doctags(example_dict))
     return {
         "image_path": image_paths,
         "width": widths,
         "height": heights,
-        "label": labels
+        "label": labels,
     }
 
 
@@ -157,6 +145,7 @@ def main(
     save_dir: str,
     datalake_dir: str = DATALAKE_DIR,
 ) -> None:
+    dataset="synthtabnet_otsl"
     data_dir = Path(datalake_dir) / f"source/provider=huggingface/dataset={dataset}"
     train_dataset, val_dataset = load_dataset(
         "parquet",

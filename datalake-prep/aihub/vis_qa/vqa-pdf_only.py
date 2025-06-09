@@ -9,7 +9,7 @@ from io import BytesIO
 from PIL import Image
 from tqdm import tqdm
 
-from utils import DATALAKE_DIR
+from utils import DATALAKE_DIR, sha256_pil_image
 
 
 def unzip_all_zips_in_dir(
@@ -31,16 +31,6 @@ def unzip_all_zips_in_dir(
         # 압축 해제
         with zipfile.ZipFile(zip_path, 'r') as zip_ref:
             zip_ref.extractall(extract_subdir)
-
-
-def sha256_pil_image(
-    image: Image.Image,
-) -> str:
-    h = hashlib.sha256()
-    with BytesIO() as buffer:
-        image.save(buffer, format="JPEG")
-        h.update(buffer.getvalue())
-    return h.hexdigest()
 
 
 def main(
