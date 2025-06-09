@@ -33,7 +33,7 @@ import sys
 import uuid
 from pathlib import Path
 
-from utils import NAS_ROOT, STAGING
+from utils import DATALAKE_DIR, STAGING
 from config import (
     validate_provider,
     validate_parts,
@@ -44,6 +44,7 @@ from config import (
 
 # NAS 설정 -------------------------------------------------
 RSYNC_OPTS = ["-a", "-z", "--no-perms", "--omit-dir-times"]
+
 
 # 유틸 ------------------------------------------------------
 def sha256_file(
@@ -86,16 +87,17 @@ def check_existing_versions(
         variant=variant, 
         parts=parts
     )
-    
+
     if not base_path.exists():
         return []
-    
+
     existing_versions = []
     for uuid_dir in base_path.iterdir():
         if uuid_dir.is_dir() and (uuid_dir / "data.parquet").exists():
             existing_versions.append(uuid_dir)
     
     return existing_versions
+
 
 def publish(
     provider: str,
@@ -109,8 +111,8 @@ def publish(
 ) -> None:
 
     # ───── 검증 ─────
-    if not NAS_ROOT.is_dir():
-        sys.exit(f"NAS_ROOT not mounted: {NAS_ROOT}")
+    if not DATALAKE_DIR.is_dir():
+        sys.exit(f"NAS_ROOT not mounted: {DATALAKE_DIR}")
 
     if not parquet_path.is_file():
         sys.exit(f"parquet not found: {parquet_path}")
@@ -206,10 +208,11 @@ def publish(
     print(f"• parquet: {_short(dst_parquet)}")
     print(f"• meta   : {_short(dst_label / '_meta.json')}")
 
+
 def _short(
     p: Path,
 ) -> str:
-    return str(p).replace(str(NAS_ROOT), "")
+    return str(p).replace(str(DATALAKE_DIR), "")
 
 
 # CLI -------------------------------------------------------

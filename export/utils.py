@@ -1,27 +1,42 @@
 import re
-import pandas as pd
 import json
+import pandas as pd
+from typing import List, Dict, Any
 
 
 def to_chat_format(
-    image_path,
-    user_prompt,
-    system_prompt,
-):
+    image_paths: List[str],
+    user_prompts: List[str],
+    system_prompts: List[str],
+) -> Dict[str, Any]:
+    if isinstance(image_paths, str):
+        image_paths = [image_paths]
+    if isinstance(user_prompts, str):
+        user_prompts = [user_prompts]
+    if isinstance(system_prompts, str):
+        system_prompts = [system_prompts]
+
+    messages = []
+    for idx, (user_prompt, system_prompt) in enumerate(
+        zip(user_prompts, system_prompts),
+    ):
+        if idx < len(image_paths):
+            user_prompt = "<image>" + user_prompt
+        messages.extend(
+            [
+                {
+                    "role": "user",
+                    "content": user_prompt,
+                },
+                {
+                    "role": "assistant",
+                    "content": system_prompt,
+                },
+            ],
+        )
     return {
-        "messages": [
-            {
-                "role": "user",
-                "content": f"<image>{user_prompt}",
-            },
-            {
-                "role": "assistant",
-                "content": system_prompt,
-            },
-        ],
-        "images": [
-            image_path,
-        ],
+        "messages": messages,
+        "images": image_paths,
     }
 
 
@@ -32,11 +47,11 @@ def save_df_as_jsonl(
     with open(save_path, "w", encoding="utf-8") as f:
         for row in df.itertuples(index=False):
             json_obj = to_chat_format(
-                image_path=row.image_path,
-                user_prompt=row.query,
-                system_prompt=row.label,
+                image_paths=row.image_path,
+                user_prompts=row.query,
+                system_prompts=row.label,
             )
-            f.write(json.dumps(json_obj, ensure_ascii=False) + "\n")
+            _ = f.write(json.dumps(json_obj, ensure_ascii=False) + "\n")
 
 
 def denormalize_bboxes(
