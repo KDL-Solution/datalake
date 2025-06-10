@@ -107,11 +107,11 @@ def commit_dataset(
         df = pd.read_parquet(parquet_fp)
 
         # 이미지 복사 및 경로 처리를 함께 진행
-
+        success = True
         if "image_path" in df.columns:
             # 이미지 경로를 처리할 새로운 리스트 준비
             new_image_paths = []
-
+            
             # 각 이미지에 대해 복사 및 경로 변환 처리
             with alive_bar(
                 len(df),
@@ -150,10 +150,11 @@ def commit_dataset(
                                 shutil.copy2(src_file, dst_file)
                                 bar.text = f"[OK] {src_file} → {dst_file}"
                             except Exception as e:
-                                bar.text = f"[❌ERROR] {src_file} → {dst_file} failed"
+                                print(f"[❌ERROR] {src_file} → {dst_file} failed")
+                                success = False
                         else:
-                            bar.text = f"[❌ERROR] Source file does not exist: {src_file}"
-
+                            print(f"[❌ERROR] Source file does not exist: {src_file}")
+                            success = False
                     # 새 DataFrame에는 상대 경로 저장 (images/ 접두사 포함)
                     new_image_paths.append(dst_file.relative_to(NAS_ROOT).as_posix())
                     bar()
@@ -162,6 +163,13 @@ def commit_dataset(
             df["date"] = datetime.datetime.now().strftime("%Y-%m-%d")
             print(f"[INFO] Updated image_path column with relative paths")
 
+        if success:
+            print(f"[OK] All images processed successfully.")
+        else:
+            print(f"[❌ERROR] Some images failed to process. Continuing...")
+            raise RuntimeError(
+                "Some images failed to process. Check logs for details."
+            )
         # parquet/meta copy
         if dry_run:
             print(f"[DRY-RUN] Would save modified parquet to {catalog_parquet}")
@@ -187,10 +195,9 @@ def commit_dataset(
         else:
             trash_backup(parquet_fp)
             trash_backup(meta_fp)
-            trash_backup(staging_images_dir)
-            
-            shutil.rmtree(staging_images_dir, ignore_errors=True)
-            if not any(staging_images_dir.parent.iterdir()):
+            trash_backup(parquet_fp.parent.parent)
+            if staging_images_dir.exists():
+                trash_backup(staging_images_dir)
                 shutil.rmtree(staging_images_dir.parent, ignore_errors=True)
             print(f"[OK] Moved staging images to trash.")
 
