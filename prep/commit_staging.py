@@ -187,6 +187,12 @@ def commit_dataset(
         else:
             trash_backup(parquet_fp)
             trash_backup(meta_fp)
+            trash_backup(staging_images_dir)
+            
+            shutil.rmtree(staging_images_dir, ignore_errors=True)
+            if not any(staging_images_dir.parent.iterdir()):
+                shutil.rmtree(staging_images_dir.parent, ignore_errors=True)
+            print(f"[OK] Moved staging images to trash.")
 
     print("\n[INFO] Commit process finished.")
 
