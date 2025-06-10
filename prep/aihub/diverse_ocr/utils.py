@@ -131,21 +131,24 @@ def main(
         with open(json_path, "r", encoding="utf-8") as f:
             data = json.load(f)
 
+        text = ""
         type_ = data["text"]["type"]
         if ocr_unit == "char" and type_ == "letter":
             text = data["text"]["letter"]["value"]
         if ocr_unit == "word" and type_ == "word":
             text = "".join([i["value"] for i in data["text"]["word"]])
 
-        rows.append(
-            {
-                "image_path": image_path.as_posix(),
-                "width": width,
-                "height": height,
-                "label": text,
-            }
-        )
-        df = pd.DataFrame(rows)
+        if text:
+            rows.append(
+                {
+                    "image_path": image_path.as_posix(),
+                    "width": width,
+                    "height": height,
+                    "label": text,
+                }
+            )
+
+    df = pd.DataFrame(rows)
     df.to_parquet(
         Path(parquet_dir) / "data.parquet",
         index=False,
