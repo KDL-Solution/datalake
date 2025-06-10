@@ -1,17 +1,15 @@
 import zipfile
 import json
-import hashlib
 import pandas as pd
 from pathlib import Path
 from collections import defaultdict
-from io import BytesIO
 from PIL import Image
 from tqdm import tqdm
 from natsort import natsorted
 from typing import List, Dict, Any
 from multiprocessing import Pool
 
-from utils import DATALAKE_DIR, sha256_pil_image
+from utils import DATALAKE_DIR, get_safe_image_hash_from_pil
 
 
 def unzip_all_zips_in_dir(
@@ -100,7 +98,9 @@ def process_image(
         h = int(ori_h * 0.48)
         image = ori_image.resize((w, h), resample=Image.LANCZOS)
 
-        sha256 = sha256_pil_image(image)
+        sha256 = get_safe_image_hash_from_pil(
+            image,
+        )
         save_path = images_dir / f"{sha256[:2]}/{sha256}.jpg"
         if save_images and not save_path.exists():
             save_path.parent.mkdir(
