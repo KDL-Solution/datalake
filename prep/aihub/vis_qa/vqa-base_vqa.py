@@ -130,7 +130,7 @@ def main(
 
 
 if __name__ == "__main__":
-    # datalake/datalake-prep에서 실행하시오: e.g., `python -m provider=aihub.vis_qa.qa.parquet`.
+    # datalake/prep에서 실행하시오: e.g., `python -m provider=aihub.vis_qa.qa.parquet`.
     import fire
 
     fire.Fire(main)

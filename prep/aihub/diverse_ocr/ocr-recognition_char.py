@@ -1,4 +1,5 @@
 if __name__ == "__main__":
+    # datalake/prep에서 실행하시오: e.g., `python -m aihub.diverse_ocr.ocr-recognition_char`.
     import fire
     from pathlib import Path
     from functools import partial

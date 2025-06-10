@@ -13,7 +13,7 @@ from utils import DATALAKE_DIR, get_safe_image_hash_from_pil
 
 def unzip_all_zips_in_dir(
     target_dir: str,
-    save_dir: str,  # 추가: 압축 해제할 루트 디렉토리
+    save_dir: str,
 ) -> None:
     target_dir = Path(target_dir).resolve()
     save_dir = Path(save_dir).resolve()
@@ -61,26 +61,23 @@ def process_image(
         C=2
     )
 
-    # Invert to find black regions as white
-    img_inv = 255 - img_binary
-
-    # Find non-zero (was black in original)
-    coords = cv2.findNonZero(img_inv)
+    # Invert to find black regions as white:
+    # Find non-zero (was black in original):
+    coords = cv2.findNonZero(255 - img_binary)
 
     if coords is None:
         # No black pixels found, return original
         return image
 
-    # Bounding box
     x, y, w, h = cv2.boundingRect(coords)
 
-    # Add margin
+    # Add margin:
     x = max(x - margin, 0)
     y = max(y - margin, 0)
     x2 = min(x + w + 2 * margin, img.shape[1])
     y2 = min(y + h + 2 * margin, img.shape[0])
 
-    # Crop original image (PIL, so convert back to array)
+    # Crop original image (PIL, so convert back to array):
     full_img_np = np.array(image)
     cropped_np = full_img_np[y:y2, x:x2]
     image = Image.fromarray(cropped_np)
@@ -106,10 +103,7 @@ def main(
         )
 
     rows = []
-    json_paths = [
-        i for i in natsorted(list(Path(data_dir).glob("**/*.json")))
-        if "필기체" in i.as_posix()
-    ]
+    json_paths = natsorted(list(Path(data_dir).glob("**/*.json")))
     for json_path in tqdm(json_paths):
         image_path = get_image_path(
             json_path.as_posix(),
