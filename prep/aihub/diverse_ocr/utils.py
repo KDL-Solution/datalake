@@ -90,7 +90,7 @@ def process_image(
 def main(
     ocr_unit: str,
     data_dir: str,
-    parquet_dir: str,
+    parquet_path: str,
     images_dir: str,
     datalake_dir: str = DATALAKE_DIR,
     unzip: bool = True,
@@ -150,6 +150,6 @@ def main(
 
     df = pd.DataFrame(rows)
     df.to_parquet(
-        Path(parquet_dir) / "data.parquet",
+        parquet_path,
         index=False,
     )

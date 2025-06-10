@@ -12,7 +12,7 @@ if __name__ == "__main__":
             main,
             ocr_unit="char",
             data_dir=(script_dir / "data").as_posix(),
-            parquet_dir=script_dir.as_posix(),
+            parquet_path=(script_dir / "char.parquet").as_posix(),
             images_dir=(script_dir / "images").as_posix(),
         )
     )
