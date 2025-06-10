@@ -2,7 +2,6 @@ import ast
 import json
 import pandas as pd
 import numpy as np
-from io import BytesIO
 
 import matplotlib.pyplot as plt
 import matplotlib.patches as patches
@@ -15,6 +14,23 @@ import hashlib
 # NAS 설정 -------------------------------------------------
 DATALAKE_DIR = Path("/mnt/AI_NAS/datalake")
 STAGING = DATALAKE_DIR / "_staging"
+
+
+def get_safe_image_hash(
+    path: str,
+) -> str:
+    img = Image.open(path).convert("RGB")
+    arr = np.array(img)
+    meta = f"{arr.shape}{arr.dtype}".encode()
+    return hashlib.sha256(arr.tobytes() + meta).hexdigest()
+
+
+def get_safe_image_hash_from_pil(
+    img: Image.Image,
+) -> str:
+    arr = np.array(img.convert("RGB"))
+    meta = f"{arr.shape}{arr.dtype}".encode()
+    return hashlib.sha256(arr.tobytes() + meta).hexdigest()
 
 
 def get_sha256_size(img_input):
@@ -34,19 +50,6 @@ def get_sha256_size(img_input):
         arr.tobytes() + str(arr.shape).encode() + str(arr.dtype).encode()
     ).hexdigest()
     return hash_val, width, height
-
-
-def sha256_pil_image(
-    image: Image.Image,
-) -> str:
-    h = hashlib.sha256()
-    with BytesIO() as buffer:
-        image.save(
-            buffer,
-            format="JPEG",
-        )
-        h.update(buffer.getvalue())
-    return h.hexdigest()
 
 
 class KIEVisualizer(object):

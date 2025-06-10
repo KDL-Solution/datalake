@@ -1,4 +1,3 @@
-import hashlib
 import datasets
 from datasets import load_dataset
 from io import BytesIO
@@ -7,7 +6,7 @@ from typing import Dict, Any, List
 from functools import partial
 from PIL import Image
 
-from utils import DATALAKE_DIR, sha256_pil_image
+from utils import DATALAKE_DIR, get_safe_image_hash_from_pil
 
 SYMBOLS_TO_FILTER = [
     "<b>",
@@ -41,13 +40,13 @@ def generate_doctags(
         if otsl_token == "<fcel>":
             content = rev_contents.pop()
             label.append(content)
-    return "".join(label)
+    doctags = "".join(label)
+    if "<otsl>" not in doctags:
+        doctags = "<otsl>" + doctags
+    if "</otsl>" not in doctags:
+        doctags += "</otsl>"
+    return doctags
 
-
-from PIL import Image
-from io import BytesIO
-from typing import Dict, List, Any
-from pathlib import Path
 
 def save_images_and_generate_labels(
     examples: Dict[str, List[Any]],
@@ -76,11 +75,17 @@ def save_images_and_generate_labels(
             )
 
         width, height = image.size
-        image_hash = sha256_pil_image(image)
-        image_path = images_dir / image_hash[:2] / image_hash / ".jpeg"
+        image_hash = get_safe_image_hash_from_pil(
+            image,
+        )
+        image_path = Path(f"{images_dir / image_hash[: 2] / image_hash}.jpg")
         if not image_path.exists():
-            image_path.parent.mkdir(parents=True, exist_ok=True)
-            image.save(image_path, format="JPEG")
+            image_path.parent.mkdir(
+                parents=True,
+                exist_ok=True,
+            )
+            image.save(
+                image_path, format="JPEG")
 
         image_paths.append(str(image_path))
         widths.append(width)
@@ -101,7 +106,7 @@ def export_to_parquet(
     dataset: Dict[str, Any],
     images_dir: str,
     parquet_path: str,
-    batch_size=32,
+    batch_size: int = 32,
 ) -> None:
     parquet_path = Path(parquet_path)
 
@@ -145,7 +150,6 @@ def main(
     save_dir: str,
     datalake_dir: str = DATALAKE_DIR,
 ) -> None:
-    dataset="synthtabnet_otsl"
     data_dir = Path(datalake_dir) / f"source/provider=huggingface/dataset={dataset}"
     train_dataset, val_dataset = load_dataset(
         "parquet",
