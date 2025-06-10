@@ -1,15 +1,12 @@
 import zipfile
 import json
 import pdfplumber
-import hashlib
 import pandas as pd
 from pathlib import Path
 from collections import defaultdict
-from io import BytesIO
-from PIL import Image
 from tqdm import tqdm
 
-from utils import DATALAKE_DIR, sha256_pil_image
+from utils import DATALAKE_DIR, get_safe_image_hash_from_pil
 
 
 def unzip_all_zips_in_dir(
@@ -79,7 +76,7 @@ def main(
                 )
                 pil_image = image.original.convert("RGB")
                 width, height = pil_image.size
-                sha256 = sha256_pil_image(
+                sha256 = get_safe_image_hash_from_pil(
                     pil_image,
                 )
                 save_path = images_dir / f"{sha256[: 2]}/{sha256}.jpg"
