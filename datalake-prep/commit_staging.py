@@ -129,6 +129,9 @@ def commit_dataset(
                         rel_img_path = rel_img_path.relative_to("images")
                 else:
                     rel_img_path = src_img_path
+                    if str(rel_img_path).startswith("images/"):
+                        # ✅ 일반 상대경로일 때도 잘라야 함
+                        rel_img_path = rel_img_path.relative_to("images")
 
                 src_file = staging_images_dir / rel_img_path
                 dst_file = catalog_images_dir / rel_img_path
