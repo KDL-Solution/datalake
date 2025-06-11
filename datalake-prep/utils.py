@@ -3,7 +3,7 @@ import json
 import pandas as pd
 import numpy as np
 
-# import matplotlib.pyplot as plt
+import matplotlib.pyplot as plt
 import matplotlib.patches as patches
 import ipywidgets as widgets
 from pathlib import Path
@@ -72,9 +72,9 @@ class KIEVisualizer(object):
                 if not isinstance(v, dict):
                     continue
 
-                bb = list(v.get("bbox", []))
+                bb = list(v.get("<|bbox|>", []))
                 if len(bb) == 4 and any(float(c) != 0 for c in bb):
-                    yield k, v.get("value", ""), bb
+                    yield k, v.get("<|value|>", ""), bb
 
     def _img(
         self,
