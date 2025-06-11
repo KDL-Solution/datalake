@@ -249,6 +249,7 @@ class AthenaClient:
         tasks: List = [],
         variants: List = [],
         datasets: List = [],
+        providers: List = [],
     ) -> pd.DataFrame:
         """존재하는 컬럼만 포함해서 조회.
         """
@@ -279,6 +280,14 @@ class AthenaClient:
             )
             sql_for_cols += f" ({where_dataset})"
 
+        if providers:
+            provider_key = "AND" if tasks or variants or datasets else "WHERE"
+            sql_for_cols += f" {provider_key}"
+            where_provider = " OR ".join(
+                [f"provider = '{i}'" for i in providers]
+            )
+            sql_for_cols += f" ({where_provider})"
+
         sql_for_cols += "\nLIMIT 1"
         df_cols = self.execute_query(
             sql=sql_for_cols
@@ -291,12 +300,12 @@ class AthenaClient:
 
         if tasks:
             sql += f" WHERE ({where_task})"
-
         if variants:
             sql += f" {variant_key} ({where_variant})"
-
         if datasets:
             sql += f" {dataset_key} ({where_dataset})"
+        if providers:
+            sql += f" {provider_key} ({where_provider})"
         return self.execute_query(
             sql=sql
         )
