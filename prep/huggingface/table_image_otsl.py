@@ -85,7 +85,9 @@ def save_images_and_generate_labels(
                 exist_ok=True,
             )
             image.save(
-                image_path, format="JPEG")
+                image_path,
+                format="JPEG",
+            )
 
         image_paths.append(str(image_path))
         widths.append(width)
