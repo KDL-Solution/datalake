@@ -1,12 +1,11 @@
 import json
-import ast
 import re
 from datasets import load_dataset
 from io import BytesIO
 from pathlib import Path
-from typing import Dict, Any, Tuple, Union, List
+from typing import Dict, Any, Tuple, List
 from functools import partial
-from PIL import Image, ImageDraw, ImageFont
+from PIL import Image
 from rapidfuzz.distance import Levenshtein
 
 from utils import DATALAKE_DIR, get_safe_image_hash_from_pil
@@ -34,7 +33,9 @@ def wrap_values_with_bbox(
         }
 
 
-def union_bboxes(bboxes):
+def union_bboxes(
+    bboxes: List[Tuple[int, int, int, int]],
+) -> Tuple[int, int, int, int]:
     lefts, tops, rights, bottoms = zip(*bboxes)
     return (
         min(lefts),
@@ -235,13 +236,15 @@ def save_image_and_generate_label(
         image,
     )
     image_path = Path(f"{images_dir / image_hash[: 2] / image_hash}.jpg")
-
     if not image_path.exists():
         image_path.parent.mkdir(
             parents=True,
             exist_ok=True,
         )
-        image.save(image_path, format="JPEG")
+        image.save(
+            image_path,
+            format="JPEG",
+        )
 
     label = generate_label(
         example["ground_truth"],
