@@ -95,13 +95,13 @@ class NASDataProcessor:
         
         date_str = datetime.now().strftime("%Y%m%d")
         user = os.getenv('USER', 'unknown')
-        log_file = log_dir / f"OptimizedDataProcessor_{date_str}_{user}.log"
+        log_file = log_dir / f"DataProcessor_{date_str}_{user}.log"
         
         file_handler = logging.FileHandler(log_file, encoding='utf-8')
         file_handler.setFormatter(self.formatter)
         self.logger.addHandler(file_handler)
         self.logger.info(f"📝 파일 로깅 활성화: {log_file}")
-        self.logger.info(f"🚀 OptimizedDataProcessor 초기화 완료")
+        self.logger.info(f"🚀 DataProcessor 초기화 완료")
     
     def get_status(self) -> Dict:
         """간단한 상태 조회"""
