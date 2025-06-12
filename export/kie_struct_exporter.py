@@ -3,6 +3,7 @@ import json
 from pathlib import Path
 import pandas as pd
 from typing import Dict, Any
+from PIL import Image, ImageDraw, ImageFont
 
 from export.utils import save_df_as_jsonl, denormalize_bboxes
 
@@ -158,3 +159,38 @@ class KIEStructExporter(object):
             df=df_copied,
             save_path=save_path,
         )
+
+
+def vis_base_kie_gt(
+    image: Image.Image,
+    label_str: str,
+    font_path: str = None,
+    font_size: int = 16,
+) -> Image.Image:
+    """
+    주어진 label_str (JSON 문자열) 기반으로 PIL 이미지 위에 bbox와 텍스트를 시각화합니다.
+
+    Args:
+        image (PIL.Image.Image): 원본 이미지
+        label_str (str): JSON 형식의 라벨 문자열
+        font_path (str, optional): 사용할 TTF 폰트 경로. 기본은 시스템 기본 폰트
+        font_size (int, optional): 텍스트 크기
+
+    Returns:
+        PIL.Image.Image: 시각화된 이미지
+    """
+    draw = ImageDraw.Draw(image)
+
+    # 폰트 설정
+    try:
+        font = ImageFont.truetype(font_path, font_size) if font_path else ImageFont.load_default()
+    except Exception:
+        font = ImageFont.load_default()
+
+    label_dict = json.loads(label_str)
+    for key, info in label_dict.items():
+        text = f"{key} -> {info['<|value|>']}"
+        bbox = info['<|bbox|>']
+        draw.rectangle(bbox, outline="red", width=2)
+        draw.text((bbox[0], bbox[1] - font_size - 2), text, fill="blue", font=font)
+    return image
