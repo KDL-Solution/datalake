@@ -1,17 +1,20 @@
+import concurrent.futures
 import asyncio
 import logging
+import uvicorn
+import sys
 from pathlib import Path
 from typing import Dict, List
 from datetime import datetime
 from contextlib import asynccontextmanager
-import concurrent.futures
 from fastapi import FastAPI, HTTPException, BackgroundTasks
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
-import uvicorn
 
-# 기존 OptimizedNASDataProcessor 임포트
-from data_processor import NASDataProcessor
+sys.path.append(str(Path(__file__).resolve().parent.parent))  # 상위 디렉토리 추가
+from managers.data_processor import NASDataProcessor
+from managers.logger import setup_logging
+
 
 
 # Request/Response 모델들
@@ -48,7 +51,7 @@ processor = None
 
 current_jobs: Dict[str, ProcessingJob] = {}
 job_lock = asyncio.Lock()
-
+setup_logging(log_level="INFO")
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -56,14 +59,14 @@ async def lifespan(app: FastAPI):
     global processor
     
     # 시작 시 프로세서 초기화
-    logging.info("🚀 NAS Data Processor 초기화 중...")
+    logging.info("🚀 NASDataProcessor 초기화 중...")
     try:
         processor = NASDataProcessor(
             batch_size=1000,
             num_proc=4
         )
         
-        logging.info("✅ NAS Data Processor 초기화 완료")
+        logging.info("✅ NASDataProcessor 초기화 완료")
     except Exception as e:
         logging.error(f"❌ Processor 초기화 실패: {e}")
         raise
@@ -240,16 +243,6 @@ async def run_processing_job(job_id: str):
                 current_jobs[job_id].status = "failed"
                 current_jobs[job_id].completed_at = datetime.now().isoformat()
                 current_jobs[job_id].error = error_msg
-
-
-# 로깅 설정
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    handlers=[
-        logging.StreamHandler(),
-    ]
-)
 
 
 if __name__ == "__main__":

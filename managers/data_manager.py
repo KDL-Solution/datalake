@@ -17,6 +17,7 @@ from PIL import Image
 import sys
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from managers.schema_manager import SchemaManager
+from managers.logger import setup_logging
 
 class LocalDataManager:
     def __init__(
@@ -27,6 +28,7 @@ class LocalDataManager:
         num_proc: int = 8, # 병렬 처리 프로세스 수
         auto_process: bool = True, # NAS 자동 처리 활성화 여부
         polling_interval: int = 10, # NAS 상태 조회 주기 (초)
+        schema_manager: Optional[SchemaManager] = None,
     ):
         self.base_path = Path(base_path)
         self.nas_api_url = nas_api_url.rstrip('/')
@@ -40,19 +42,20 @@ class LocalDataManager:
         self.staging_failed_path = self.staging_path / "failed"
         self.catalog_path = self.base_path / "catalog"
         self.assets_path  = self.base_path / "assets"
-        self.schema_path = self.base_path / "config" / "schema.yaml"
+        
         
         self.num_proc = num_proc
-        self.image_column_candidates = ['image', 'image_bytes']
+        self.image_data_candidates = ['image', 'image_bytes']
+        self.image_data_key = 'image'  # 기본 이미지 컬럼 키
+        self.file_path_candidates = ['image_path', 'file', 'file_path']
+        self.file_path_key = 'file_path'  # 기본 파일 경로 컬럼 키
         
-        
-        self._setup_console_logging(log_level)
-        self._check_path_and_setup_logging()
+        self._check_path_and_setup_logging(log_level)
         
         self._check_nas_api_connection()
 
-        self.schema_manager = SchemaManager(
-            config_path=self.schema_path,
+        self.schema_manager = schema_manager if schema_manager else SchemaManager(
+            base_path=self.base_path, 
             create_default=True
         )
       
@@ -65,7 +68,6 @@ class LocalDataManager:
         original_source: str = "", # 원본 소스 URL 
     ):
         task = "raw"
-        variant = datetime.now().strftime("%Y%m%d_%H%M%S")
         
         self.logger.info(f"📥 Raw data 업로드 시작: {provider}/{dataset}")
         
@@ -74,7 +76,11 @@ class LocalDataManager:
         
         self._cleanup_existing_pending(provider, dataset, task, is_raw=True)
         
-        dataset_obj, has_images = self._load_data(data_file, process_images=True)
+        dataset_obj, file_info = self._load_data(data_file, process_assets=True)
+        
+        variant = file_info['variant']
+        has_images = bool(file_info['image_columns'])
+        has_files = bool(file_info['file_columns'])
         
         metadata = self._create_metadata(
             provider=provider,
@@ -85,11 +91,12 @@ class LocalDataManager:
             data_type="raw",
             source_task=None,  # 원본 작업이므로 None
             has_images=has_images,
+            has_files=has_files,
             dataset_description=dataset_description,
             original_source=original_source,
         )
         
-        staging_dir = self._save_to_staging(dataset_obj, metadata)
+        staging_dir = self._save_to_staging(dataset_obj, metadata, file_info)
         self.logger.info(f"✅ Task 데이터 업로드 완료: {staging_dir}")
         
         job_id = None
@@ -127,7 +134,7 @@ class LocalDataManager:
         self._cleanup_existing_pending(provider, dataset, task, variant=variant, is_raw=False)
         
         # 데이터 로드 및 컬럼 변환 (이미지 제외)
-        dataset_obj, _ = self._load_data(data_file, process_images=False)
+        dataset_obj, _ = self._load_data(data_file, process_assets=False)
         
         # 메타데이터 생성
         metadata = self._create_metadata(
@@ -138,6 +145,7 @@ class LocalDataManager:
             dataset_description=dataset_description,
             source_task=source_task,
             has_images=False,  # 이미지는 참조만
+            has_files=False,  # 파일 경로는 없음
             total_rows=len(dataset_obj),
             data_type='task',
             **kwargs
@@ -303,108 +311,7 @@ class LocalDataManager:
                 self.logger.warning(f"⚠️ 알 수 없는 작업 상태: {status}")
                 time.sleep(self.pooling_interval)
         
-        raise TimeoutError(f"작업 완료 대기 시간 초과: {job_id}")
- 
-    def add_provider(self, provider: str) -> bool:
-        """새로운 Provider 추가"""
-        if self.schema_manager.add_provider(provider):
-            self.logger.info(f"✅ Provider '{provider}' 추가 완료")
-            return True
-        else:
-            self.logger.warning(f"⚠️ Provider '{provider}'는 이미 존재합니다")
-            return False
-    
-    def add_task(
-        self, 
-        task: str, 
-        required_fields: Optional[List[str]] = None, 
-        allowed_values: Optional[Dict[str, List[str]]] = None
-    ) -> bool:
-        """새로운 Task 추가"""
-        if self.schema_manager.add_task(task, required_fields, allowed_values):
-            self.logger.info(f"✅ Task '{task}' 추가 완료")
-            if required_fields:
-                    self.logger.info(f"  📝 필수 필드: {required_fields}")
-            if allowed_values:
-                self.logger.info(f"  🔧 허용 값: {allowed_values}")
-            return True
-        else:
-            self.logger.warning(f"⚠️ Task '{task}'는 이미 존재합니다")
-            return False
-        
-    def update_task(
-        self, 
-        task: str, 
-        required_fields: Optional[List[str]] = None, 
-        allowed_values: Optional[Dict[str, List[str]]] = None
-    ) -> bool:
-        """기존 Task 업데이트"""
-        if self.schema_manager.update_task(task, required_fields, allowed_values):
-            self.logger.info(f"✅ Task '{task}' 업데이트 완료")
-            if required_fields:
-                self.logger.info(f"  📝 필수 필드: {required_fields}")
-            if allowed_values:
-                self.logger.info(f"  🔧 허용 값: {allowed_values}")
-            return True
-        else:
-            self.logger.warning(f"⚠️ Task '{task}'는 존재하지 않습니다")
-            return False
-    
-    def remove_provider(self, provider: str) -> bool:
-        """Provider 제거"""
-        if self.schema_manager.remove_provider(provider):
-            self.logger.info(f"✅ Provider '{provider}' 제거 완료")
-            return True
-        else:
-            self.logger.warning(f"⚠️ Provider '{provider}'는 존재하지 않습니다")
-            return False
-    
-    def remove_task(self, task: str) -> bool:
-        """Task 제거"""
-        if self.schema_manager.remove_task(task):
-            self.logger.info(f"✅ Task '{task}' 제거 완료")
-            return True
-        else:
-            self.logger.warning(f"⚠️ Task '{task}'는 존재하지 않습니다")
-            return False
-        
-    def list_providers(self) -> List[str]:
-        """모든 Provider 목록 조회"""
-        return self.schema_manager.get_all_providers()
-    
-    def list_tasks(self) -> Dict[str, Dict]:
-        """모든 Task 목록 조회"""
-        return self.schema_manager.get_all_tasks()
-    
-    def show_schema_info(self):
-        """스키마 정보 대시보드 출력"""
-        print("\n" + "="*60)
-        print("📋 Schema Configuration Dashboard")
-        print("="*60)
-        
-        # Providers
-        providers = self.list_providers()
-        print(f"\n🏢 Providers ({len(providers)}개):")
-        for provider in providers:
-            print(f"  • {provider}")
-        
-        # Tasks
-        tasks = self.list_tasks()
-        print(f"\n📝 Tasks ({len(tasks)}개):")
-        for task_name, task_config in tasks.items():
-            print(f"  • {task_name}")
-            
-            required_fields = task_config.get('required_fields', [])
-            if required_fields:
-                print(f"    📝 필수 필드: {', '.join(required_fields)}")
-            
-            allowed_values = task_config.get('allowed_values', {})
-            if allowed_values:
-                print(f"    🔧 허용 값:")
-                for field, values in allowed_values.items():
-                    print(f"      - {field}: {', '.join(values)}")
-        
-        print("="*60 + "\n")
+        raise TimeoutError(f"작업 완료 대기 시간 초과: {job_id}")    
         
     def _check_nas_api_connection(self):
         """NAS API 서버 연결 확인"""
@@ -429,9 +336,10 @@ class LocalDataManager:
         data_type: str,
         source_task: Optional[str],
         has_images: bool = False,
+        has_files: bool = False,
         dataset_description: str = "",
         original_source: str = "",
-        # **kwargs
+        **kwargs
     ) -> Dict:
         """메타데이터 생성"""
         metadata = {
@@ -444,12 +352,13 @@ class LocalDataManager:
             'original_source': original_source,
             'source_task': source_task,
             'has_images': has_images,
+            'has_files': has_files,
             'total_rows': total_rows,
             'uploaded_by': os.getenv('USER', 'unknown'),
             'uploaded_at': datetime.now().isoformat(),
             'file_id': str(uuid.uuid4())[:8],
         }
-        # metadata.update(kwargs)
+        metadata.update(kwargs) # task의 추가 필드
         self.logger.debug(f"📄 메타데이터: {metadata}")
         return metadata
 
@@ -525,7 +434,7 @@ class LocalDataManager:
         else:
             self.logger.debug("📭 정리할 기존 pending 데이터 없음")
     
-    def _load_data(self, data_file: str,process_images: bool = False) -> Dataset:
+    def _load_data(self, data_file: str, process_assets: bool = False) -> Dataset:
         """데이터 파일을 로드하는 메서드"""
         data_path = Path(data_file).resolve()
         if not data_path.exists():
@@ -557,14 +466,99 @@ class LocalDataManager:
        # 통합된 컬럼 타입 변환 처리 (JSON dumps + 이미지)
         dataset_obj = self._process_cast_columns(dataset_obj)
         
-        if process_images:
-            dataset_obj, has_images = self._process_images(dataset_obj)
-        else:
-            has_images = False
-            self.logger.debug("📄 이미지 컬럼 처리 생략")
-        
-        return dataset_obj, has_images
+        if process_assets:
+            # 파일 컬럼 분석 및 variant 결정
+            file_info = self._detect_file_columns_and_variant(dataset_obj)
+            dataset_obj = self._normalize_column_names(dataset_obj, file_info)
 
+            self.logger.info(f"📄 파일 분석 결과: variant={file_info['variant']}, "
+                           f"이미지컬럼={file_info['image_columns']}, "
+                           f"파일컬럼={file_info['file_columns']}, "
+                           f"확장자={file_info['extensions']}")
+        else:
+            file_info = {'image_columns': [], 'file_columns': [], 'variant': 'text', 'extensions': set()}
+            self.logger.debug("📄 Assets 컬럼 처리 생략")
+        
+        return dataset_obj, file_info
+    
+    def _detect_file_columns_and_variant(self, dataset_obj: Dataset) -> Dict:
+        """파일 컬럼들을 찾고 확장자 기반으로 variant 결정"""
+        result = {
+            'image_columns': [],
+            'file_columns': [],
+            'extensions': set(),
+            'variant': 'text'
+        }
+        for key in dataset_obj.column_names:
+            sample_value = dataset_obj[0][key]
+            
+            # PIL Image나 bytes 데이터인 경우
+            if key in self.image_data_candidates:
+                if hasattr(sample_value, 'save') or isinstance(sample_value, bytes):
+                    result['image_columns'].append(key)
+                    continue
+            
+            # 경로 기반 파일인 경우
+            if key in self.file_path_candidates:
+                if isinstance(sample_value, str) and Path(sample_value).exists():
+                    ext = Path(sample_value).suffix.lower()
+                    result['extensions'].add(ext)
+                    result['file_columns'].append(key)
+        
+        if len(result['image_columns']) > 1:
+            raise ValueError(f"❌ 이미지 컬럼이 2개 이상입니다: {result['image_columns']}. "
+                             f"하나의 컬럼만 사용해주세요.")
+        if len(result['file_columns']) > 1:
+            raise ValueError(f"❌ 파일 컬럼이 2개 이상입니다: {result['file_columns']}. "
+                             f"하나의 컬럼만 사용해주세요.")
+            
+        result['image_columns'] = result['image_columns'][:1]
+        result['file_columns'] = result['file_columns'][:1]
+        # variant 결정
+        has_image_data = bool(result['image_columns'])
+        has_file_paths = bool(result['file_columns'])
+        extensions = result['extensions']
+        
+        if has_image_data and has_file_paths:
+            result['variant'] = "mixed"
+        elif has_image_data:
+            result['variant'] = "image"
+        elif has_file_paths:
+            # 확장자 기반으로 구체적 분류
+            if any(ext in ['.jpg', '.jpeg', '.png', '.gif', '.bmp', '.tiff', '.webp'] for ext in extensions):
+                result['variant'] = "image"
+            else:
+                result['variant'] = "files"
+        else:
+            result['variant'] = "text"
+        
+        return result
+
+    def _normalize_column_names(self, dataset_obj: Dataset, file_info: Dict) -> Dataset:
+        """컬럼명을 표준화 (image_columns → image, file_columns → file_path)"""
+        
+        # 이미지 컬럼 표준화
+        if len(file_info['image_columns']):
+            image_col = file_info['image_columns'][0]
+            self.logger.info(f"🔄 이미지 컬럼 표준화: {image_col} → {self.image_data_key}")
+            
+            # 첫 번째 이미지 컬럼을 표준 컬럼으로 사용
+            
+            if image_col != self.image_data_key:
+                # 컬럼명 변경
+                dataset_obj = dataset_obj.rename_column(image_col, self.image_data_key)
+        
+        # 파일 컬럼 표준화
+        if len(file_info['file_columns']):
+            file_col = file_info['file_columns'][0]
+            self.logger.info(f"🔄 파일 컬럼 표준화: {file_col} → {self.file_path_key}")
+            
+            
+            # 컬럼명 변경 (필요한 경우)
+            if file_col != self.file_path_key:
+                dataset_obj = dataset_obj.rename_column(file_col, self.file_path_key)
+        return dataset_obj
+    
     def _process_cast_columns(self, dataset_obj: Dataset):
         
         self.logger.info("🔍 JSON 변환 대상 컬럼 검사 시작")
@@ -585,34 +579,6 @@ class LocalDataManager:
             self.logger.info("📄 JSON 변환 대상 컬럼 없음")
         
         return dataset_obj
-    
-    def _process_images(self, dataset_obj: Dataset):
-        """이미지 컬럼 처리"""
-        self.logger.info("🔍 이미지 컬럼 검사 시작")
-        
-        image_column = None
-        has_images = False
-        
-        # 이미지 컬럼 찾기
-        for key in dataset_obj.column_names:
-            if key in self.image_column_candidates:
-                image_column = key
-                has_images = True
-                self.logger.info(f"🖼️ 이미지 컬럼 발견: '{key}'")
-                break
-        
-        # 이미지 컬럼 변환
-        if has_images and image_column:
-            try:
-                dataset_obj = dataset_obj.cast_column(image_column, ImageFeature())
-                self.logger.info(f"✅ 이미지 컬럼 '{image_column}'을 PIL Image로 변환 완료")
-            except Exception as e:
-                self.logger.error(f"❌ 이미지 컬럼 변환 실패: {e}")
-                raise ValueError(f"❌ 이미지 컬럼 '{image_column}'을 PIL Image로 변환하는 데 실패했습니다.")
-        else:
-            self.logger.info("📄 이미지 컬럼 없음")
-        
-        return dataset_obj, has_images
     
     def _apply_json_transform(self, dataset_obj: Dataset, json_cast_columns: list) -> Dataset:
         """JSON 변환 적용"""
@@ -635,7 +601,7 @@ class LocalDataManager:
             self.logger.error(f"❌ JSON 변환 실패: {e}")
             raise ValueError(f"❌ JSON 변환 중 오류 발생: {e}")
 
-    def _save_to_staging(self, dataset: Dataset, metadata: dict):
+    def _save_to_staging(self, dataset_obj: Dataset, metadata: dict, file_info: Optional[Dict] = None) -> str:
         """데이터를 staging 폴더에 저장"""
         timestamp = datetime.now().strftime("%Y%m%d%H%M%S")
         file_id = metadata['file_id']
@@ -646,9 +612,21 @@ class LocalDataManager:
         
         staging_dirname = f"{dataset_name}_{task}_{variant}_{file_id}_{timestamp}_{user}"
         staging_dir= self.staging_path / "pending" / staging_dirname
-        
         try:
-            dataset.save_to_disk(str(staging_dir))
+            if metadata.get('data_type') == 'raw' and file_info:
+                # 메타데이터 업데이트
+                staging_assets_dir = staging_dir / "assets"
+            
+                if len(file_info['file_columns']):
+                    dataset_obj  = self._copy_file_path_to_staging(
+                        dataset_obj, staging_assets_dir
+                    )
+                
+            if metadata.get('data_type') == 'task':
+                dataset_obj = self._add_metadata_columns(dataset_obj, metadata)
+                
+            dataset_obj.save_to_disk(str(staging_dir))
+            
             metadata_file = staging_dir / "upload_metadata.json"
             with open(metadata_file, 'w', encoding='utf-8') as f:
                 json.dump(metadata, f, ensure_ascii=False, indent=4)
@@ -658,23 +636,35 @@ class LocalDataManager:
         except Exception as e:
             if staging_dir.exists():
                 shutil.rmtree(staging_dir)
-            raise ValueError(f"❌ datasets 저장 실패: {e}")
+            raise 
     
-    def _setup_console_logging(self, log_level: str):
-        """콘솔 로깅 설정"""
-    
-        self.formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
-        console_handler = logging.StreamHandler()
-        console_handler.setFormatter(self.formatter)
-        self.logger = logging.getLogger(__name__)
-        self.logger.addHandler(console_handler)
+    def _copy_file_path_to_staging(self, dataset_obj: Dataset, staging_assets_dir: Path):
+        """파일 경로를 staging으로 복사"""
+        sample_value = dataset_obj[0][self.file_path_key]
         
-        if log_level.upper() == "DEBUG":
-            self.logger.setLevel(logging.DEBUG)
-        else:
-            self.logger.setLevel(logging.INFO)
+        if isinstance(sample_value, str) and Path(sample_value).exists():
+            def copy_file(example, idx):
+                original_path = Path(example[self.file_path_key]).resolve()
+                if original_path.exists():
+                    ext = original_path.suffix or ""
+                    prefix = "file"
+                    new_filename = f"{prefix}_{idx:06d}{ext}"
+                    target_path = staging_assets_dir / new_filename
+                    target_path.parent.mkdir(parents=True, exist_ok=True)
+                    
+                    shutil.copy2(original_path, target_path)
+                    
+                    example[self.file_path_key] = f"assets/{new_filename}"
+                    
+                return example
             
-    def _check_path_and_setup_logging(self):
+            dataset_obj = dataset_obj.map(copy_file, with_indices=True)
+            return dataset_obj
+        else:
+            self.logger.warning(f"⚠️ 파일 경로 컬럼 '{self.file_path_key}'가 유효하지 않거나 존재하지 않습니다: {sample_value}")
+            raise ValueError(f"파일 경로 컬럼 '{self.file_path_key}'가 유효하지 않거나 존재하지 않습니다.")
+    
+    def _check_path_and_setup_logging(self, log_level: str):
         
         required_paths = {
             'base': self.base_path,
@@ -694,46 +684,9 @@ class LocalDataManager:
         if missing_paths:
             missing_list = '\n'.join(missing_paths)
             raise FileNotFoundError(f"❌ 필수 디렉토리가 없습니다:\n{missing_list}")
-            
-        self.logger.info("✅ 모든 필수 디렉토리 확인 완료")
-        
-        log_dir = self.base_path / "logs"
-        log_dir.mkdir(parents=True, exist_ok=True)
-        
-        date_str = datetime.now().strftime("%Y%m%d")
-        user = os.getenv('USER', 'unknown')
-        log_file = log_dir / f"DataManager_{date_str}_{user}.log"
-        
-        file_handler = logging.FileHandler(log_file, encoding='utf-8')
-        file_handler.setFormatter(self.formatter)
-        self.logger.addHandler(file_handler)
-        self.logger.info(f"📝 파일 로깅 활성화: {log_file}")
-        self.logger.info(f"🚀 DataManager 초기화 완료")
-    
-    def _convert_and_save_data(self, staging_dir: Path, target_path: Path, metadata: Dict):
-        """Arrow 데이터를 Parquet으로 변환하여 저장"""
-        self.logger.info("🔄 Arrow → Parquet 변환 중")
-        
-        try:
-            # Arrow 데이터 로드
-            dataset_obj = load_from_disk(str(staging_dir))
-            
-            if metadata.get("data_type") == "task":
-                dataset_obj = self._add_metadata_columns(dataset_obj, metadata)
-            
-            # Parquet으로 저장
-            parquet_file = target_path / "data.parquet"
-            dataset_obj.to_parquet(str(parquet_file))
-            
-            # 메타데이터 복사
-            metadata_source = staging_dir / "upload_metadata.json"
-            metadata_target = target_path / "_metadata.json"
-            shutil.copy(str(metadata_source), str(metadata_target))
-            
-            self.logger.info(f"💾 Parquet 저장 완료: {parquet_file}")
-            
-        except Exception as e:
-            raise ValueError(f"데이터 변환 실패: {e}")
+        setup_logging(log_level=log_level, base_path=str(self.base_path))
+        self.logger = logging.getLogger(__name__)
+        self.logger.debug("✅ 모든 필수 디렉토리 확인 완료")
         
     def _add_metadata_columns(self, dataset_obj: Dataset, metadata: Dict):
         """Task 데이터에 메타데이터 컬럼 추가"""

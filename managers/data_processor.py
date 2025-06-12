@@ -6,15 +6,17 @@ import io
 import threading
 import time
 import os
+import gc
 from datetime import datetime
 from tqdm import tqdm
 from pathlib import Path
 from typing import Dict, Optional, List
-import gc
-
+from PIL import Image
 from datasets import Dataset, load_from_disk
 from datasets.features import Image as ImageFeature
-from PIL import Image
+from functools import partial
+
+from managers.logger import setup_logging
 
 class NASDataProcessor:
     
@@ -37,10 +39,12 @@ class NASDataProcessor:
         
         self.num_proc = num_proc
         self.batch_size = batch_size
-        self.image_column_candidates = ["image", "image_bytes"]
         
-        self._setup_console_logging(log_level)
-        self._check_path_and_setup_logging()
+        # LocalDataManager와 동일
+        self.image_data_key = 'image'  # 기본 이미지 컬럼 키
+        self.file_path_key = 'file_path'  # 기본 파일 경로 컬럼 키
+        
+        self._check_path_and_setup_logging(log_level)
         
         self.existing_hashes = set()
         self.cache_built = False
@@ -51,58 +55,8 @@ class NASDataProcessor:
         self.failure_lock = threading.Lock()
         self.error_messages = []
         
-        self.logger.info(f"🚀 OptimizedNASDataProcessor 초기화 (병렬: {self.num_proc}, 배치: {batch_size})")
-
-    def _setup_console_logging(self, log_level: str) -> logging.Logger:
-        """기본 로깅 설정"""
-        
-        self.formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
-        console_handler = logging.StreamHandler()
-        console_handler.setFormatter(self.formatter)
-        self.logger = logging.getLogger(__name__)
-        self.logger.addHandler(console_handler)
-        
-        if log_level.upper() == "DEBUG":
-            self.logger.setLevel(logging.DEBUG)
-        else:
-            self.logger.setLevel(logging.INFO)
-
-    def _check_path_and_setup_logging(self):
-        
-        required_paths = {
-            'base': self.base_path,
-            'staging': self.staging_path,
-            'staging/pending': self.staging_pending_path,
-            'staging/processing': self.staging_processing_path, 
-            'staging/failed': self.staging_failed_path,
-            'catalog': self.catalog_path,
-            'assets': self.assets_path,
-        }
-        
-        missing_paths = []
-        for path_name, path_obj in required_paths.items():
-            if not path_obj.exists():
-                missing_paths.append(f"  - {path_name}: {path_obj}")
-        
-        if missing_paths:
-            missing_list = '\n'.join(missing_paths)
-            raise FileNotFoundError(f"❌ 필수 디렉토리가 없습니다:\n{missing_list}")
-            
-        self.logger.info("✅ 모든 필수 디렉토리 확인 완료")
-        
-        log_dir = self.base_path / "logs"
-        log_dir.mkdir(parents=True, exist_ok=True)
-        
-        date_str = datetime.now().strftime("%Y%m%d")
-        user = os.getenv('USER', 'unknown')
-        log_file = log_dir / f"DataProcessor_{date_str}_{user}.log"
-        
-        file_handler = logging.FileHandler(log_file, encoding='utf-8')
-        file_handler.setFormatter(self.formatter)
-        self.logger.addHandler(file_handler)
-        self.logger.info(f"📝 파일 로깅 활성화: {log_file}")
-        self.logger.info(f"🚀 DataProcessor 초기화 완료")
-    
+        self.logger.info(f"🚀 NASDataProcessor 초기화 (병렬: {self.num_proc}, 배치: {batch_size})")
+ 
     def get_status(self) -> Dict:
         """간단한 상태 조회"""
         return {
@@ -167,6 +121,30 @@ class NASDataProcessor:
         self.logger.info(f"✅ 처리 완료: {result}")
         return result
     
+    def _check_path_and_setup_logging(self, log_level: str = "INFO"):
+        
+        required_paths = {
+            'base': self.base_path,
+            'staging': self.staging_path,
+            'staging/pending': self.staging_pending_path,
+            'staging/processing': self.staging_processing_path, 
+            'staging/failed': self.staging_failed_path,
+            'catalog': self.catalog_path,
+            'assets': self.assets_path,
+        }
+        
+        missing_paths = []
+        for path_name, path_obj in required_paths.items():
+            if not path_obj.exists():
+                missing_paths.append(f"  - {path_name}: {path_obj}")
+        
+        if missing_paths:
+            missing_list = '\n'.join(missing_paths)
+            raise FileNotFoundError(f"❌ 필수 디렉토리가 없습니다:\n{missing_list}")
+        setup_logging(log_level=log_level, base_path=str(self.base_path))
+        self.logger = logging.getLogger(__name__)
+        self.logger.debug("✅ 모든 필수 디렉토리 확인 완료")
+   
     def _process_single_directory(self, processing_dir: Path):
         """단일 디렉토리 처리 - datasets 라이브러리 활용"""
         # 메타데이터 읽기
@@ -182,8 +160,22 @@ class NASDataProcessor:
         self.logger.info(f"📂 데이터 로드: {len(dataset_obj)}행")
         
         # 이미지 처리 (Raw 데이터인 경우)
-        if metadata.get('data_type') == 'raw' and metadata.get('has_images', False):
-            dataset_obj = self._process_images_with_map(dataset_obj, metadata)
+        if metadata.get('data_type') == 'raw':
+            provider = metadata['provider']
+            dataset_name = metadata['dataset']
+            assets_base = self.assets_path / f"provider={provider}" / f"dataset={dataset_name}"
+            assets_base.mkdir(parents=True, exist_ok=True)
+            
+            # 해시 캐시 구축 (공통)
+            self._build_hash_cache(assets_base)
+
+            # 이미지 처리
+            if metadata.get('has_images', False) and self.image_data_key in dataset_obj.column_names:
+                dataset_obj = self._process_images_with_map(dataset_obj, metadata, assets_base, processing_dir)
+            
+            # 파일 처리
+            if metadata.get('has_files', False) and self.file_path_key in dataset_obj.column_names:
+                dataset_obj = self._process_files_with_map(dataset_obj, metadata, assets_base, processing_dir)
         
         # Catalog에 저장
         self._save_to_catalog(dataset_obj, metadata)
@@ -192,44 +184,30 @@ class NASDataProcessor:
         del dataset_obj
         gc.collect()
     
-    def _process_images_with_map(self, dataset_obj: Dataset, metadata: Dict) -> Dataset:
-        """datasets.map()을 활용한 이미지 처리"""
-        # 이미지 컬럼 찾기
-        image_column = None
-        for col in dataset_obj.column_names:
-            if col.lower() in self.image_column_candidates:
-                image_column = col
-                break
-        
-        if not image_column:
-            raise ValueError("이미지 컬럼을 찾을 수 없음")
-        
+    def _process_images_with_map(self, dataset_obj: Dataset, metadata: Dict, assets_base: Path, processing_dir: Path) -> Dataset:
+        """이미지 처리 (PIL Image/bytes → hash.jpg)"""
+        print(metadata)
         total_images = len(dataset_obj)
-        self.logger.info(f"🖼️ 이미지 처리 시작: {image_column} ({total_images}개)")
+        self.logger.info(f"🖼️ 이미지 처리 시작: {self.image_data_key} ({total_images}개)")
+
+        shard_config = self._get_shard_config(total_images)
+        self.logger.info(f"🔧 샤딩 설정: {shard_config['info']}")
         
-        # Assets 경로 설정
-        provider = metadata['provider']
-        dataset_name = metadata['dataset']
-        self.assets_base = self.assets_path / f"provider={provider}" / f"dataset={dataset_name}"
-        self.assets_base.mkdir(parents=True, exist_ok=True)
+        dataset_obj = dataset_obj.cast_column(self.image_data_key, ImageFeature())
         
-        self.shard_config = self._get_shard_config(total_images)
-        self.logger.info(f"🔧 샤딩 설정: {self.shard_config['info']}")
-        
-        # 해시 캐시 구축
-        self._build_hash_cache(self.assets_base)
-        
-        # Image feature로 캐스팅
-        dataset_obj = dataset_obj.cast_column(image_column, ImageFeature())
-        
-        # datasets.map()으로 배치 처리
+        process_batch_func = partial(
+            self._process_image_batch,
+            assets_base=assets_base,
+            shard_config=shard_config
+        )
+
         try:
             processed_dataset = dataset_obj.map(
-                self._process_image_batch,
+                process_batch_func,
                 batched=True,
                 batch_size=self.batch_size,
                 num_proc=self.num_proc,
-                remove_columns=[image_column],  # 원본 이미지 컬럼 제거
+                remove_columns=[self.image_data_key],  # 원본 이미지 컬럼 제거
                 desc="🖼️ 이미지 처리",
                 load_from_cache_file=False,  # 캐시 비활성화로 메모리 절약
             )
@@ -245,23 +223,44 @@ class NASDataProcessor:
         except Exception as e:
             self.logger.error(f"❌ datasets.map() 처리 실패: {e}")
             raise
+        
+        
+    def _process_files_with_map(self, dataset_obj: Dataset, metadata: Dict, assets_base: Path, processing_dir: Path) -> Dataset:
+        """파일 처리 (staging/assets → final/assets + hash)"""
+        print(metadata)
+        total_files = len(dataset_obj)
+        self.logger.info(f"📄 파일 처리 시작: {self.file_path_key} ({total_files}개)")
+        
+        shard_config = self._get_shard_config(total_files)
+        self.logger.info(f"🔧 샤딩 설정: {shard_config['info']}")
+        
+        process_batch_func = partial(
+            self._process_file_batch,
+            assets_base=assets_base,
+            processing_dir=processing_dir
+        )
+        
+        try:
+            processed_dataset = dataset_obj.map(
+                process_batch_func,
+                batched=True,
+                batch_size=self.batch_size,
+                num_proc=self.num_proc,
+                remove_columns=[self.file_path_key],  # 원본 파일 경로 컬럼 제거
+                desc="📄 파일 이동",
+                load_from_cache_file=False,
+            )
+            
+            self.logger.info(f"✅ 파일 이동 완료: {len(processed_dataset)}개")
+            return processed_dataset
+        except Exception as e:
+            self.logger.error(f"❌ 파일 처리 실패: {e}")
+            raise
     
-    def _process_image_batch(self, batch: Dict) -> Dict:
-        """배치 단위 이미지 처리 함수 (datasets.map용)"""
-        # 이미지 컬럼 이름 찾기
-        image_column = None
-        for col in batch.keys():
-            if col.lower() in self.image_column_candidates:
-                image_column = col
-                break
-        
-        if not image_column:
-            raise ValueError("이미지 컬럼을 찾을 수 없음")
-        
-        images = batch[image_column]
-        batch_size = len(images)
-        
-        # 결과 저장용
+    def _process_image_batch(self, batch: Dict, assets_base: Path, shard_config: Dict) -> Dict:
+        """배치 단위 이미지 처리 (PIL Image/bytes → hash.jpg)"""
+        images = batch[self.image_data_key]
+        self.logger.debug(f"배치 처리: {len(images)}개 이미지")        
         image_hashes = []
         image_paths = []
         
@@ -270,7 +269,7 @@ class NASDataProcessor:
         
         for idx, image_data in enumerate(images):
             try:
-                # 실패 플래그 확인
+                # 실패 시 중단
                 if self.processing_failed:
                     break
                 
@@ -282,17 +281,11 @@ class NASDataProcessor:
                 # PIL Image 처리
                 pil_image = image_data if hasattr(image_data, 'save') else Image.open(io.BytesIO(image_data))
                 
-                # 해시 계산
-                image_hash = self._get_image_hash(pil_image)
-                
-                # 중복 체크
+                image_hash  = self._get_image_hash(pil_image)
+                image_path = self._get_image_path(assets_base, shard_config, image_hash)
                 if image_hash in self.existing_hashes:
-                    duplicate_count += 1
-                    image_path = self._get_image_path(self.assets_base, image_hash, self.shard_config)
-                    relative_path = str(image_path.relative_to(self.assets_path))
+                    duplicate_count += 1    
                 else:
-                    # 새 이미지 저장
-                    image_path = self._get_image_path(self.assets_base, image_hash, self.shard_config)
                     image_path.parent.mkdir(parents=True, exist_ok=True)
                     
                     if pil_image.mode != 'RGB':
@@ -304,8 +297,8 @@ class NASDataProcessor:
                         self.existing_hashes.add(image_hash)
                     
                     saved_count += 1
-                    relative_path = str(image_path.relative_to(self.assets_path))
                 
+                relative_path = str(image_path.relative_to(self.assets_path))
                 image_hashes.append(image_hash)
                 image_paths.append(relative_path)
                 
@@ -326,10 +319,66 @@ class NASDataProcessor:
             self.logger.debug(f"배치 처리: 저장={saved_count}, 중복={duplicate_count}")
         
         return {
-            "image_hash": image_hashes,
-            "image_path": image_paths
+            "path": image_paths,
+            "hash": image_hashes,
         }
-    
+        
+    def _process_file_batch(self, batch: Dict, assets_base: Path, processing_dir: Path) -> Dict:
+        """배치 단위 파일 처리 (staging/assets → final/assets + hash)"""
+        
+        file_paths = batch[self.file_path_key]
+        self.logger.debug(f"배치 파일 처리: {len(file_paths)}개")
+        new_file_paths = []
+        file_hashes = []
+        
+        moved_count = 0
+        
+        for file_path in file_paths:
+            try:
+                if file_path and file_path.startswith("assets/"):
+                    # staging에서 최종 assets로 이동
+                    staging_file_path = processing_dir / file_path
+                    
+                    if staging_file_path.exists():
+                        # 파일 해시 계산
+                        file_hash = self._get_file_hash(staging_file_path)
+                        
+                        # 확장자 유지한 최종 경로
+                        ext = Path(file_path).suffix
+                        final_filename = f"{file_hash}{ext}"
+                        final_file_path = assets_base / "files" / final_filename
+                        final_file_path.parent.mkdir(parents=True, exist_ok=True)
+                        
+                        # 파일 이동
+                        shutil.move(str(staging_file_path), str(final_file_path))
+                        
+                        # 최종 상대 경로 (assets 기준)
+                        final_relative = str(final_file_path.relative_to(self.assets_path))
+                        new_file_paths.append(final_relative)
+                        file_hashes.append(file_hash)
+                        moved_count += 1
+                    else:
+                        self.logger.warning(f"⚠️ Staging 파일 없음: {staging_file_path}")
+                        new_file_paths.append(None)
+                        file_hashes.append(None)
+                else:
+                    # staging이 아닌 경우 그대로 유지 (hash는 None)
+                    new_file_paths.append(file_path)
+                    file_hashes.append(None)
+                    
+            except Exception as e:
+                self.logger.error(f"❌ 파일 처리 실패: {e}")
+                new_file_paths.append(None)
+                file_hashes.append(None)
+        
+        if moved_count > 0:
+            self.logger.debug(f"배치 파일 이동: {moved_count}개")
+        
+        return {
+            "path": new_file_paths,
+            "hash": file_hashes
+        }
+        
     def _build_hash_cache(self, assets_base: Path):
         """기존 이미지 해시 캐시 구축"""
         if self.cache_built:
@@ -351,7 +400,8 @@ class NASDataProcessor:
             build_time = time.time() - start_time
             self.logger.info(f"✅ 해시 캐시 구축 완료: {len(self.existing_hashes)}개 ({build_time:.2f}초)")
             self.cache_built = True
-            
+    
+                
     def _get_image_hash(self, pil_image: Image.Image) -> str:
         """이미지 해시 계산"""
         if pil_image.mode != 'RGB':
@@ -363,6 +413,14 @@ class NASDataProcessor:
         jpeg_bytes = img_buffer.getvalue()
         
         return hashlib.sha256(jpeg_bytes).hexdigest()
+
+    def _get_file_hash(self, file_path: Path) -> str:
+        """파일 해시 계산 (SHA256)"""
+        hash_sha256 = hashlib.sha256()
+        with open(file_path, "rb") as f:
+            for chunk in iter(lambda: f.read(4096), b""):
+                hash_sha256.update(chunk)
+        return hash_sha256.hexdigest()
     
     def _get_shard_config(self, total_images: int) -> Dict:
         """샤딩 설정"""
@@ -373,7 +431,7 @@ class NASDataProcessor:
         else:
             return {"levels": 2, "info": "2단계 샤딩 (xx/xx/)"}
 
-    def _get_image_path(self, base_path: Path, image_hash: str, shard_config: Dict) -> Path:
+    def _get_image_path(self, base_path: Path, shard_config: Dict, image_hash: str) -> Path:
         """샤딩 설정에 따른 경로"""
         levels = shard_config["levels"]
         if levels == 0:

@@ -18,17 +18,31 @@ from typing import List, Dict, Optional
 
 # LocalDataManager import (경로 수정 필요)
 from data_manager import LocalDataManager
+from schema_manager import SchemaManager
 
 
 class DataManagerCLI:
     """Data Manager CLI 인터페이스"""
     
-    def __init__(self, nas_api_url: str = "http://localhost:8000"):
-        self.manager = LocalDataManager(
+    def __init__(
+        self, 
+        base_path: str = "/mnt/AI_NAS/datalake",
+        nas_api_url: str = "http://localhost:8000",
+        log_level: str = "INFO"
+    ):
+        self.schema_manager = SchemaManager(
+            base_path=base_path,
+            create_default=False,  # 기본 스키마가 없으면 생성
+        )
+        self.data_manager = LocalDataManager(
+            base_path=base_path,
             nas_api_url=nas_api_url,
             auto_process=False,  # CLI에서는 수동 제어
-            log_level="INFO"
+            log_level=log_level,
+            schema_manager= self.schema_manager
         )
+        
+        
     
     def create_provider_interactive(self):
         """대화형 Provider 생성"""
@@ -44,14 +58,14 @@ class DataManagerCLI:
                 return False
             
             # 기존 Provider 확인
-            if provider_name in self.manager.list_providers():
+            if provider_name in self.schema_manager.get_all_providers():
                 print(f"⚠️ Provider '{provider_name}'가 이미 존재합니다.")
                 return False
             
             # 확인 및 생성
             confirm = input(f"\nProvider '{provider_name}'를 생성하시겠습니까? (y/N): ").strip().lower()
             if confirm in ['y', 'yes']:
-                result = self.manager.add_provider(provider_name)
+                result = self.schema_manager.add_provider(provider_name)
                 if result:
                     print(f"✅ Provider '{provider_name}' 생성 완료!")
                     return True
@@ -83,7 +97,7 @@ class DataManagerCLI:
                 return False
             
             # 기존 Task 확인
-            existing_tasks = self.manager.list_tasks()
+            existing_tasks = self.schema_manager.get_all_tasks()
             if task_name in existing_tasks:
                 print(f"⚠️ Task '{task_name}'가 이미 존재합니다.")
                 update = input("업데이트하시겠습니까? (y/N): ").strip().lower()
@@ -120,9 +134,9 @@ class DataManagerCLI:
             confirm = input("\n생성하시겠습니까? (y/N): ").strip().lower()
             if confirm in ['y', 'yes']:
                 if task_name in existing_tasks:
-                    result = self.manager.update_task(task_name, required_fields, allowed_values)
+                    result = self.schema_manager.update_task(task_name, required_fields, allowed_values)
                 else:
-                    result = self.manager.add_task(task_name, required_fields, allowed_values)
+                    result = self.schema_manager.add_task(task_name, required_fields, allowed_values)
                 
                 if result:
                     print(f"✅ Task '{task_name}' 생성/업데이트 완료!")
@@ -143,7 +157,7 @@ class DataManagerCLI:
 
     def remove_provider_interactive(self):
         """대화형 Provider 제거"""
-        providers = self.manager.list_providers()
+        providers = self.schema_manager.get_all_providers()
         if not providers:
             print("❌ 제거할 Provider가 없습니다.")
             return False
@@ -169,7 +183,7 @@ class DataManagerCLI:
             
             confirm = input(f"\nProvider '{provider}'를 제거하시겠습니까? (y/N): ").strip().lower()
             if confirm in ['y', 'yes']:
-                result = self.manager.remove_provider(provider)
+                result = self.schema_manager.remove_provider(provider)
                 if result:
                     print(f"✅ Provider '{provider}' 제거 완료!")
                     return True
@@ -189,7 +203,7 @@ class DataManagerCLI:
 
     def remove_task_interactive(self):
         """대화형 Task 제거"""
-        tasks = self.manager.list_tasks()
+        tasks = self.schema_manager.get_all_tasks()
         if not tasks:
             print("❌ 제거할 Task가 없습니다.")
             return False
@@ -216,7 +230,7 @@ class DataManagerCLI:
             
             confirm = input(f"\nTask '{task}'를 제거하시겠습니까? (y/N): ").strip().lower()
             if confirm in ['y', 'yes']:
-                result = self.manager.remove_task(task)
+                result = self.schema_manager.remove_task(task)
                 if result:
                     print(f"✅ Task '{task}' 제거 완료!")
                     return True
@@ -241,14 +255,20 @@ class DataManagerCLI:
         print("="*50)
         
         try:
-            # 데이터 파일 경로 입력
+            # 1. 데이터 파일 경로 입력
             data_file = input("📁 데이터 파일 경로: ").strip()
             if not data_file or not Path(data_file).exists():
                 print("❌ 유효한 파일 경로를 입력해주세요.")
                 return False
             
-            # Provider 선택
-            providers = self.manager.list_providers()
+            # 2. 데이터 타입 선택 (가장 중요한 분기점)
+            data_type = input("\n📝 데이터 타입 (raw/task) [raw]: ").strip().lower() or "raw"
+            if data_type not in ["raw", "task"]:
+                print("❌ 잘못된 데이터 타입입니다. (raw 또는 task)")
+                return False
+            
+            # 3. Provider 선택
+            providers = self.schema_manager.get_all_providers()
             if not providers:
                 print("❌ 등록된 Provider가 없습니다. 먼저 Provider를 생성해주세요.")
                 return False
@@ -271,29 +291,30 @@ class DataManagerCLI:
                     print(f"❌ Provider '{provider}'가 존재하지 않습니다.")
                     return False
             
-            # Dataset 이름
-            dataset = input("📦 Dataset 이름: ").strip()
-            if not dataset:
-                print("❌ Dataset 이름이 필요합니다.")
-                return False
-            
-            # 데이터 타입 선택
-            data_type = input("📝 데이터 타입 (raw/task) [raw]: ").strip().lower() or "raw"
-            
+            # 4. 데이터 타입별 플로우
             if data_type == "raw":
-                # Raw 데이터 업로드
+                # Raw 데이터: 새 Dataset 생성
+                dataset = input("\n📦 새 Dataset 이름: ").strip()
+                if not dataset:
+                    print("❌ Dataset 이름이 필요합니다.")
+                    return False
+                
                 description = input("📄 데이터셋 설명 (선택사항): ").strip()
                 source = input("🔗 원본 소스 URL (선택사항): ").strip()
                 
                 print(f"\n📋 업로드 정보:")
-                print(f"  파일: {data_file}")
-                print(f"  Provider: {provider}")
-                print(f"  Dataset: {dataset}")
-                print(f"  타입: Raw 데이터")
+                print(f"  📁 파일: {data_file}")
+                print(f"  📝 타입: Raw 데이터")
+                print(f"  🏢 Provider: {provider}")
+                print(f"  📦 Dataset: {dataset} (새로 생성)")
+                if description:
+                    print(f"  📄 설명: {description}")
+                if source:
+                    print(f"  🔗 소스: {source}")
                 
                 confirm = input("\n업로드하시겠습니까? (y/N): ").strip().lower()
                 if confirm in ['y', 'yes']:
-                    staging_dir, job_id = self.manager.upload_raw_data(
+                    staging_dir, job_id = self.data_manager.upload_raw_data(
                         data_file=data_file,
                         provider=provider,
                         dataset=dataset,
@@ -301,12 +322,49 @@ class DataManagerCLI:
                         original_source=source
                     )
                     print(f"✅ 업로드 완료: {staging_dir}")
-                    print("💡 'python cli.py process' 명령으로 처리를 시작할 수 있습니다.")
+                    print("💡 'python cli.py process start' 명령으로 처리를 시작할 수 있습니다.")
                     return True
                     
             elif data_type == "task":
+                # Task 데이터: 기존 Dataset에서 선택
+                print(f"\n📦 기존 Dataset 선택:")
+                print("💡 Task 데이터는 기존에 업로드된 raw 데이터에서 추출됩니다.")
+                
+                # 해당 Provider의 기존 dataset 목록 조회
+                catalog_path = self.data_manager.catalog_path / f"provider={provider}"
+                existing_datasets = []
+                
+                if catalog_path.exists():
+                    for dataset_dir in catalog_path.iterdir():
+                        if dataset_dir.is_dir() and dataset_dir.name.startswith("dataset="):
+                            dataset_name = dataset_dir.name.replace("dataset=", "")
+                            existing_datasets.append(dataset_name)
+                
+                if not existing_datasets:
+                    print(f"❌ Provider '{provider}'에 업로드된 데이터가 없습니다.")
+                    print("💡 먼저 raw 데이터를 업로드해주세요.")
+                    return False
+                
+                print(f"\n📦 사용 가능한 Dataset ({len(existing_datasets)}개):")
+                for i, dataset_name in enumerate(existing_datasets, 1):
+                    print(f"  {i}. {dataset_name}")
+                
+                dataset_choice = input("Dataset 번호 또는 이름 입력: ").strip()
+                if dataset_choice.isdigit():
+                    idx = int(dataset_choice) - 1
+                    if 0 <= idx < len(existing_datasets):
+                        dataset = existing_datasets[idx]
+                    else:
+                        print("❌ 잘못된 번호입니다.")
+                        return False
+                else:
+                    dataset = dataset_choice
+                    if dataset not in existing_datasets:
+                        print(f"❌ Dataset '{dataset}'가 존재하지 않습니다.")
+                        return False
+                
                 # Task 선택
-                tasks = self.manager.list_tasks()
+                tasks = self.schema_manager.get_all_tasks()
                 if not tasks:
                     print("❌ 등록된 Task가 없습니다. 먼저 Task를 생성해주세요.")
                     return False
@@ -331,13 +389,13 @@ class DataManagerCLI:
                         return False
                 
                 # Variant 입력
-                variant = input("🏷️ Variant 이름: ").strip()
+                variant = input("\n🏷️ Variant 이름: ").strip()
                 if not variant:
                     print("❌ Variant 이름이 필요합니다.")
                     return False
                 
                 # 필수 필드 입력
-                all_tasks = self.manager.schema_manager.get_all_tasks()
+                all_tasks = self.data_manager.schema_manager.get_all_tasks()
                 task_info = all_tasks.get(task, {})
                 required_fields = task_info.get('required_fields', [])
                 allowed_values = task_info.get('allowed_values', {})
@@ -355,22 +413,23 @@ class DataManagerCLI:
                         metadata[field] = value
                 
                 # 검증
-                is_valid, error_msg = self.manager.schema_manager.validate_task_metadata(task, metadata)
+                is_valid, error_msg = self.data_manager.schema_manager.validate_task_metadata(task, metadata)
                 if not is_valid:
                     print(f"❌ 검증 실패: {error_msg}")
                     return False
                 
                 print(f"\n📋 업로드 정보:")
-                print(f"  파일: {data_file}")
-                print(f"  Provider: {provider}")
-                print(f"  Dataset: {dataset}")
-                print(f"  Task: {task}")
-                print(f"  Variant: {variant}")
-                print(f"  메타데이터: {metadata}")
+                print(f"  📁 파일: {data_file}")
+                print(f"  📝 타입: Task 데이터")
+                print(f"  🏢 Provider: {provider}")
+                print(f"  📦 Dataset: {dataset} (기존)")
+                print(f"  📝 Task: {task}")
+                print(f"  🏷️ Variant: {variant}")
+                print(f"  📋 메타데이터: {metadata}")
                 
                 confirm = input("\n업로드하시겠습니까? (y/N): ").strip().lower()
                 if confirm in ['y', 'yes']:
-                    staging_dir, job_id = self.manager.upload_task_data(
+                    staging_dir, job_id = self.data_manager.upload_task_data(
                         data_file=data_file,
                         provider=provider,
                         dataset=dataset,
@@ -379,11 +438,8 @@ class DataManagerCLI:
                         **metadata
                     )
                     print(f"✅ 업로드 완료: {staging_dir}")
-                    print("💡 'python cli.py process' 명령으로 처리를 시작할 수 있습니다.")
+                    print("💡 'python cli.py process start' 명령으로 처리를 시작할 수 있습니다.")
                     return True
-            else:
-                print("❌ 잘못된 데이터 타입입니다. (raw 또는 task)")
-                return False
                 
         except KeyboardInterrupt:
             print("\n❌ 업로드가 취소되었습니다.")
@@ -391,7 +447,7 @@ class DataManagerCLI:
         except Exception as e:
             print(f"❌ 업로드 중 오류: {e}")
             return False
-
+        
     def trigger_processing(self):
         """NAS 처리 수동 시작"""
         print("\n" + "="*50)
@@ -400,7 +456,7 @@ class DataManagerCLI:
         
         try:
             # 현재 상태 확인
-            status = self.manager.get_nas_status()
+            status = self.data_manager.get_nas_status()
             if status:
                 pending_count = status.get('pending', 0)
                 processing_count = status.get('processing', 0)
@@ -426,7 +482,7 @@ class DataManagerCLI:
                     return False
             
             # 처리 시작
-            job_id = self.manager.trigger_nas_processing()
+            job_id = self.data_manager.trigger_nas_processing()
             if job_id:
                 print(f"✅ 처리 시작됨: {job_id}")
                 
@@ -435,19 +491,19 @@ class DataManagerCLI:
                 if wait_completion in ['y', 'yes']:
                     try:
                         print("⏳ 처리 완료 대기 중... (Ctrl+C로 중단)")
-                        result = self.manager.wait_for_job_completion(job_id, timeout=3600)
+                        result = self.data_manager.wait_for_job_completion(job_id, timeout=3600)
                         print(f"📊 처리 완료: {result}")
                         return True
                     except KeyboardInterrupt:
                         print("\n⏸️ 대기 중단됨. 백그라운드에서 처리는 계속됩니다.")
-                        print(f"💡 'python cli.py process --status {job_id}' 명령으로 상태를 확인할 수 있습니다.")
+                        print(f"💡 'python cli.py process status {job_id}' 명령으로 상태를 확인할 수 있습니다.")
                         return True
                     except Exception as e:
                         print(f"❌ 처리 대기 중 오류: {e}")
                         return False
                 else:
                     print(f"🔄 백그라운드에서 처리 중입니다. Job ID: {job_id}")
-                    print(f"💡 'python cli.py process --status {job_id}' 명령으로 상태를 확인할 수 있습니다.")
+                    print(f"💡 'python cli.py process status {job_id}' 명령으로 상태를 확인할 수 있습니다.")
                     return True
             else:
                 print("❌ 처리 시작에 실패했습니다.")
@@ -466,7 +522,7 @@ class DataManagerCLI:
         print("="*50)
         
         try:
-            job_status = self.manager.get_job_status(job_id)
+            job_status = self.data_manager.get_job_status(job_id)
             if job_status:
                 status = job_status.get('status', 'unknown')
                 started_at = job_status.get('started_at', 'N/A')
@@ -506,7 +562,7 @@ class DataManagerCLI:
         
         try:
             # 1. 📥 업로드됨 (Pending)
-            pending_path = self.manager.staging_pending_path
+            pending_path = self.data_manager.staging_pending_path
             pending_items = []
             
             if pending_path.exists():
@@ -540,8 +596,8 @@ class DataManagerCLI:
                         continue
             
             # 2. 🔄 처리 중/완료 (Jobs)
-            jobs = self.manager.list_nas_jobs() or []
-            recent_jobs = jobs[-10:] if jobs else []  # 최근 10개
+            jobs = self.data_manager.list_nas_jobs() or []
+            recent_jobs = jobs[-5:] if jobs else []  # 최근 5개
             
             # 출력
             if pending_items:
@@ -585,10 +641,10 @@ class DataManagerCLI:
         print("="*60)
         
         # Schema 정보
-        self.manager.show_schema_info()
+        self.schema_manager.show_schema_info()
         
         # NAS 상태
-        self.manager.show_nas_dashboard()
+        self.data_manager.show_nas_dashboard()
 
 
 def main():
@@ -615,8 +671,9 @@ def main():
 
 🔄 처리 관리:
   python cli.py process                        # 처리 시작 (대화형)
-  python cli.py process --status JOB_ID        # 작업 상태 확인
-  python cli.py process --list                 # 내 데이터 현황
+  python cli.py process start                  # 새 처리 시작
+  python cli.py process status JOB_ID          # 작업 상태 확인
+  python cli.py process list                   # 내 데이터 현황
 
 📊 상태 확인:
   python cli.py status                         # 전체 상태 대시보드
@@ -624,8 +681,12 @@ def main():
 💡 팁: 각 명령어는 부분 입력 시 사용 가능한 하위 옵션을 안내합니다.
         """
     )
+    parser.add_argument("--base-path", default="/mnt/AI_NAS/datalake/migrate_test",
+                       help="데이터 저장 기본 경로")
     parser.add_argument("--nas-url", default="http://localhost:8000", 
                        help="NAS API 서버 URL")
+    parser.add_argument("--log-level", default="INFO",
+                       help="로깅 레벨 (DEBUG, INFO, WARNING, ERROR, CRITICAL)")
     
     subparsers = parser.add_subparsers(dest='command', help='명령어')
     
@@ -655,8 +716,13 @@ def main():
     
     # 처리 관리
     process_parser = subparsers.add_parser('process', help='데이터 처리 관리')
-    process_parser.add_argument('--status', metavar='JOB_ID', help='특정 작업 상태 확인')
-    process_parser.add_argument('--list', action='store_true', help='내 데이터 전체 현황 확인')
+    process_subparsers = process_parser.add_subparsers(dest='process_action')
+    process_subparsers.add_parser('start', help='새 처리 시작')
+    process_subparsers.add_parser('list', help='내 데이터 전체 현황 확인')
+    job_status_parser = process_subparsers.add_parser('status', help='특정 작업 상태 확인')
+    job_status_parser.add_argument('job_id', help='작업 ID')
+    
+    
     
     # 상태 확인
     subparsers.add_parser('status', help='전체 상태 확인')
@@ -683,7 +749,11 @@ def main():
         return
     
     # CLI 인스턴스 생성
-    cli = DataManagerCLI(nas_api_url=args.nas_url)
+    cli = DataManagerCLI(
+        base_path=args.base_path,
+        nas_api_url=args.nas_url,
+        log_level=args.log_level,
+    )
     
     try:
         if args.command == 'config':
@@ -712,7 +782,7 @@ def main():
                 elif args.provider_action == 'remove':
                     cli.remove_provider_interactive()
                 elif args.provider_action == 'list':
-                    providers = cli.manager.list_providers()
+                    providers = cli.schema_manager.get_all_providers()
                     print(f"\n🏢 등록된 Provider ({len(providers)}개):")
                     if providers:
                         for provider in providers:
@@ -734,7 +804,7 @@ def main():
                 elif args.task_action == 'remove':
                     cli.remove_task_interactive()
                 elif args.task_action == 'list':
-                    tasks = cli.manager.list_tasks()
+                    tasks = cli.schema_manager.get_all_tasks()
                     print(f"\n📝 등록된 Task ({len(tasks)}개):")
                     if tasks:
                         for task_name, task_config in tasks.items():
@@ -752,28 +822,25 @@ def main():
                         print("  💡 'python cli.py config task create' 명령으로 Task를 생성해주세요.")
             
             elif args.config_type == 'list':
-                cli.manager.show_schema_info()
+                cli.schema_manager.show_schema_info()
         
         elif args.command == 'upload':
             cli.upload_data_interactive()
         
         elif args.command == 'process':
-            if args.status:
-                cli.check_job_status(args.status)
-            elif args.list:
-                cli.list_all_data()
-            else:
-                # process 명령어만 입력한 경우 사용 가능한 옵션 안내
-                print("\n🔄 데이터 처리를 시작하거나 다음 옵션을 사용하세요:")
-                print("  🚀 python cli.py process                    - 새 처리 시작")
-                print("  🔍 python cli.py process --status JOB_ID    - 작업 상태 확인")
-                print("  📋 python cli.py process --list             - 내 데이터 현황")
-                print()
+            if not args.process_action:
+                print("\n❓ process 하위 명령어를 선택해주세요:")
+                print("  🚀 python cli.py process start           - 새 처리 시작")
+                print("  🔍 python cli.py process status JOB_ID   - 작업 상태 확인")
+                print("  📋 python cli.py process list            - 내 데이터 현황")
+                return
                 
-                # 기본적으로 처리 시작
-                proceed = input("지금 새로운 처리를 시작하시겠습니까? (y/N): ").strip().lower()
-                if proceed in ['y', 'yes']:
-                    cli.trigger_processing()
+            if args.process_action == 'start':
+                cli.trigger_processing()
+            elif args.process_action == 'status':
+                cli.check_job_status(args.job_id)
+            elif args.process_action == 'list':
+                cli.list_all_data()
         
         elif args.command == 'status':
             cli.show_status()
