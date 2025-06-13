@@ -6,7 +6,7 @@ from typing import Dict, Any, List
 from functools import partial
 from PIL import Image
 
-from utils import DATALAKE_DIR, get_safe_image_hash_from_pil
+from prep.utils import DATALAKE_DIR, get_safe_image_hash_from_pil
 
 SYMBOLS_TO_FILTER = [
     "<b>",
@@ -79,15 +79,20 @@ def save_images_and_generate_labels(
             image,
         )
         image_path = Path(f"{images_dir / image_hash[: 2] / image_hash}.jpg")
+        image_path = Path("/home/eric/workspace/datalake/prep/huggingface/pubtabnet_otsl/images_val/e2/e2f7c68b268f7582573a3afb0acb6c203d9f9d5424a3d3ce394c5936bc0da8f5.jpg")
         if not image_path.exists():
             image_path.parent.mkdir(
                 parents=True,
                 exist_ok=True,
             )
             image.save(
-                image_path, format="JPEG")
+                image_path,
+                format="JPEG",
+            )
 
-        image_paths.append(str(image_path))
+        image_paths.append(
+            Path(*image_path.parts[-2:]).as_posix()
+        )
         widths.append(width)
         heights.append(height)
 

@@ -69,6 +69,8 @@ def commit_dataset(
         if os.stat(p).st_uid == os.getuid()
     ]
     print(f"[INFO] Found {len(all_parquets)} parquet files in staging.")
+    for i in all_parquets:
+        print(f"  • {i.as_posix()}")
 
     by_dataset = {}
     for p in all_parquets:
@@ -199,6 +201,7 @@ def commit_dataset(
 
 if __name__ == "__main__":
     import argparse
+
     parser = argparse.ArgumentParser(description="Commit staging datasets to catalog.")
     parser.add_argument(
         "--skip-dry",
@@ -206,8 +209,11 @@ if __name__ == "__main__":
         help="Skip dry run and commit directly to catalog.",
     )
     args = parser.parse_args()
-    
-    def run_with_error_handling(dry_run=True):
+
+
+    def run_with_error_handling(
+        dry_run: bool = True,
+    ):
         """에러 처리와 함께 커밋 작업을 수행합니다"""
         try:
             stage_text = "DRY RUN" if dry_run else "COMMIT"
@@ -219,6 +225,8 @@ if __name__ == "__main__":
             print(f"\n❌ [{stage_text}] 오류 발생: {e}")
             print(f"   {stage_text} 작업이 중단되었습니다.")
             return False
+
+
     proceed = "y" if args.skip_dry else "n"
     if not args.skip_dry:
         print("\n=== 1단계: Dry Run 실행 ===")

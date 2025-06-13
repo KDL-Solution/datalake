@@ -120,16 +120,13 @@ class KIEStructExporter(object):
         self,
         df: pd.DataFrame,
         datalake_dir: str,
-        save_path: str,
-        user_prompt: str = "Extract the following information from the image. Return the result in the following structured JSON format (formatted with newlines and zero-space indentation), filling in both <|value|> and <|bbox|>:",
+        jsonl_path: str,
+        user_prompt: str = "Extract the following information from the image. Return the result in the following structured JSON format (formatted with zero-space indentation and without newlines), filling in both <|value|> and <|bbox|>:",
         value_key: str = "<|value|>",
         bbox_key: str = "<|bbox|>",
-        indent: int = 0,
+        indent: int = None,
     ) -> None:
         df_copied = df.copy()
-        # df_copied["query"] = df_copied["query"].str.replace("<|value|>", "<|value|>", regex=False).str.replace("<|bbox|>", "<|bbox|>", regex=False)
-        # df_copied["label"] = df_copied["label"].str.replace('"<|value|>"', '"<|value|>"', regex=False).str.replace('"<|bbox|>"', '"<|bbox|>"', regex=False)
-        # df_copied["image_path"] = df_copied["image_path"].str.replace('images/images', 'images', regex=False)
 
         df_copied["image_path"] = df_copied["image_path"].apply(
             lambda x: (Path(datalake_dir) / x).as_posix(),
@@ -156,5 +153,5 @@ class KIEStructExporter(object):
 
         save_df_as_jsonl(
             df=df_copied,
-            save_path=save_path,
+            jsonl_path=jsonl_path,
         )

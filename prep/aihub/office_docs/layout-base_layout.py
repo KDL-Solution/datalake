@@ -9,7 +9,7 @@ from natsort import natsorted
 from typing import List, Dict, Any
 from multiprocessing import Pool
 
-from utils import DATALAKE_DIR, get_safe_image_hash_from_pil
+from prep.utils import DATALAKE_DIR, get_safe_image_hash_from_pil
 
 
 def unzip_all_zips_in_dir(

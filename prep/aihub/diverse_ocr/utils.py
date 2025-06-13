@@ -8,7 +8,7 @@ import numpy as np
 import cv2
 from natsort import natsorted
 
-from utils import DATALAKE_DIR, get_safe_image_hash_from_pil
+from prep.utils import DATALAKE_DIR, get_safe_image_hash_from_pil
 
 
 def unzip_all_zips_in_dir(
@@ -141,7 +141,7 @@ def main(
         if text:
             rows.append(
                 {
-                    "image_path": image_path.as_posix(),
+                    "image_path": Path(*image_path.parts[-2:]).as_posix(),
                     "width": width,
                     "height": height,
                     "label": text,

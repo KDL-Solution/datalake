@@ -8,7 +8,7 @@ from functools import partial
 from PIL import Image
 from rapidfuzz.distance import Levenshtein
 
-from utils import DATALAKE_DIR, get_safe_image_hash_from_pil
+from prep.utils import DATALAKE_DIR, get_safe_image_hash_from_pil
 
 
 def quad_to_ltrb(

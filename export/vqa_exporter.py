@@ -23,5 +23,5 @@ class VQAExporter(object):
             ).agg(list).reset_index()
         save_df_as_jsonl(
             df=df_copied,
-            save_path=save_path,
+            jsonl_path=save_path,
         )
