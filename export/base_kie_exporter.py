@@ -4,7 +4,11 @@ from pathlib import Path
 import pandas as pd
 from typing import Dict, Any
 
-from export.utils import save_df_as_jsonl, denormalize_bboxes
+from export.utils import (
+    save_df_as_jsonl,
+    denormalize_bboxes,
+    smart_resize,
+)
 
 
 def remove_none_values(
@@ -140,6 +144,14 @@ class KIEStructExporter(object):
             ),
             axis=1,
         )
+        df_copied[["width", "height"]] = df_copied.apply(
+            lambda x: smart_resize(
+                width=x["width"],
+                height=x["height"],
+            ),
+            axis=1,
+            result_type="expand",
+        )
         df_copied["label"] = df_copied.apply(
             lambda x: self._process_kie_label(
                 label=x["label"],
@@ -155,3 +167,22 @@ class KIEStructExporter(object):
             df=df_copied,
             jsonl_path=jsonl_path,
         )
+
+
+if __name__ == "__main__":
+    from athena.src.core.athena_client import AthenaClient
+
+    client = AthenaClient()
+
+    df = client.retrieve_with_existing_cols(
+        datasets=[
+            "real_kie",
+        ],
+    )
+
+    exporter = KIEStructExporter()
+    exporter.export(
+        df=df,
+        datalake_dir="/mnt/AI_NAS/datalake",
+        jsonl_path="/home/eric/workspace/Qwen-SFT/real_kie.jsonl",
+    )

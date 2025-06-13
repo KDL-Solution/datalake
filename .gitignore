@@ -199,3 +199,5 @@ pyrightconfig.json
 **/images_word/
 **/data/
 *.sh
+
+!user_prompts.json

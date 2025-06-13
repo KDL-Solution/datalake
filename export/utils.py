@@ -77,8 +77,8 @@ MAX_RATIO = 200
 
 
 def smart_resize(
-    height: int,
     width: int,
+    height: int,
     factor: int = IMAGE_FACTOR,
     min_pixels: int = MIN_PIXELS,
     max_pixels: int = MAX_PIXELS,
@@ -106,7 +106,7 @@ def smart_resize(
         beta = math.sqrt(min_pixels / (height * width))
         h_bar = ceil_by_factor(height * beta, factor)
         w_bar = ceil_by_factor(width * beta, factor)
-    return h_bar, w_bar
+    return w_bar, h_bar
 
 
 def denormalize_bboxes(

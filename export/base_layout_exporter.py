@@ -5,7 +5,11 @@ import pandas as pd
 from typing import List, Dict
 from PIL import Image, ImageDraw, ImageFont
 
-from export.utils import save_df_as_jsonl, denormalize_bboxes
+from export.utils import (
+    save_df_as_jsonl,
+    denormalize_bboxes,
+    smart_resize,
+)
 
 
 TYPE_MAP = {
@@ -107,6 +111,14 @@ class BaseLayoutExporter(object):
                 x["label"],
             )["reading_order"] else user_prompt_no_reading_order,
             axis=1,
+        )
+        df_copied[["width", "height"]] = df_copied.apply(
+            lambda x: smart_resize(
+                width=x["width"],
+                height=x["height"],
+            ),
+            axis=1,
+            result_type="expand",
         )
         df_copied["label"] = df_copied.apply(
             lambda x: self._elements_to_label(

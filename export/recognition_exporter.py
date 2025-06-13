@@ -10,7 +10,8 @@ from PIL import Image
 from prep.utils import DATALAKE_DIR
 from export.utils import save_df_as_jsonl
 
-class RecogntionExporter(object):
+
+class RecogntionCharExporter(object):
     def __init__(
         self,
         datalake_dir: str = DATALAKE_DIR,
@@ -25,7 +26,38 @@ class RecogntionExporter(object):
         with open(charset_path, encoding="utf-8") as f:
             self.charset = set(f.read().strip())
 
-    def compose(
+    def _is_text_valid(
+        self,
+        text: str,
+    ) -> bool:
+        return all(i in self.charset for i in text)
+
+    def export(
+        self,
+        df: pd.DataFrame,
+        jsonl_path: str,
+    ) -> None:
+        df_copied = df.copy()
+
+        df = df[
+            df["label"].apply(
+                lambda x: self._is_text_valid(
+                    str(x),
+                ),
+            )
+        ]
+
+        df_copied["image_path"] = df_copied["image_path"].apply(
+            lambda x: (Path(self.datalake_dir) / x).as_posix(),
+        )
+        df_copied["query"] = self.user_prompt
+
+        save_df_as_jsonl(
+            df=df_copied,
+            jsonl_path=jsonl_path,
+        )
+
+    def _compose(
         self, 
         images: List[Image.Image],
         labels: List[str],
@@ -83,41 +115,10 @@ class RecogntionExporter(object):
         full_text = "\n".join(paragraph_texts)
         return final_image, full_text
 
-    def is_text_valid(
-        self,
-        text: str,
-    ) -> bool:
-        return all(i in self.charset for i in text)
-
-    def export(
-        self,
-        df: pd.DataFrame,
-        jsonl_path: str,
-    ) -> None:
-        df_copied = df.copy()
-
-        df = df[
-            df["label"].apply(
-                lambda x: self.is_text_valid(
-                    str(x),
-                ),
-            )
-        ]
-
-        df_copied["image_path"] = df_copied["image_path"].apply(
-            lambda x: (Path(self.datalake_dir) / x).as_posix(),
-        )
-        df_copied["query"] = self.user_prompt
-
-        save_df_as_jsonl(
-            df=df_copied,
-            jsonl_path=jsonl_path,
-        )
-
     def export_with_composition(
         self,
         df: pd.DataFrame,
-        output_dir: str,
+        images_dir: str,
         num_paragraphs: int,
         images_per_paragraph: int,
         jsonl_path: str,
@@ -147,7 +148,7 @@ class RecogntionExporter(object):
             batch_labels = labels[start:end]
             batch_images = [Image.open(p).convert("RGB") for p in batch_paths]
 
-            composed_image, composed_text = self.compose(
+            composed_image, composed_text = self._compose(
                 images=batch_images,
                 labels=batch_labels,
                 num_paragraphs=num_paragraphs,
@@ -157,7 +158,7 @@ class RecogntionExporter(object):
             )
 
             image_filename = f"composed_{i:04d}.jpg"
-            image_path = Path(output_dir) / image_filename
+            image_path = Path(images_dir) / image_filename
             image_path.parent.mkdir(
                 parents=True,
                 exist_ok=True,
@@ -189,18 +190,18 @@ if __name__ == "__main__":
         ],
     )
 
-    exporter = RecogntionExporter()
+    exporter = RecogntionCharExporter()
 
     exporter.export(
-        df=df.head(1000),
-        jsonl_path="/home/eric/workspace/Qwen-SFT/diverse_ocr_char_1000.jsonl",
+        df=df,
+        jsonl_path="/home/eric/workspace/Qwen-SFT/diverse_ocr_char.jsonl",
     )
     exporter.export_with_composition(
-        df=df.head(1000),
+        df=df,
         num_paragraphs=8,
         images_per_paragraph=20,
-        output_dir="/home/eric/workspace/diverse_ocr_images",
-        jsonl_path="/home/eric/workspace/Qwen-SFT/diverse_ocr_char_composed_1000.jsonl",
+        images_dir="/home/eric/workspace/diverse_ocr_images",
+        jsonl_path="/home/eric/workspace/Qwen-SFT/diverse_ocr_char_composed.jsonl",
         x_padding=80,
         y_padding=20,
     )
