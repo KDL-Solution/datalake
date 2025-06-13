@@ -195,5 +195,6 @@ pyrightconfig.json
 **/images_train/
 **/images_val/
 **/images_test/
+**/pdfs/
 **/data/
 *.sh
