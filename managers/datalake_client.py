@@ -16,10 +16,10 @@ from PIL import Image
 
 import sys
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from managers.schema_manager import SchemaManager
-from managers.logger import setup_logging
+from managers.data_schema import SchemaManager
+from managers.logging_setup import setup_logging
 
-class LocalDataManager:
+class DatalakeClient:
     def __init__(
         self, 
         base_path: str = "/mnt/AI_NAS/datalake/migrate_test",
@@ -27,13 +27,10 @@ class LocalDataManager:
         log_level: str = "INFO",
         num_proc: int = 8, # 병렬 처리 프로세스 수
         auto_process: bool = True, # NAS 자동 처리 활성화 여부
-        polling_interval: int = 10, # NAS 상태 조회 주기 (초)
-        schema_manager: Optional[SchemaManager] = None,
     ):
         self.base_path = Path(base_path)
         self.nas_api_url = nas_api_url.rstrip('/')
         self.auto_process = auto_process
-        self.polling_interval = polling_interval
         
         # 필수 디렉토리 설정
         self.staging_path = self.base_path / "staging"
@@ -54,7 +51,7 @@ class LocalDataManager:
         
         self._check_nas_api_connection()
 
-        self.schema_manager = schema_manager if schema_manager else SchemaManager(
+        self.schema_manager = SchemaManager(
             base_path=self.base_path, 
             create_default=True
         )
@@ -280,7 +277,7 @@ class LocalDataManager:
             self.logger.error(f"❌ NAS API 연결 실패: {e}")
             return None
         
-    def wait_for_job_completion(self, job_id: str, timeout: int = 3600) -> Dict:
+    def wait_for_job_completion(self, job_id: str, polling_interval: int = 10, timeout: int = 3600) -> Dict:
         """작업 완료까지 대기 (폴링)"""
         self.logger.info(f"⏳ 작업 완료 대기 중: {job_id}")
         
@@ -306,10 +303,10 @@ class LocalDataManager:
                 
             elif status == 'running':
                 self.logger.debug(f"🔄 작업 진행 중: {job_id}")
-                time.sleep(self.polling_interval)
+                time.sleep(polling_interval)
             else:
                 self.logger.warning(f"⚠️ 알 수 없는 작업 상태: {status}")
-                time.sleep(self.pooling_interval)
+                time.sleep(polling_interval)
         
         raise TimeoutError(f"작업 완료 대기 시간 초과: {job_id}")    
         
@@ -693,26 +690,23 @@ class LocalDataManager:
         self.logger.info("📝 Task 메타데이터 컬럼 추가 중")
         
         required_fields = self.schema_manager.get_required_fields(metadata['task'])
-            
+        self.logger.debug(f"필수 필드: {required_fields}")
+        self.logger.debug(f"현재 columns: {dataset_obj.column_names}")
+        
         # 데이터셋 길이
         num_rows = len(dataset_obj)
-        
         # 필수 필드들만 컬럼으로 추가
         added_columns = []
         
-        values = []
         for field in required_fields:
             value = metadata.get(field)
             if value is None:
                 self.logger.warning(f"⚠️ 필수 필드 '{field}'가 메타데이터에 없습니다. 추가하지 않습니다.")
                 raise ValueError(f"필수 필드 '{field}'를 추가해주세요.")
-            values.append(value)
-        for value in values:
-            column_data = [metadata[field]] * num_rows
+            column_data = [value] * num_rows
             dataset_obj = dataset_obj.add_column(field, column_data)
-            added_columns.append(f"{field}={metadata[field]}")
-            self.logger.debug(f"📝 컬럼 추가: {field} = {metadata[field]}")
-        
+            added_columns.append(f"{field}={value}")
+            self.logger.debug(f"📝 컬럼 추가: {field} = {value}")
         if added_columns:
             self.logger.info(f"✅ 필수 필드 컬럼 추가 완료: {', '.join(added_columns)}")
         else:
@@ -722,9 +716,9 @@ class LocalDataManager:
     
             
 if __name__ == "__main__":
-    manager = LocalDataManager(
+    manager = DatalakeClient(
         log_level="DEBUG",
-        )
+    )
     
     manager.show_nas_dashboard()
     manager.show_schema_info()

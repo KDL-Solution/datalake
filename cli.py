@@ -1,25 +1,10 @@
 import argparse
 import sys
-from pathlib import Path
-from typing import List, Dict, Optional
-
-sys.path.append(str(Path(__file__).resolve().parent.parent))  # 상위 디렉토리 추가
-from managers.data_manager import LocalDataManager
-#!/usr/bin/env python3
-"""
-Data Manager CLI - 대화형 스키마 관리 및 데이터 업로드
-"""
-
-import argparse
-import sys
 import json
 from pathlib import Path
 from typing import List, Dict, Optional
-
-# LocalDataManager import (경로 수정 필요)
-from data_manager import LocalDataManager
-from schema_manager import SchemaManager
-
+sys.path.append(str(Path(__file__).resolve().parent.parent))  # 상위 디렉토리 추가
+from managers.datalake_client import DatalakeClient
 
 class DataManagerCLI:
     """Data Manager CLI 인터페이스"""
@@ -30,20 +15,14 @@ class DataManagerCLI:
         nas_api_url: str = "http://localhost:8000",
         log_level: str = "INFO"
     ):
-        self.schema_manager = SchemaManager(
-            base_path=base_path,
-            create_default=False,  # 기본 스키마가 없으면 생성
-        )
-        self.data_manager = LocalDataManager(
+        self.data_manager = DatalakeClient(
             base_path=base_path,
             nas_api_url=nas_api_url,
             auto_process=False,  # CLI에서는 수동 제어
             log_level=log_level,
-            schema_manager= self.schema_manager
         )
+        self.schema_manager = self.data_manager.schema_manager
         
-        
-    
     def create_provider_interactive(self):
         """대화형 Provider 생성"""
         print("\n" + "="*50)

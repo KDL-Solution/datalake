@@ -16,7 +16,7 @@ from datasets import Dataset, load_from_disk
 from datasets.features import Image as ImageFeature
 from functools import partial
 
-from managers.logger import setup_logging
+from managers.logging_setup import setup_logging
 
 class NASDataProcessor:
     
@@ -118,7 +118,6 @@ class NASDataProcessor:
                             shutil.rmtree(processing_dir)
         
         result = {"success": success_count, "failed": failed_count}
-        self.logger.info(f"✅ 처리 완료: {result}")
         return result
     
     def _check_path_and_setup_logging(self, log_level: str = "INFO"):
@@ -157,7 +156,8 @@ class NASDataProcessor:
         
         # datasets로 로드
         dataset_obj = load_from_disk(str(processing_dir))
-        self.logger.info(f"📂 데이터 로드: {len(dataset_obj)}행")
+        self.logger.info(f"{processing_dir.name} 데이터셋 로드 완료: {len(dataset_obj)}개 행")
+        self.logger.debug(f"데이터셋 컬럼: {dataset_obj.column_names}")
         
         # 이미지 처리 (Raw 데이터인 경우)
         if metadata.get('data_type') == 'raw':
@@ -211,7 +211,7 @@ class NASDataProcessor:
                 desc="🖼️ 이미지 처리",
                 load_from_cache_file=False,  # 캐시 비활성화로 메모리 절약
             )
-            
+            self.logger.debug(f"처리된 데이터셋 컬럼: {processed_dataset.column_names}")
             # 처리 중 실패가 있었는지 확인
             if self.processing_failed:
                 error_summary = f"이미지 처리 실패: {'; '.join(self.error_messages[:5])}"
@@ -387,8 +387,6 @@ class NASDataProcessor:
         with self.cache_lock:
             if self.cache_built:
                 return
-            
-            self.logger.info("🔍 기존 이미지 해시 캐시 구축 중...")
             start_time = time.time()
             
             # 모든 .jpg 파일에서 해시 추출
@@ -398,7 +396,7 @@ class NASDataProcessor:
                     self.existing_hashes.add(hash_from_filename)
             
             build_time = time.time() - start_time
-            self.logger.info(f"✅ 해시 캐시 구축 완료: {len(self.existing_hashes)}개 ({build_time:.2f}초)")
+            self.logger.info(f"🔍 기존 이미지 해시 캐시 구축 완료: {len(self.existing_hashes)}개, 시간: {build_time:.2f}초")
             self.cache_built = True
     
                 

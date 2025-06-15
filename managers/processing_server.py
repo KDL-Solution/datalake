@@ -3,19 +3,16 @@ import asyncio
 import logging
 import uvicorn
 import sys
+import os
 from pathlib import Path
 from typing import Dict, List
 from datetime import datetime
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, HTTPException, BackgroundTasks
-from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
 sys.path.append(str(Path(__file__).resolve().parent.parent))  # 상위 디렉토리 추가
-from managers.data_processor import NASDataProcessor
-from managers.logger import setup_logging
-
-
+from managers.nas_processor import NASDataProcessor
 
 # Request/Response 모델들
 class ProcessRequest(BaseModel):
@@ -48,33 +45,39 @@ class ProcessingJob(BaseModel):
 
 # 전역 변수들
 processor = None
-
+logger = None
+BASE_PATH = None
+LOG_LEVEL = None
+BATCH_SIZE = None
+NUM_PROC = None
 current_jobs: Dict[str, ProcessingJob] = {}
 job_lock = asyncio.Lock()
-setup_logging(log_level="INFO")
-
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """앱 시작/종료 시 실행"""
-    global processor
+    global processor, logger, BASE_PATH, LOG_LEVEL, BATCH_SIZE, NUM_PROC
     
-    # 시작 시 프로세서 초기화
-    logging.info("🚀 NASDataProcessor 초기화 중...")
+    BASE_PATH = os.environ["BASE_PATH"]
+    LOG_LEVEL = os.environ.get("LOG_LEVEL", "INFO").upper()
+    BATCH_SIZE = int(os.environ.get("BATCH_SIZE", 1000))
+    NUM_PROC = int(os.environ.get("NUM_PROC", 4))    
     try:
         processor = NASDataProcessor(
-            batch_size=1000,
-            num_proc=4
+            base_path=BASE_PATH,
+            log_level=LOG_LEVEL,
+            num_proc=NUM_PROC,
+            batch_size=BATCH_SIZE,
         )
-        
-        logging.info("✅ NASDataProcessor 초기화 완료")
+        logger = processor.logger
+        logger.info("✅ NASDataProcessor 초기화 완료")
     except Exception as e:
-        logging.error(f"❌ Processor 초기화 실패: {e}")
+        logger.error(f"❌ Processor 초기화 실패: {e}")
         raise
     
     yield
     
     # 종료 시 정리
-    logging.info("🔄 서버 종료 중...")
+    logger.info("🔄 서버 종료 중...")
 
 
 # FastAPI 앱 생성
@@ -121,7 +124,7 @@ async def get_status():
             last_updated=datetime.now().isoformat()
         )
     except Exception as e:
-        logging.error(f"상태 조회 실패: {e}")
+        logger.error(f"상태 조회 실패: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -151,7 +154,6 @@ async def process_pending_data(background_tasks: BackgroundTasks):
             current_jobs[job_id] = job
         
         asyncio.create_task(run_processing_job(job_id))
-
         
         return {
             "job_id": job_id,
@@ -160,7 +162,7 @@ async def process_pending_data(background_tasks: BackgroundTasks):
         }
         
     except Exception as e:
-        logging.error(f"처리 요청 실패: {e}")
+        logger.error(f"처리 요청 실패: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -210,13 +212,14 @@ async def delete_job(job_id: str):
             raise HTTPException(status_code=400, detail="Cannot delete running job")
         
         del current_jobs[job_id]
+        logger.info(f"✅ 작업 {job_id} 삭제됨")
         return {"message": f"Job {job_id} deleted"}
 
 
 async def run_processing_job(job_id: str):
     """백그라운드에서 실행할 처리 작업"""
     try:
-        logging.info(f"🔄 처리 작업 시작: {job_id}")
+        logger.info(f"🔄 처리 작업 시작: {job_id}")
         
         # 성공 시 작업 상태 업데이트
         loop = asyncio.get_event_loop()
@@ -231,12 +234,12 @@ async def run_processing_job(job_id: str):
                 current_jobs[job_id].status = "completed"
                 current_jobs[job_id].completed_at = datetime.now().isoformat()
                 current_jobs[job_id].result = result
-        logging.info(f"✅ 처리 작업 완료: {job_id}, 결과: {result}")
+        logger.info(f"✅ 처리 작업 완료: {job_id}, 결과: {result}")
         
     except Exception as e:
         # 실패 시 작업 상태 업데이트
         error_msg = str(e)
-        logging.error(f"❌ 처리 작업 실패: {job_id}, 오류: {error_msg}")
+        logger.error(f"❌ 처리 작업 실패: {job_id}, 오류: {error_msg}")
         
         async with job_lock:
             if job_id in current_jobs:
@@ -252,11 +255,17 @@ if __name__ == "__main__":
     parser.add_argument("--host", default="0.0.0.0", help="Host to bind to")
     parser.add_argument("--port", type=int, default=8000, help="Port to bind to")
     parser.add_argument("--workers", type=int, default=1, help="Number of workers")
+    parser.add_argument("--log-level", default="INFO", help="Logging level (DEBUG, INFO, WARNING, ERROR, CRITICAL)")
+    parser.add_argument("--base-path", default="/mnt/AI_NAS/datalake/migrate_test", help="Base path for NAS data")
+    parser.add_argument("--num-proc", type=int, default=4, help="Number of processing threads")
+    parser.add_argument("--batch-size", type=int, default=1000, help="Batch size for processing")
     
     args = parser.parse_args()
-    
+    os.environ["BASE_PATH"] = args.base_path
+    os.environ["LOG_LEVEL"] = args.log_level
+    os.environ["NUM_PROC"] = str(args.num_proc)
     print(f"🚀 Starting NAS Data Processing API Server on {args.host}:{args.port}")
-    
+
     uvicorn.run(
         app,
         host=args.host,
