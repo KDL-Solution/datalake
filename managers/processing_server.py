@@ -13,7 +13,7 @@ from pydantic import BaseModel
 
 sys.path.append(str(Path(__file__).resolve().parent.parent))  # 상위 디렉토리 추가
 from managers.nas_processor import NASDataProcessor
-
+from managers.logging_setup import setup_logging
 # Request/Response 모델들
 class ProcessRequest(BaseModel):
     """처리 요청 모델"""
@@ -68,7 +68,8 @@ async def lifespan(app: FastAPI):
             num_proc=NUM_PROC,
             batch_size=BATCH_SIZE,
         )
-        logger = processor.logger
+        setup_logging(log_level=LOG_LEVEL, base_path=BASE_PATH)
+        logger = logging.getLogger(__name__)
         logger.info("✅ NASDataProcessor 초기화 완료")
     except Exception as e:
         logger.error(f"❌ Processor 초기화 실패: {e}")
@@ -271,5 +272,4 @@ if __name__ == "__main__":
         host=args.host,
         port=args.port,
         workers=args.workers,
-        reload=False
     )

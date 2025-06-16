@@ -62,6 +62,7 @@ class DatalakeClient:
         dataset_description: str = "", # 데이터셋 설명
         original_source: str = "", # 원본 소스 URL 
         auto_process: bool = False, # 자동 처리 여부
+        overwrite: bool = False, # 기존 pending 데이터 제거 여부
     ):
         task = "raw"
         
@@ -70,7 +71,20 @@ class DatalakeClient:
         if not self.schema_manager.validate_provider(provider):
             raise ValueError(f"❌ 지원하지 않는 provider입니다: {provider}")
         
-        self._cleanup_existing_pending(provider, dataset, task, is_raw=True)
+        existing_dirs =  self._cleanup_existing_pending(provider, dataset, task, is_raw=True)
+                # 기존 데이터 삭제
+        if existing_dirs:
+            if not overwrite:
+                self.logger.warning(f"⚠️ 이미 pending 데이터가 있어 업로드를 건너뜁니다: {len(existing_dirs)}개")
+                self.logger.info("💡 덮어쓰려면 overwrite=True를 사용하세요")
+                return None, None  # 또는 기존 staging_dir 정보 반환
+                
+            for existing_dir in existing_dirs:
+                try:
+                    shutil.rmtree(existing_dir)
+                    self.logger.info(f"🗑️ 삭제 완료: {existing_dir.name}")
+                except Exception as e:
+                    self.logger.error(f"❌ 삭제 실패: {existing_dir.name} - {e}")
         
         dataset_obj, file_info = self._load_data(data_file, process_assets=True)
         
@@ -113,6 +127,7 @@ class DatalakeClient:
         dataset_description: str = "",
         source_task: str = None,
         auto_process: bool = False,
+        overwrite: bool = False,
         **kwargs
     ) -> str:
         """Task 데이터 업로드 (기존 catalog에서 특정 task 추출, 이미지 참조만)"""
@@ -128,7 +143,20 @@ class DatalakeClient:
             raise ValueError(f"❌ Task 메타데이터 검증 실패: {error_msg}")
         
         # 기존 pending 데이터 정리
-        self._cleanup_existing_pending(provider, dataset, task, variant=variant, is_raw=False)
+        existing_dirs =  self._cleanup_existing_pending(provider, dataset, task, variant=variant, is_raw=False)
+                # 기존 데이터 삭제
+        if existing_dirs:
+            if not overwrite:
+                self.logger.warning(f"⚠️ 이미 pending 데이터가 있어 업로드를 건너뜁니다: {len(existing_dirs)}개")
+                self.logger.info("💡 덮어쓰려면 overwrite=True를 사용하세요")
+                return None, None  # 또는 기존 staging_dir 정보 반환
+                
+            for existing_dir in existing_dirs:
+                try:
+                    shutil.rmtree(existing_dir)
+                    self.logger.info(f"🗑️ 삭제 완료: {existing_dir.name}")
+                except Exception as e:
+                    self.logger.error(f"❌ 삭제 실패: {existing_dir.name} - {e}")
         
         # 데이터 로드 및 컬럼 변환 (이미지 제외)
         dataset_obj, _ = self._load_data(data_file, process_assets=False)
@@ -403,32 +431,7 @@ class DatalakeClient:
             except Exception as e:
                 self.logger.warning(f"⚠️ 메타데이터 읽기 실패: {pending_dir} - {e}")
                 continue
-        
-        # 기존 데이터 삭제
-        if existing_dirs:
-            self.logger.info(f"🗑️  기존 pending 데이터 정리: {len(existing_dirs)}개 발견")
-            self.logger.debug("삭제할 디렉토리 목록:")
-            self.logger.debug("\n".join(str(d) for d in existing_dirs))
-            
-            try:
-                response = input("\n🗑️  위 pending 데이터를 삭제하시겠습니까? (y/N): ").strip().lower()
-                if response not in ['y', 'yes']:
-                    self.logger.info("❌ 사용자가 삭제를 취소했습니다.")
-                    raise ValueError("사용자가 삭제를 취소했습니다.")
-            except KeyboardInterrupt:
-                self.logger.info("❌ 사용자가 삭제를 취소했습니다.")
-                raise ValueError("사용자가 삭제를 취소했습니다.")
-                
-            for existing_dir in existing_dirs:
-                try:
-                    shutil.rmtree(existing_dir)
-                    self.logger.info(f"🗑️ 삭제 완료: {existing_dir.name}")
-                except Exception as e:
-                    self.logger.error(f"❌ 삭제 실패: {existing_dir.name} - {e}")
-            
-            self.logger.info(f"✅ 기존 pending 데이터 정리 완료: {len(existing_dirs)}개 삭제")
-        else:
-            self.logger.debug("📭 정리할 기존 pending 데이터 없음")
+        return existing_dirs
     
     def _load_data(self, data_file: str, process_assets: bool = False) -> Dataset:
         """데이터 파일을 로드하는 메서드"""
@@ -646,7 +649,7 @@ class DatalakeClient:
                     prefix = "file"
                     new_filename = f"{prefix}_{idx:06d}{ext}"
                     target_path = staging_assets_dir / new_filename
-                    target_path.parent.mkdir(mode=0o755,parents=True, exist_ok=True)
+                    target_path.parent.mkdir(mode=0o775,parents=True, exist_ok=True)
                     
                     shutil.copy2(original_path, target_path)
                     

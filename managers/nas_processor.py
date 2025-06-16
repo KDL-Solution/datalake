@@ -29,11 +29,11 @@ class NASDataProcessor:
     ):
         # 경로 설정
         self.base_path = Path(base_path)
-        
         self.staging_path = self.base_path / "staging"
         self.staging_pending_path = self.staging_path / "pending"
         self.staging_processing_path = self.staging_path / "processing"
         self.staging_failed_path = self.staging_path / "failed"
+        
         self.catalog_path = self.base_path / "catalog"
         self.assets_path = self.base_path / "assets"
         
@@ -106,10 +106,9 @@ class NASDataProcessor:
                 failed_count += 1
                 self.logger.error(f"❌ 실패: {pending_dir.name} - {e}")
                 
-                # 실패 시 failed로 이동
                 if processing_dir and processing_dir.exists():
                     failed_dir = self.staging_failed_path / pending_dir.name
-                    failed_dir.parent.mkdir(mode=0o755, parents=True, exist_ok=True)
+                    failed_dir.parent.mkdir(mode=0o775, parents=True, exist_ok=True)
                     try:
                         shutil.move(str(processing_dir), str(failed_dir))
                     except Exception as move_error:
@@ -164,7 +163,7 @@ class NASDataProcessor:
             provider = metadata['provider']
             dataset_name = metadata['dataset']
             assets_base = self.assets_path / f"provider={provider}" / f"dataset={dataset_name}"
-            assets_base.mkdir(mode=0o755, parents=True, exist_ok=True)
+            assets_base.mkdir(mode=0o775, parents=True, exist_ok=True)
             
             # 해시 캐시 구축 (공통)
             self._build_hash_cache(assets_base)
@@ -233,7 +232,6 @@ class NASDataProcessor:
         
         shard_config = self._get_shard_config(total_files)
         self.logger.info(f"🔧 샤딩 설정: {shard_config['info']}")
-        
         process_batch_func = partial(
             self._process_file_batch,
             assets_base=assets_base,
@@ -286,7 +284,7 @@ class NASDataProcessor:
                 if image_hash in self.existing_hashes:
                     duplicate_count += 1    
                 else:
-                    image_path.parent.mkdir(mode=0o755, parents=True, exist_ok=True)
+                    image_path.parent.mkdir(mode=0o775, parents=True, exist_ok=True)
                     
                     if pil_image.mode != 'RGB':
                         pil_image = pil_image.convert('RGB')
@@ -334,8 +332,6 @@ class NASDataProcessor:
         saved_count = 0
         duplicate_count = 0
         # print iterdir staging_pending_path
-        self.logger.debug(f"staging_pending_path: {self.staging_pending_path}")
-        self.logger.debug(f"staging_pending_path 파일 목록: {[str(p) for p in self.staging_pending_path.iterdir()]}")
         for idx, file_path in enumerate(file_paths):
             try:
                 if self.processing_failed:
@@ -346,13 +342,7 @@ class NASDataProcessor:
                     file_paths.append(None)
                     continue
                     
-                # 파일 해시 계산
-                # file_path에 staging_pending_path를 포함
-                file_path = Path(file_path)
-                if not file_path.is_absolute():
-                    file_path = self.staging_pending_path / file_path
-                    print(f"절대 경로로 변환: {file_path}")
-                    print(f"파일 존재 여부: {file_path.exists()}")
+                file_path = self.staging_processing_path / file_path
                 if not file_path.exists():
                     raise FileNotFoundError(f"파일이 존재하지 않습니다: {file_path}")
                 
@@ -361,7 +351,7 @@ class NASDataProcessor:
                 if file_hash in self.existing_hashes:
                     duplicate_count += 1
                 else:
-                    new_file_path.parent.mkdir(mode=0o755, parents=True, exist_ok=True)
+                    new_file_path.parent.mkdir(mode=0o775, parents=True, exist_ok=True)
                     shutil.move(str(file_path), str(new_file_path))
                     with self.cache_lock:
                         self.existing_hashes.add(file_hash)
@@ -464,7 +454,7 @@ class NASDataProcessor:
             f"task={task}" /
             f"variant={variant}"
         )
-        catalog_dir.mkdir(mode=0o755, parents=True, exist_ok=True)
+        catalog_dir.mkdir(mode=0o775, parents=True, exist_ok=True)
         
         # Parquet 저장 (datasets 내장 최적화)
         parquet_file = catalog_dir / "data.parquet"
