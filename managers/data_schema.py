@@ -212,7 +212,7 @@ class SchemaManager:
             return False
         
         # 디렉토리 생성
-        self.config_path.parent.mkdir(parents=True, exist_ok=True)
+        self.config_path.parent.mkdir(mode=0o755,parents=True, exist_ok=True)
         
         # 기본 스키마 생성
         default_schema = self._get_default_schema()

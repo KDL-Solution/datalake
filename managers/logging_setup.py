@@ -19,7 +19,7 @@ def setup_logging(log_level: str = "INFO", base_path: str = None):
     # 파일 핸들러 (optional)
     if base_path:
         log_dir = Path(base_path) / "logs"
-        log_dir.mkdir(exist_ok=True)
+        log_dir.mkdir(mode=0o755, parents=True, exist_ok=True)
         date_str = datetime.now().strftime("%Y%m%d")
         user = os.getenv('USER', 'unknown')
         log_file = log_dir / f"{date_str}_{user}.log"

@@ -109,7 +109,7 @@ class NASDataProcessor:
                 # 실패 시 failed로 이동
                 if processing_dir and processing_dir.exists():
                     failed_dir = self.staging_failed_path / pending_dir.name
-                    failed_dir.parent.mkdir(exist_ok=True)
+                    failed_dir.parent.mkdir(mode=0o755, parents=True, exist_ok=True)
                     try:
                         shutil.move(str(processing_dir), str(failed_dir))
                     except Exception as move_error:
@@ -164,18 +164,18 @@ class NASDataProcessor:
             provider = metadata['provider']
             dataset_name = metadata['dataset']
             assets_base = self.assets_path / f"provider={provider}" / f"dataset={dataset_name}"
-            assets_base.mkdir(parents=True, exist_ok=True)
+            assets_base.mkdir(mode=0o755, parents=True, exist_ok=True)
             
             # 해시 캐시 구축 (공통)
             self._build_hash_cache(assets_base)
 
             # 이미지 처리
             if metadata.get('has_images', False) and self.image_data_key in dataset_obj.column_names:
-                dataset_obj = self._process_images_with_map(dataset_obj, metadata, assets_base, processing_dir)
+                dataset_obj = self._process_images_with_map(dataset_obj, metadata, assets_base)
             
             # 파일 처리
             if metadata.get('has_files', False) and self.file_path_key in dataset_obj.column_names:
-                dataset_obj = self._process_files_with_map(dataset_obj, metadata, assets_base, processing_dir)
+                dataset_obj = self._process_files_with_map(dataset_obj, metadata, assets_base)
         
         # Catalog에 저장
         self._save_to_catalog(dataset_obj, metadata)
@@ -184,7 +184,7 @@ class NASDataProcessor:
         del dataset_obj
         gc.collect()
     
-    def _process_images_with_map(self, dataset_obj: Dataset, metadata: Dict, assets_base: Path, processing_dir: Path) -> Dataset:
+    def _process_images_with_map(self, dataset_obj: Dataset, metadata: Dict, assets_base: Path) -> Dataset:
         """이미지 처리 (PIL Image/bytes → hash.jpg)"""
         print(metadata)
         total_images = len(dataset_obj)
@@ -225,7 +225,7 @@ class NASDataProcessor:
             raise
         
         
-    def _process_files_with_map(self, dataset_obj: Dataset, metadata: Dict, assets_base: Path, processing_dir: Path) -> Dataset:
+    def _process_files_with_map(self, dataset_obj: Dataset, metadata: Dict, assets_base: Path) -> Dataset:
         """파일 처리 (staging/assets → final/assets + hash)"""
         print(metadata)
         total_files = len(dataset_obj)
@@ -237,7 +237,7 @@ class NASDataProcessor:
         process_batch_func = partial(
             self._process_file_batch,
             assets_base=assets_base,
-            processing_dir=processing_dir
+            shard_config=shard_config,
         )
         
         try:
@@ -282,11 +282,11 @@ class NASDataProcessor:
                 pil_image = image_data if hasattr(image_data, 'save') else Image.open(io.BytesIO(image_data))
                 
                 image_hash  = self._get_image_hash(pil_image)
-                image_path = self._get_image_path(assets_base, shard_config, image_hash)
+                image_path = self._get_level_path(assets_base, shard_config, image_hash)
                 if image_hash in self.existing_hashes:
                     duplicate_count += 1    
                 else:
-                    image_path.parent.mkdir(parents=True, exist_ok=True)
+                    image_path.parent.mkdir(mode=0o755, parents=True, exist_ok=True)
                     
                     if pil_image.mode != 'RGB':
                         pil_image = pil_image.convert('RGB')
@@ -323,57 +323,67 @@ class NASDataProcessor:
             "hash": image_hashes,
         }
         
-    def _process_file_batch(self, batch: Dict, assets_base: Path, processing_dir: Path) -> Dict:
+    def _process_file_batch(self, batch: Dict, assets_base: Path, shard_config: Dict) -> Dict:
         """배치 단위 파일 처리 (staging/assets → final/assets + hash)"""
         
         file_paths = batch[self.file_path_key]
         self.logger.debug(f"배치 파일 처리: {len(file_paths)}개")
-        new_file_paths = []
         file_hashes = []
+        new_file_paths = []
         
-        moved_count = 0
-        
-        for file_path in file_paths:
+        saved_count = 0
+        duplicate_count = 0
+        # print iterdir staging_pending_path
+        self.logger.debug(f"staging_pending_path: {self.staging_pending_path}")
+        self.logger.debug(f"staging_pending_path 파일 목록: {[str(p) for p in self.staging_pending_path.iterdir()]}")
+        for idx, file_path in enumerate(file_paths):
             try:
-                if file_path and file_path.startswith("assets/"):
-                    # staging에서 최종 assets로 이동
-                    staging_file_path = processing_dir / file_path
-                    
-                    if staging_file_path.exists():
-                        # 파일 해시 계산
-                        file_hash = self._get_file_hash(staging_file_path)
-                        
-                        # 확장자 유지한 최종 경로
-                        ext = Path(file_path).suffix
-                        final_filename = f"{file_hash}{ext}"
-                        final_file_path = assets_base / "files" / final_filename
-                        final_file_path.parent.mkdir(parents=True, exist_ok=True)
-                        
-                        # 파일 이동
-                        shutil.move(str(staging_file_path), str(final_file_path))
-                        
-                        # 최종 상대 경로 (assets 기준)
-                        final_relative = str(final_file_path.relative_to(self.assets_path))
-                        new_file_paths.append(final_relative)
-                        file_hashes.append(file_hash)
-                        moved_count += 1
-                    else:
-                        self.logger.warning(f"⚠️ Staging 파일 없음: {staging_file_path}")
-                        new_file_paths.append(None)
-                        file_hashes.append(None)
-                else:
-                    # staging이 아닌 경우 그대로 유지 (hash는 None)
-                    new_file_paths.append(file_path)
+                if self.processing_failed:
+                    break
+                
+                if file_path is None:
                     file_hashes.append(None)
+                    file_paths.append(None)
+                    continue
+                    
+                # 파일 해시 계산
+                # file_path에 staging_pending_path를 포함
+                file_path = Path(file_path)
+                if not file_path.is_absolute():
+                    file_path = self.staging_pending_path / file_path
+                    print(f"절대 경로로 변환: {file_path}")
+                    print(f"파일 존재 여부: {file_path.exists()}")
+                if not file_path.exists():
+                    raise FileNotFoundError(f"파일이 존재하지 않습니다: {file_path}")
+                
+                file_hash = self._get_file_hash(file_path)
+                new_file_path = self._get_level_path(assets_base, shard_config, file_hash)
+                if file_hash in self.existing_hashes:
+                    duplicate_count += 1
+                else:
+                    new_file_path.parent.mkdir(mode=0o755, parents=True, exist_ok=True)
+                    shutil.move(str(file_path), str(new_file_path))
+                    with self.cache_lock:
+                        self.existing_hashes.add(file_hash)
+                    saved_count += 1
+                relative_path = str(new_file_path.relative_to(self.assets_path))
+                file_hashes.append(file_hash)
+                new_file_paths.append(relative_path)
                     
             except Exception as e:
-                self.logger.error(f"❌ 파일 처리 실패: {e}")
-                new_file_paths.append(None)
-                file_hashes.append(None)
+                with self.failure_lock:
+                    if not self.processing_failed:
+                        self.processing_failed = True
+                        error_msg = f"파일 {idx} 처리 실패: {str(e)}"
+                        self.error_messages.append(error_msg)
+                        self.logger.error(f"❌ {error_msg}")
+                
+                # 실패 즉시 중단
+                raise RuntimeError(f"파일 처리 실패: {str(e)}")
         
-        if moved_count > 0:
-            self.logger.debug(f"배치 파일 이동: {moved_count}개")
-        
+        if saved_count > 0 or duplicate_count > 0:
+            self.logger.debug(f"배치 파일 처리: 저장={saved_count}, 중복={duplicate_count}")
+
         return {
             "path": new_file_paths,
             "hash": file_hashes
@@ -405,11 +415,9 @@ class NASDataProcessor:
         if pil_image.mode != 'RGB':
             pil_image = pil_image.convert('RGB')
         
-        # JPEG 변환 후 해시
         img_buffer = io.BytesIO()
         pil_image.save(img_buffer, format='JPEG', quality=95)
         jpeg_bytes = img_buffer.getvalue()
-        
         return hashlib.sha256(jpeg_bytes).hexdigest()
 
     def _get_file_hash(self, file_path: Path) -> str:
@@ -429,7 +437,7 @@ class NASDataProcessor:
         else:
             return {"levels": 2, "info": "2단계 샤딩 (xx/xx/)"}
 
-    def _get_image_path(self, base_path: Path, shard_config: Dict, image_hash: str) -> Path:
+    def _get_level_path(self, base_path: Path, shard_config: Dict, image_hash: str) -> Path:
         """샤딩 설정에 따른 경로"""
         levels = shard_config["levels"]
         if levels == 0:
@@ -456,7 +464,7 @@ class NASDataProcessor:
             f"task={task}" /
             f"variant={variant}"
         )
-        catalog_dir.mkdir(parents=True, exist_ok=True)
+        catalog_dir.mkdir(mode=0o755, parents=True, exist_ok=True)
         
         # Parquet 저장 (datasets 내장 최적화)
         parquet_file = catalog_dir / "data.parquet"

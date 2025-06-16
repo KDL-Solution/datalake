@@ -23,14 +23,12 @@ class DatalakeClient:
     def __init__(
         self, 
         base_path: str = "/mnt/AI_NAS/datalake/migrate_test",
-        nas_api_url: str = "http://192.168.20.62:8000",
+        nas_api_url: str = "http://192.168.20.15:8091",
         log_level: str = "INFO",
         num_proc: int = 8, # 병렬 처리 프로세스 수
-        auto_process: bool = True, # NAS 자동 처리 활성화 여부
     ):
         self.base_path = Path(base_path)
         self.nas_api_url = nas_api_url.rstrip('/')
-        self.auto_process = auto_process
         
         # 필수 디렉토리 설정
         self.staging_path = self.base_path / "staging"
@@ -63,6 +61,7 @@ class DatalakeClient:
         dataset: str,
         dataset_description: str = "", # 데이터셋 설명
         original_source: str = "", # 원본 소스 URL 
+        auto_process: bool = False, # 자동 처리 여부
     ):
         task = "raw"
         
@@ -97,7 +96,7 @@ class DatalakeClient:
         self.logger.info(f"✅ Task 데이터 업로드 완료: {staging_dir}")
         
         job_id = None
-        if self.auto_process:
+        if auto_process:
             job_id = self.trigger_nas_processing()
             if job_id:
                 self.logger.info(f"🔄 자동 처리 시작됨: {job_id}")
@@ -113,6 +112,7 @@ class DatalakeClient:
         variant: str,
         dataset_description: str = "",
         source_task: str = None,
+        auto_process: bool = False,
         **kwargs
     ) -> str:
         """Task 데이터 업로드 (기존 catalog에서 특정 task 추출, 이미지 참조만)"""
@@ -153,7 +153,7 @@ class DatalakeClient:
         self.logger.info(f"✅ Task 데이터 업로드 완료: {staging_dir}")
         
         job_id = None
-        if self.auto_process:
+        if auto_process:
             job_id = self.trigger_nas_processing()
             if job_id:
                 self.logger.info(f"🔄 자동 처리 시작됨: {job_id}")
@@ -320,8 +320,7 @@ class DatalakeClient:
                 self.logger.warning(f"⚠️ NAS API 서버 응답 이상: {response.status_code}")
         except requests.exceptions.RequestException as e:
             self.logger.warning(f"⚠️ NAS API 서버 연결 실패: {e}")
-            self.logger.warning("🔄 로컬 모드로 동작합니다 (자동 처리 비활성화)")
-            self.auto_process = False
+            raise ConnectionError(f"NAS API 서버 연결 실패: {e}")
     
     def _create_metadata(
         self,
@@ -647,11 +646,11 @@ class DatalakeClient:
                     prefix = "file"
                     new_filename = f"{prefix}_{idx:06d}{ext}"
                     target_path = staging_assets_dir / new_filename
-                    target_path.parent.mkdir(parents=True, exist_ok=True)
+                    target_path.parent.mkdir(mode=0o755,parents=True, exist_ok=True)
                     
                     shutil.copy2(original_path, target_path)
                     
-                    example[self.file_path_key] = f"assets/{new_filename}"
+                    example[self.file_path_key] = str(target_path.resolve().relative_to(self.staging_pending_path))
                     
                 return example
             
