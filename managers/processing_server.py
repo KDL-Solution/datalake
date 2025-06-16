@@ -258,7 +258,7 @@ if __name__ == "__main__":
     parser.add_argument("--workers", type=int, default=1, help="Number of workers")
     parser.add_argument("--log-level", default="INFO", help="Logging level (DEBUG, INFO, WARNING, ERROR, CRITICAL)")
     parser.add_argument("--base-path", default="/mnt/AI_NAS/datalake/migrate_test", help="Base path for NAS data")
-    parser.add_argument("--num-proc", type=int, default=4, help="Number of processing threads")
+    parser.add_argument("--num-proc", type=int, default=16, help="Number of processing threads")
     parser.add_argument("--batch-size", type=int, default=1000, help="Batch size for processing")
     
     args = parser.parse_args()

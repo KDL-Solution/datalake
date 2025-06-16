@@ -72,7 +72,10 @@ class NASDataProcessor:
         if not self.staging_pending_path.exists():
             return {"success": 0, "failed": 0, "message": "Pending 디렉토리 없음"}
         
-        pending_dirs = [d for d in self.staging_pending_path.iterdir() if d.is_dir()]
+        pending_dirs = [
+            d for d in self.staging_pending_path.iterdir()
+            if d.is_dir() and (d / "upload_metadata.json").exists()
+        ]
         
         if not pending_dirs:
             return {"success": 0, "failed": 0, "message": "처리할 데이터 없음"}

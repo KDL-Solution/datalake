@@ -6,6 +6,7 @@ import shutil
 import pandas as pd
 import requests 
 import time 
+import subprocess
 
 from pathlib import Path
 from datetime import datetime
@@ -23,7 +24,7 @@ class DatalakeClient:
     def __init__(
         self, 
         base_path: str = "/mnt/AI_NAS/datalake/migrate_test",
-        nas_api_url: str = "http://192.168.20.15:8091",
+        nas_api_url: str = "http://192.168.20.62:8091",
         log_level: str = "INFO",
         num_proc: int = 8, # 병렬 처리 프로세스 수
     ):
@@ -86,27 +87,23 @@ class DatalakeClient:
                 except Exception as e:
                     self.logger.error(f"❌ 삭제 실패: {existing_dir.name} - {e}")
         
-        dataset_obj, file_info = self._load_data(data_file, process_assets=True)
-        
-        variant = file_info['variant']
-        has_images = bool(file_info['image_columns'])
-        has_files = bool(file_info['file_columns'])
-        
+        dataset_obj, file_info = self._load_data(data_file)
+
         metadata = self._create_metadata(
             provider=provider,
             dataset=dataset,
             task=task,
-            variant=variant,
+            variant=file_info['type'],
             total_rows=len(dataset_obj),
             data_type="raw",
             source_task=None,  # 원본 작업이므로 None
-            has_images=has_images,
-            has_files=has_files,
+            has_images=file_info['has_image_data'],
+            has_files= file_info['has_file_paths'],
             dataset_description=dataset_description,
             original_source=original_source,
         )
         
-        staging_dir = self._save_to_staging(dataset_obj, metadata, file_info)
+        staging_dir = self._save_to_staging(dataset_obj, metadata, has_file=file_info['has_file_paths'])
         self.logger.info(f"✅ Task 데이터 업로드 완료: {staging_dir}")
         
         job_id = None
@@ -159,7 +156,7 @@ class DatalakeClient:
                     self.logger.error(f"❌ 삭제 실패: {existing_dir.name} - {e}")
         
         # 데이터 로드 및 컬럼 변환 (이미지 제외)
-        dataset_obj, _ = self._load_data(data_file, process_assets=False)
+        dataset_obj, _ = self._load_data(data_file)
         
         # 메타데이터 생성
         metadata = self._create_metadata(
@@ -305,7 +302,7 @@ class DatalakeClient:
             self.logger.error(f"❌ NAS API 연결 실패: {e}")
             return None
         
-    def wait_for_job_completion(self, job_id: str, polling_interval: int = 10, timeout: int = 3600) -> Dict:
+    def wait_for_job_completion(self, job_id: str, polling_interval: int = 60, timeout: int = 3600) -> Dict:
         """작업 완료까지 대기 (폴링)"""
         self.logger.info(f"⏳ 작업 완료 대기 중: {job_id}")
         
@@ -433,7 +430,7 @@ class DatalakeClient:
                 continue
         return existing_dirs
     
-    def _load_data(self, data_file: str, process_assets: bool = False) -> Dataset:
+    def _load_data(self, data_file: str) -> Dataset:
         """데이터 파일을 로드하는 메서드"""
         data_path = Path(data_file).resolve()
         if not data_path.exists():
@@ -464,29 +461,26 @@ class DatalakeClient:
                 
        # 통합된 컬럼 타입 변환 처리 (JSON dumps + 이미지)
         dataset_obj = self._process_cast_columns(dataset_obj)
-        
-        if process_assets:
-            # 파일 컬럼 분석 및 variant 결정
-            file_info = self._detect_file_columns_and_variant(dataset_obj)
+        file_info = self._detect_file_columns_and_type(dataset_obj)
+        if file_info['process_assets']:
             dataset_obj = self._normalize_column_names(dataset_obj, file_info)
 
-            self.logger.info(f"📄 파일 분석 결과: variant={file_info['variant']}, "
+            self.logger.info(f"📄 파일 분석 결과: variant={file_info['type']}, "
                            f"이미지컬럼={file_info['image_columns']}, "
                            f"파일컬럼={file_info['file_columns']}, "
                            f"확장자={file_info['extensions']}")
         else:
-            file_info = {'image_columns': [], 'file_columns': [], 'variant': 'text', 'extensions': set()}
             self.logger.debug("📄 Assets 컬럼 처리 생략")
         
         return dataset_obj, file_info
     
-    def _detect_file_columns_and_variant(self, dataset_obj: Dataset) -> Dict:
-        """파일 컬럼들을 찾고 확장자 기반으로 variant 결정"""
+    def _detect_file_columns_and_type(self, dataset_obj: Dataset) -> Dict:
+        """파일 컬럼들을 찾고 확장자 기반으로 type 결정"""
         result = {
             'image_columns': [],
             'file_columns': [],
             'extensions': set(),
-            'variant': 'text'
+            'type': 'text'
         }
         for key in dataset_obj.column_names:
             sample_value = dataset_obj[0][key]
@@ -503,33 +497,34 @@ class DatalakeClient:
                     ext = Path(sample_value).suffix.lower()
                     result['extensions'].add(ext)
                     result['file_columns'].append(key)
-        
         if len(result['image_columns']) > 1:
             raise ValueError(f"❌ 이미지 컬럼이 2개 이상입니다: {result['image_columns']}. "
                              f"하나의 컬럼만 사용해주세요.")
         if len(result['file_columns']) > 1:
             raise ValueError(f"❌ 파일 컬럼이 2개 이상입니다: {result['file_columns']}. "
                              f"하나의 컬럼만 사용해주세요.")
-            
         result['image_columns'] = result['image_columns'][:1]
         result['file_columns'] = result['file_columns'][:1]
-        # variant 결정
-        has_image_data = bool(result['image_columns'])
-        has_file_paths = bool(result['file_columns'])
+        result['has_image_data'] = bool(result['image_columns'])
+        result['has_file_paths'] = bool(result['file_columns'])
+        
+        has_image_data = result['has_image_data']
+        has_file_paths = result['has_file_paths']
         extensions = result['extensions']
         
+        result['process_assets'] = has_image_data or has_file_paths
+        
         if has_image_data and has_file_paths:
-            result['variant'] = "mixed"
+            result['type'] = "mixed"
         elif has_image_data:
-            result['variant'] = "image"
+            result['type'] = "image"
         elif has_file_paths:
             # 확장자 기반으로 구체적 분류
             if any(ext in ['.jpg', '.jpeg', '.png', '.gif', '.bmp', '.tiff', '.webp'] for ext in extensions):
-                result['variant'] = "image"
+                result['type'] = "image"
             else:
-                result['variant'] = "files"
-        else:
-            result['variant'] = "text"
+                result['type'] = "files"
+                
         
         return result
 
@@ -600,7 +595,8 @@ class DatalakeClient:
             self.logger.error(f"❌ JSON 변환 실패: {e}")
             raise ValueError(f"❌ JSON 변환 중 오류 발생: {e}")
 
-    def _save_to_staging(self, dataset_obj: Dataset, metadata: dict, file_info: Optional[Dict] = None) -> str:
+    def _save_to_staging(self, dataset_obj: Dataset, metadata: dict, has_file: bool = False) -> str:
+        """데이터셋을 staging 폴더에 저장하고 메타데이터 파일 생성"""
         """데이터를 staging 폴더에 저장"""
         timestamp = datetime.now().strftime("%Y%m%d%H%M%S")
         file_id = metadata['file_id']
@@ -612,14 +608,12 @@ class DatalakeClient:
         staging_dirname = f"{dataset_name}_{task}_{variant}_{file_id}_{timestamp}_{user}"
         staging_dir= self.staging_path / "pending" / staging_dirname
         try:
-            if metadata.get('data_type') == 'raw' and file_info:
-                # 메타데이터 업데이트
-                staging_assets_dir = staging_dir / "assets"
-            
-                if len(file_info['file_columns']):
-                    dataset_obj  = self._copy_file_path_to_staging(
-                        dataset_obj, staging_assets_dir
-                    )
+            staging_assets_dir = staging_dir / "assets"
+            staging_assets_dir.mkdir(mode=0o775, parents=True, exist_ok=True)
+            if has_file:
+                dataset_obj  = self._copy_file_path_to_staging(
+                    dataset_obj, staging_assets_dir
+                )
                 
             if metadata.get('data_type') == 'task':
                 dataset_obj = self._add_metadata_columns(dataset_obj, metadata)
@@ -642,22 +636,45 @@ class DatalakeClient:
         sample_value = dataset_obj[0][self.file_path_key]
         
         if isinstance(sample_value, str) and Path(sample_value).exists():
+            sample_path = Path(sample_value).resolve()
+            staging_device = os.stat(staging_assets_dir.parent).st_dev
+            source_device = os.stat(sample_path.parent).st_dev
+            same_device = (source_device == staging_device)
+            
+            copy_method = "OS 레벨 cp" if same_device else "Python copy2"
+            self.logger.debug(f"📤 파일 복사 모드: {copy_method} (device: {source_device}→{staging_device})")
             def copy_file(example, idx):
                 original_path = Path(example[self.file_path_key]).resolve()
                 if original_path.exists():
                     ext = original_path.suffix or ""
                     prefix = "file"
+                    
+                    folder_num = idx // 1000
+                    folder_name = f"batch_{folder_num:04d}"
                     new_filename = f"{prefix}_{idx:06d}{ext}"
-                    target_path = staging_assets_dir / new_filename
+                    target_dir = staging_assets_dir / folder_name
+                    target_path = target_dir / new_filename
                     target_path.parent.mkdir(mode=0o775,parents=True, exist_ok=True)
                     
-                    shutil.copy2(original_path, target_path)
-                    
-                    example[self.file_path_key] = str(target_path.resolve().relative_to(self.staging_pending_path))
+                    if same_device:
+                        result = subprocess.run(
+                            ["cp", str(original_path), str(target_path)], 
+                            capture_output=True, text=True
+                        )
+                        if result.returncode != 0:
+                            raise RuntimeError(f"cp 명령 실패: {result.stderr}")
+                    else:
+                        shutil.copy2(original_path, target_path)
+                    relative_path = target_path.relative_to(self.staging_pending_path)
+                    example[self.file_path_key] = str(relative_path)
                     
                 return example
             
-            dataset_obj = dataset_obj.map(copy_file, with_indices=True)
+            dataset_obj = dataset_obj.map(
+                copy_file, 
+                with_indices=True,
+                num_proc=self.num_proc,
+                desc="파일 경로 복사 중",)
             return dataset_obj
         else:
             self.logger.warning(f"⚠️ 파일 경로 컬럼 '{self.file_path_key}'가 유효하지 않거나 존재하지 않습니다: {sample_value}")
