@@ -101,14 +101,14 @@ def process_image(
         sha256 = get_safe_image_hash_from_pil(
             image,
         )
-        save_path = images_dir / f"{sha256[:2]}/{sha256}.jpg"
-        if save_images and not save_path.exists():
-            save_path.parent.mkdir(
+        image_path = images_dir / f"{sha256[:2]}/{sha256}.jpg"
+        if save_images and not image_path.exists():
+            image_path.parent.mkdir(
                 parents=True,
                 exist_ok=True,
             )
             image.save(
-                save_path,
+                image_path,
                 format="JPEG",
             )
 
@@ -138,7 +138,13 @@ def process_image(
                 "bbox": [l / ori_w, t / ori_h, r / ori_w, b / ori_h],
             }
             results.append(
-                (save_path.as_posix(), element, gt["page"], w, h)
+                (
+                    Path(*image_path.parts[-2:]).as_posix(),
+                    element,
+                    gt["page"],
+                    w,
+                    h,
+                )
             )
         return results
 
@@ -199,9 +205,6 @@ def main(
 
     rows = []
     for image_path, elements in elements_dict.items():
-        rel_image_path = Path(image_path).relative_to(
-            images_dir,
-        ).as_posix()
         label = {
             "page": image_info_dict[image_path]["page"],
             "reading_order": False,
@@ -209,7 +212,7 @@ def main(
         }
         rows.append(
             {
-                "image_path": rel_image_path,  # `str`.
+                "image_path": image_path,  # `str`.
                 "width": image_info_dict[image_path]["width"],  # `int`.
                 "height": image_info_dict[image_path]["height"],  # `int`.
                 "label": json.dumps(

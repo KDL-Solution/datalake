@@ -79,7 +79,7 @@ def process_image(
 
     # Crop original image (PIL, so convert back to array):
     full_img_np = np.array(image)
-    cropped_np = full_img_np[y:y2, x:x2]
+    cropped_np = full_img_np[y: y2, x: x2]
     image = Image.fromarray(cropped_np)
     image = image.convert("L")  # 흑백으로 변환.
 

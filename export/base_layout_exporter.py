@@ -4,73 +4,26 @@ from pathlib import Path
 import pandas as pd
 from typing import List, Dict
 from PIL import Image, ImageDraw, ImageFont
+from tqdm import tqdm
 
 from prep.utils import DATALAKE_DIR
 from export.utils import (
     save_df_as_jsonl,
     denormalize_bboxes,
     smart_resize,
+    mask_outside_bboxes,
+    layout_category_dict,
+    user_prompt_dict,
 )
-from export.user_prompts import user_prompt_dict
 
-
-TYPE_MAP = {
-    "text_plane": "plain_text",
-    "title": "plain_text",
-    "section_header": "plain_text",
-    "list_item": "plain_text",
-    "caption": "plain_text",
-    "page_header": "plain_text",
-    "page_footer": "plain_text",
-    "abstract": "plain_text",
-    "keywords": "plain_text",
-    "footnote": "plain_text",
-    "handwriting": "plain_text",
-    "table_of_contents_entry": "plain_text",
-    "text_inline_math": "plain_text",
-    "table": "table",
-    "figure": "image",
-    "picture": "image",
-    "flowchart": "image",
-    "chart": "image",
-    "chart_bar": "image",
-    "chart_pie": "image",
-    "chart_line": "image",
-    "chart_area": "image",
-    "chart_scatter": "image",
-    "chart_radar": "image",
-    "chart_mixed": "image",
-    "diagram": "image",
-    "diagram_functional_block": "image",
-    "diagram_flowchart": "image",
-    "diagram_characteristic_curve": "image",
-    "diagram_timing": "image",
-    "diagram_circuit": "image",
-    "diagram_3d_schematic": "image",
-    "diagram_appearance": "image",
-    "diagram_pin": "image",
-    "diagram_layout": "image",
-    "diagram_engineering_drawing": "image",
-    "diagram_data_structure": "image",
-    "diagram_sampling": "image",
-    "diagram_functional_register": "image",
-    "diagram_marking": "image",
-    "formula": "plain_text",
-    "music_sheet": "plain_text",
-    "chemical_formula_content": "plain_text",
-    "publishing_info": "plain_text",
-    "signature": "plain_text",
-    "stamp": "plain_text",
-}
+tqdm.pandas()
 
 
 class BaseLayoutExporter(object):
     def _elements_to_label(
         self,
         elements: List[Dict[str, str]],
-        width: int,
-        height: int,
-        type_map: Dict[str, str] = TYPE_MAP,
+        layout_category_dict: Dict[str, str] = layout_category_dict,
         indent: int = None,
     ):
         elements.sort(key=lambda x: x["idx"])  # idx 기준으로 정렬.
@@ -78,26 +31,48 @@ class BaseLayoutExporter(object):
             {k: i[k] for k in ["type", "bbox"]} for i in elements
         ]  # type, bbox만 남김.
         elements = [
-            {**i, "type": type_map.get(i["type"], i["type"])}
+            {**i, "type": layout_category_dict.get(i["type"], i["type"])}
             for i in elements
         ]  # type을 통폐합.
-
-        label = json.dumps(
+        return json.dumps(
             elements,
             ensure_ascii=False,
             indent=indent,
         )
-        return denormalize_bboxes(
-            label,
-            width=width,
-            height=height,
-            bbox_key="bbox",
-        )
+
+    def save_masked_image(
+        self,
+        image_path: str,
+        bboxes: List[int],
+        images_dir: str,
+    ):
+        try:
+            image = Image.open(image_path).convert("RGB")
+        except OSError:
+            print(f"[ERROR] Cannot open image: {image_path}")
+            return None
+        else:
+            new_image = mask_outside_bboxes(
+                image=image,
+                bboxes=bboxes,
+            )
+            new_image_path = Path(images_dir) / Path(image_path).name
+            if not new_image_path.exists():
+                new_image_path.parent.mkdir(
+                    parents=True,
+                    exist_ok=True,
+                )
+                new_image.save(
+                    new_image_path.as_posix(),
+                    format="JPEG",
+                )
+            return new_image_path.as_posix()
 
     def export(
         self,
         df: pd.DataFrame,
         jsonl_path: str,
+        images_dir: str,
         datalake_dir: str = DATALAKE_DIR.as_posix(),
         user_prompt_reading_order: str = user_prompt_dict["base_layout_reading_order"],
         user_prompt_no_reading_order: str = user_prompt_dict["base_layout_no_reading_order"],
@@ -105,30 +80,47 @@ class BaseLayoutExporter(object):
     ) -> None:
         df_copied = df.copy()
 
-        df_copied["image_path"] = df_copied["image_path"].apply(
-            lambda x: (Path(datalake_dir) / x).as_posix(),
-        )
-        df_copied["query"] = df_copied.apply(
-            lambda x: user_prompt_reading_order if json.loads(
-                x["label"],
-            )["reading_order"] else user_prompt_no_reading_order,
-            axis=1,
-        )
-        df_copied[["width", "height"]] = df_copied.apply(
+        df_copied[["new_width", "new_height"]] = df_copied.apply(
             lambda x: smart_resize(
                 width=x["width"],
                 height=x["height"],
             ),
             axis=1,
             result_type="expand",
+        )  # Smart resize.
+        df_copied["label"] = df_copied.apply(
+            lambda x: denormalize_bboxes(
+                x["label"],
+                width=x["new_width"],
+                height=x["new_height"],
+                bbox_key="bbox",
+            ),
+            axis=1,
+        )  # Denormalize.
+        df_copied["label"] = df_copied["label"].apply(
+            lambda x: json.loads(x),
+        )  # String to Dict.
+
+        df_copied["image_path"] = df_copied["image_path"].apply(
+            lambda x: (Path(datalake_dir) / x).as_posix(),
+        )  # Relative path to absolute path.
+        df_copied["image_path"] = df_copied.progress_apply(
+            lambda x: self.save_masked_image(
+                image_path=x["image_path"],
+                bboxes=[i["bbox"] for i in x["label"]["elements"]],
+                images_dir=images_dir,
+            ),
+            axis=1,
+        )
+        df_copied = df_copied[df_copied["image_path"].notna()]
+
+        df_copied["query"] = df_copied.apply(
+            lambda x: user_prompt_reading_order if x["label"]["reading_order"] else user_prompt_no_reading_order,
+            axis=1,
         )
         df_copied["label"] = df_copied.apply(
             lambda x: self._elements_to_label(
-                json.loads(
-                    x["label"],
-                )["elements"],
-                width=x["width"],
-                height=x["height"],
+                x["label"]["elements"],
                 indent=indent,
             ),
             axis=1,
@@ -192,35 +184,35 @@ if __name__ == "__main__":
     from athena.src.core.athena_client import AthenaClient
 
     client = AthenaClient()
-    exporter = BaseLayoutExporter()
-    ROOT = Path(__file__).resolve().parent
-
     df = client.retrieve_with_existing_cols(
         datasets=[
             "office_docs",
         ],
     )
+
+    exporter = BaseLayoutExporter()
+    ROOT = Path(__file__).resolve().parent
     exporter.export(
         df=df,
         jsonl_path=(ROOT / "data/office_docs.jsonl").as_posix(),
     )
 
-    df = client.retrieve_with_existing_cols(
-        datasets=[
-            "doclaynet_train",
-            "doclaynet_val",
-        ],
-    )
-    exporter.export(
-        df=df,
-        jsonl_path=(ROOT / "data/doclaynet_train_val.jsonl").as_posix(),
-    )
-    df = client.retrieve_with_existing_cols(
-        datasets=[
-            "doclaynet_test",
-        ],
-    )
-    exporter.export(
-        df=df,
-        jsonl_path=(ROOT / "data/doclaynet_test.jsonl").as_posix(),
-    )
+    # df = client.retrieve_with_existing_cols(
+    #     datasets=[
+    #         "doclaynet_train",
+    #         "doclaynet_val",
+    #     ],
+    # )
+    # exporter.export(
+    #     df=df,
+    #     jsonl_path=(ROOT / "data/doclaynet_train_val.jsonl").as_posix(),
+    # )
+    # df = client.retrieve_with_existing_cols(
+    #     datasets=[
+    #         "doclaynet_test",
+    #     ],
+    # )
+    # exporter.export(
+    #     df=df,
+    #     jsonl_path=(ROOT / "data/doclaynet_test.jsonl").as_posix(),
+    # )

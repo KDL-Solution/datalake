@@ -172,7 +172,7 @@ class KIEStructExporter(object):
 
 if __name__ == "__main__":
     from athena.src.core.athena_client import AthenaClient
-    from export.user_prompts import user_prompt_dict
+    from export.utils import user_prompt_dict
 
     client = AthenaClient()
     exporter = KIEStructExporter()

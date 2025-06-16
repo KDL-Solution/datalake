@@ -4,6 +4,7 @@ import math
 import pandas as pd
 from pathlib import Path
 from typing import List, Dict, Any
+from PIL import Image, ImageDraw
 
 
 def to_chat_format(
@@ -137,3 +138,84 @@ def denormalize_bboxes(
     # Build dynamic pattern: e.g., r'"<\|bbox\|>":\s*(\[[^\]]+\])'
     pattern = rf'"{escaped_key}":\s*(\[[^\]]+\])'
     return re.sub(pattern, replacer, json_str)
+
+
+def mask_outside_bboxes(
+    image: Image.Image,
+    bboxes: list[tuple[int, int, int, int]],
+) -> Image.Image:
+    # Create a white image (same size, same mode)
+    white_bg = Image.new(image.mode, image.size, color="white")
+
+    # Create a mask where we draw the bboxes
+    mask = Image.new("L", image.size, 0)  # Black mask
+    draw = ImageDraw.Draw(mask)
+    for bbox in bboxes:
+        draw.rectangle(bbox, fill=255)  # White inside bboxes
+
+    # Composite the original image over the white background using the mask
+    result = Image.composite(image, white_bg, mask)
+    return result
+
+
+layout_category_dict = {
+    "text_plain": "plain_text",
+    "text_plane": "plain_text",
+    "title": "plain_text",
+    "section_header": "plain_text",
+    "list_item": "plain_text",
+    "caption": "plain_text",
+    "page_header": "plain_text",
+    "page_footer": "plain_text",
+    "abstract": "plain_text",
+    "keywords": "plain_text",
+    "footnote": "plain_text",
+    "handwriting": "plain_text",
+    "table_of_contents_entry": "plain_text",
+    "text_inline_math": "plain_text",
+    "table": "table",
+    "figure": "image",
+    "picture": "image",
+    "flowchart": "image",
+    "chart": "image",
+    "chart_bar": "image",
+    "chart_pie": "image",
+    "chart_line": "image",
+    "chart_area": "image",
+    "chart_scatter": "image",
+    "chart_radar": "image",
+    "chart_mixed": "image",
+    "diagram": "image",
+    "diagram_functional_block": "image",
+    "diagram_flowchart": "image",
+    "diagram_characteristic_curve": "image",
+    "diagram_timing": "image",
+    "diagram_circuit": "image",
+    "diagram_3d_schematic": "image",
+    "diagram_appearance": "image",
+    "diagram_pin": "image",
+    "diagram_layout": "image",
+    "diagram_engineering_drawing": "image",
+    "diagram_data_structure": "image",
+    "diagram_sampling": "image",
+    "diagram_functional_register": "image",
+    "diagram_marking": "image",
+    "formula": "plain_text",
+    "music_sheet": "plain_text",
+    "chemical_formula_content": "plain_text",
+    "publishing_info": "plain_text",
+    "signature": "plain_text",
+    "stamp": "plain_text",
+}
+
+user_prompt_dict = {
+    "recognition": "Read text in the image.",
+    "base_kie_bbox": "Extract information from the image. Return the result in the following structured JSON format (formatted with zero-space indentation and without newlines), filling in both <|value|> and <|bbox|>:",
+    "base_kie_no_bbox": "Extract information from the image. Return the result in the following structured JSON format (formatted with zero-space indentation and without newlines), filling in <|value|>:",
+    "post_handwritten_plain_text": "Extract information from the image. Return a structured JSON (compact, no spaces or newlines), filling in each <|value|>. Read from left to right, top to bottom:",
+    "base_layout_reading_order": "Extract all layout elements. Reading order must be preserved.",
+    "base_layout_no_reading_order": "Extract all layout elements. Reading order does not matter.",
+    "plain_text": "Read text in the image.",
+    "table": "Parse the table in the image.",
+    "image": "Read text in the image.",
+}
