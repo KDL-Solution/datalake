@@ -156,7 +156,7 @@ class DatalakeClient:
                     self.logger.error(f"❌ 삭제 실패: {existing_dir.name} - {e}")
         
         # 데이터 로드 및 컬럼 변환 (이미지 제외)
-        dataset_obj, _ = self._load_data(data_file)
+        dataset_obj, file_info = self._load_data(data_file)
         
         # 메타데이터 생성
         metadata = self._create_metadata(
@@ -166,8 +166,8 @@ class DatalakeClient:
             variant=variant,
             dataset_description=dataset_description,
             source_task=source_task,
-            has_images=False,  # 이미지는 참조만
-            has_files=False,  # 파일 경로는 없음
+            has_images=file_info['has_image_data'],
+            has_files=file_info['has_file_paths'],
             total_rows=len(dataset_obj),
             data_type='task',
             **kwargs

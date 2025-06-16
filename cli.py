@@ -1,10 +1,15 @@
 import argparse
 import sys
 import json
+import shutil
+import pandas as pd
+
+from datasets import Dataset
+from PIL import Image
 from pathlib import Path
-from typing import List, Dict, Optional
 sys.path.append(str(Path(__file__).resolve().parent.parent))  # 상위 디렉토리 추가
 from managers.datalake_client import DatalakeClient
+from client.src.core.duckdb_client import DuckDBClient
 
 class DataManagerCLI:
     """Data Manager CLI 인터페이스"""
@@ -12,16 +17,157 @@ class DataManagerCLI:
     def __init__(
         self, 
         base_path: str = "/mnt/AI_NAS/datalake",
-        nas_api_url: str = "http://localhost:8000",
+        nas_api_url: str = "http://192.168.20.62:8091",
         log_level: str = "INFO"
     ):
         self.data_manager = DatalakeClient(
             base_path=base_path,
             nas_api_url=nas_api_url,
-            auto_process=False,  # CLI에서는 수동 제어
             log_level=log_level,
         )
         self.schema_manager = self.data_manager.schema_manager
+    
+    def _check_and_update_catalog_db(self, duck_client, catalog_path):
+        """Catalog DB 상태 확인 및 업데이트 필요 여부 판단"""
+        try:
+            # 테이블 존재 여부 확인
+            tables = duck_client.list_tables()
+            if tables.empty or 'catalog' not in tables['name'].values:
+                print("📝 새로운 Catalog DB 생성 필요")
+                return True
+            
+            # DB 파일과 Parquet 파일들의 수정 시간 비교
+            db_path = self.data_manager.base_path / "catalog.duckdb"
+            db_mtime = db_path.stat().st_mtime if db_path.exists() else 0
+            
+            # 가장 최근 Parquet 파일의 수정 시간 확인
+            latest_parquet_mtime = 0
+            for parquet_file in catalog_path.rglob("*.parquet"):
+                file_mtime = parquet_file.stat().st_mtime
+                if file_mtime > latest_parquet_mtime:
+                    latest_parquet_mtime = file_mtime
+            
+            if latest_parquet_mtime > db_mtime:
+                print("🔄 Parquet 파일이 DB보다 최신 → 업데이트 필요")
+                return True
+            else:
+                print("✅ DB가 최신 상태")
+                return False
+                
+        except Exception as e:
+            print(f"⚠️ DB 상태 확인 실패, 재생성 진행: {e}")
+            return True
+
+    def rebuild_catalog_db(self):
+        """Catalog DB 강제 재구축"""
+        print("\n" + "="*50)
+        print("🔨 Catalog DB 재구축")
+        print("="*50)
+        
+        try:
+            db_path = self.data_manager.base_path / "catalog.duckdb"
+            catalog_path = self.data_manager.catalog_path
+            
+            if not catalog_path.exists():
+                print("❌ Catalog 디렉토리가 존재하지 않습니다.")
+                return False
+            
+            # 기존 DB 파일 백업
+            if db_path.exists():
+                backup_path = db_path.with_suffix('.duckdb.backup')
+                shutil.copy2(db_path, backup_path)
+                print(f"💾 기존 DB 백업: {backup_path}")
+            
+            print("🔄 Catalog DB 재구축 중...")
+            
+            with DuckDBClient(str(db_path), read_only=True) as duck_client:
+                # 기존 테이블 삭제 (있다면)
+                try:
+                    duck_client.execute_query("DROP TABLE IF EXISTS catalog")
+                except:
+                    pass
+                
+                # 새로 생성
+                duck_client.create_table_from_parquet(
+                    "catalog",
+                    str(catalog_path / "**" / "*.parquet"),
+                    hive_partitioning=True,
+                    union_by_name=True
+                )
+                
+                # 결과 확인
+                count_result = duck_client.execute_query("SELECT COUNT(*) as total FROM catalog")
+                total_rows = count_result['total'].iloc[0]
+                
+                partitions_df = duck_client.retrieve_partitions("catalog")
+                total_partitions = len(partitions_df)
+                
+                print(f"✅ Catalog DB 재구축 완료!")
+                print(f"📊 총 {total_rows:,}개 행, {total_partitions}개 파티션")
+                print(f"💾 DB 파일: {db_path}")
+                print(f"📁 파일 크기: {db_path.stat().st_size / 1024 / 1024:.1f}MB")
+                
+                return True
+                
+        except Exception as e:
+            print(f"❌ DB 재구축 실패: {e}")
+            return False
+        
+    def show_catalog_db_info(self):
+        """Catalog DB 정보 표시"""
+        print("\n📊 Catalog DB 정보")
+        print("="*50)
+        
+        try:
+            db_path = self.data_manager.base_path / "catalog.duckdb"
+            
+            if not db_path.exists():
+                print("❌ Catalog DB 파일이 없습니다.")
+                print(f"💡 'python cli.py catalog rebuild' 명령으로 생성할 수 있습니다.")
+                return False
+            
+            # DB 기본 정보
+            db_size = db_path.stat().st_size / 1024 / 1024
+            from datetime import datetime
+            db_mtime = datetime.fromtimestamp(db_path.stat().st_mtime)
+            
+            print(f"📁 DB 파일: {db_path}")
+            print(f"💾 파일 크기: {db_size:.1f}MB")
+            print(f"🕒 수정 시간: {db_mtime.strftime('%Y-%m-%d %H:%M:%S')}")
+            
+            with DuckDBClient(str(db_path)) as duck_client:
+                # 테이블 정보
+                tables = duck_client.list_tables()
+                print(f"\n📋 테이블: {len(tables)}개")
+                for _, table in tables.iterrows():
+                    print(f"  • {table['name']}")
+                
+                if 'catalog' in tables['name'].values:
+                    # Catalog 테이블 상세 정보
+                    count_result = duck_client.execute_query("SELECT COUNT(*) as total FROM catalog")
+                    total_rows = count_result['total'].iloc[0]
+                    
+                    partitions_df = duck_client.retrieve_partitions("catalog")
+                    
+                    print(f"\n📊 Catalog 테이블:")
+                    print(f"  📈 총 행 수: {total_rows:,}개")
+                    print(f"  🏷️ 파티션: {len(partitions_df)}개")
+                    
+                    # 상위 Provider별 통계
+                    if not partitions_df.empty:
+                        provider_stats = partitions_df.groupby('provider').size().sort_values(ascending=False)
+                        print(f"\n🏢 Provider별 파티션 수:")
+                        for provider, count in provider_stats.head(5).items():
+                            print(f"  • {provider}: {count}개")
+                        
+                        if len(provider_stats) > 5:
+                            print(f"  ... 외 {len(provider_stats) - 5}개")
+                
+                return True
+                
+        except Exception as e:
+            print(f"❌ DB 정보 조회 실패: {e}")
+            return False
         
     def create_provider_interactive(self):
         """대화형 Provider 생성"""
@@ -426,6 +572,467 @@ class DataManagerCLI:
         except Exception as e:
             print(f"❌ 업로드 중 오류: {e}")
             return False
+    
+    def download_data_interactive(self):
+        """대화형 데이터 다운로드"""
+        print("\n" + "="*50)
+        print("📥 데이터 다운로드")
+        print("="*50)
+        
+        try:
+            # DuckDB 클라이언트 생성 (임시 DB 사용)
+            db_path = self.data_manager.base_path / "catalog.duckdb"
+            with DuckDBClient(str(db_path), read_only=True) as duck_client:
+                
+                print("🔄 Catalog 데이터 로딩 중...")
+                catalog_path = self.data_manager.catalog_path
+
+                needs_update = self._check_and_update_catalog_db(duck_client, catalog_path)
+                if needs_update:
+                    print("🔄 Catalog DB 업데이트 중...")
+                    try:
+                        duck_client.create_table_from_parquet(
+                            "catalog",
+                            str(catalog_path / "**" / "*.parquet"),
+                            hive_partitioning=True,
+                            union_by_name=True
+                        )
+                        print("✅ Catalog DB 업데이트 완료")
+                    except Exception as e:
+                        print(f"❌ Catalog DB 업데이트 실패: {e}")
+                        return False
+                else:
+                    print("✅ 기존 Catalog DB 사용")
+                    
+                # 사용 가능한 파티션 확인
+                partitions_df = duck_client.retrieve_partitions("catalog")
+                if partitions_df.empty:
+                    print("❌ Catalog에 데이터가 없습니다.")
+                    return False
+                    
+                print(f"📊 {len(partitions_df)} 개 파티션 사용 가능")
+            
+                # 1. 검색 방법 선택
+                print("\n🔍 검색 방법을 선택하세요:")
+                print("  1. 파티션 기반 검색 (Provider/Dataset/Task/Variant)")
+                print("  2. 텍스트 검색 (JSON 라벨 내 텍스트)")
+            
+                search_choice = input("검색 방법 (1-2) [1]: ").strip() or "1"
+                
+                search_results = None
+                
+                if search_choice == "1":
+                    # 파티션 기반 검색
+                    search_results = self._partition_based_search(duck_client, partitions_df)
+                    print("\n📊 파티션 기반 검색 결과:")
+                    print(search_results.head(3).to_string(index=False, max_cols=5))
+                elif search_choice == "2":
+                    # 텍스트 검색
+                    search_results = self._text_based_search(duck_client)
+                else:
+                    print("❌ 잘못된 선택입니다.")
+                    return False
+                
+                if search_results is None or search_results.empty:
+                    print("❌ 검색 결과가 없습니다.")
+                    return False
+                
+                print(f"\n📊 검색 결과: {len(search_results):,}개 항목")
+                
+                # 결과 미리보기
+                print("\n📋 결과 미리보기:")
+                print(search_results.head(10))
+                if len(search_results) > 3:
+                    print(f"... (총 {len(search_results):,}개 항목)")
+                
+                # 다운로드 옵션 선택
+                return self._download_options(search_results)
+                
+        except KeyboardInterrupt:
+            print("\n❌ 다운로드가 취소되었습니다.")
+            return False
+        except Exception as e:
+            print(f"❌ 다운로드 중 오류: {e}")
+            return False
+
+    def _partition_based_search(self, duck_client: DuckDBClient, partitions_df: pd.DataFrame):
+        """파티션 기반 검색 (Provider/Dataset/Task/Variant)"""
+        print("\n🏢 Provider 선택:")
+        
+        providers = sorted(partitions_df['provider'].unique().tolist())
+        print("사용 가능한 Provider:")
+        for i, provider in enumerate(providers, 1):
+            count = len(partitions_df[partitions_df['provider'] == provider])
+            print(f"  {i}. {provider} ({count}개 파티션)")
+        
+        provider_choice = input("Provider 선택 (번호/이름, 전체는 Enter): ").strip()
+        selected_providers = []
+        
+        if not provider_choice:
+            selected_providers = providers
+            print("✅ 모든 Provider 선택")
+        elif provider_choice.isdigit():
+            idx = int(provider_choice) - 1
+            if 0 <= idx < len(providers):
+                selected_providers = [providers[idx]]
+            else:
+                print("❌ 잘못된 번호입니다.")
+                return None
+        else:
+            if provider_choice in providers:
+                selected_providers = [provider_choice]
+            else:
+                print(f"❌ Provider '{provider_choice}'가 존재하지 않습니다.")
+                return None
+        
+        # Dataset 선택
+        filtered_partitions = partitions_df[partitions_df['provider'].isin(selected_providers)]
+        datasets = sorted(filtered_partitions['dataset'].unique().tolist())
+        
+        print(f"\n📦 Dataset 선택 ({len(datasets)}개 사용 가능):")
+        for i, dataset in enumerate(datasets, 1):
+            count = len(filtered_partitions[filtered_partitions['dataset'] == dataset])
+            print(f"  {i}. {dataset} ({count}개 파티션)")
+        
+        dataset_choice = input("Dataset 선택 (번호/이름, 전체는 Enter): ").strip()
+        selected_datasets = []
+        
+        if not dataset_choice:
+            selected_datasets = datasets
+            print("✅ 모든 Dataset 선택")
+        elif dataset_choice.isdigit():
+            idx = int(dataset_choice) - 1
+            if 0 <= idx < len(datasets):
+                selected_datasets = [datasets[idx]]
+            else:
+                print("❌ 잘못된 번호입니다.")
+                return None
+        else:
+            if dataset_choice in datasets:
+                selected_datasets = [dataset_choice]
+            else:
+                print(f"❌ Dataset '{dataset_choice}'가 존재하지 않습니다.")
+                return None
+        
+        # Task 선택
+        filtered_partitions = filtered_partitions[filtered_partitions['dataset'].isin(selected_datasets)]
+        tasks = sorted(filtered_partitions['task'].unique().tolist())
+        
+        print(f"\n📝 Task 선택 ({len(tasks)}개 사용 가능):")
+        for i, task in enumerate(tasks, 1):
+            count = len(filtered_partitions[filtered_partitions['task'] == task])
+            print(f"  {i}. {task} ({count}개 파티션)")
+        
+        task_choice = input("Task 선택 (번호/이름, 전체는 Enter): ").strip()
+        selected_tasks = []
+        
+        if not task_choice:
+            selected_tasks = tasks
+            print("✅ 모든 Task 선택")
+        elif task_choice.isdigit():
+            idx = int(task_choice) - 1
+            if 0 <= idx < len(tasks):
+                selected_tasks = [tasks[idx]]
+            else:
+                print("❌ 잘못된 번호입니다.")
+                return None
+        else:
+            if task_choice in tasks:
+                selected_tasks = [task_choice]
+            else:
+                print(f"❌ Task '{task_choice}'가 존재하지 않습니다.")
+                return None
+        
+        # Variant 선택
+        filtered_partitions = filtered_partitions[filtered_partitions['task'].isin(selected_tasks)]
+        variants = sorted(filtered_partitions['variant'].unique().tolist())
+        
+        print(f"\n🏷️ Variant 선택 ({len(variants)}개 사용 가능):")
+        for i, variant in enumerate(variants, 1):
+            count = len(filtered_partitions[filtered_partitions['variant'] == variant])
+            print(f"  {i}. {variant} ({count}개 파티션)")
+        
+        variant_choice = input("Variant 선택 (번호/이름, 전체는 Enter): ").strip()
+        selected_variants = []
+        
+        if not variant_choice:
+            selected_variants = variants
+            print("✅ 모든 Variant 선택")
+        elif variant_choice.isdigit():
+            idx = int(variant_choice) - 1
+            if 0 <= idx < len(variants):
+                selected_variants = [variants[idx]]
+            else:
+                print("❌ 잘못된 번호입니다.")
+                return None
+        else:
+            if variant_choice in variants:
+                selected_variants = [variant_choice]
+            else:
+                print(f"❌ Variant '{variant_choice}'가 존재하지 않습니다.")
+                return None
+        
+        # 쿼리 실행
+        print(f"\n🔍 검색 중...")
+        print(f"  Provider: {selected_providers}")
+        print(f"  Dataset: {selected_datasets}")
+        print(f"  Task: {selected_tasks}")
+        print(f"  Variant: {selected_variants}")
+        
+        return duck_client.retrieve_with_existing_cols(
+            providers=selected_providers,
+            datasets=selected_datasets,
+            tasks=selected_tasks,
+            variants=selected_variants,
+            table="catalog"
+        )
+
+    def _text_based_search(self, duck_client: DuckDBClient):
+        """텍스트 기반 검색"""
+        print("\n🔤 텍스트 검색:")
+        
+        search_text = input("검색할 텍스트: ").strip()
+        if not search_text:
+            print("❌ 검색 텍스트가 필요합니다.")
+            return None
+        
+        columns_df = duck_client.get_table_info("catalog")
+        columns = columns_df['column_name'].tolist()
+        # 컬럼 선택
+        print(f"\n📝 컬럼 선택:")
+        for i, col in enumerate(columns, 1):
+            print(f"  {i}. {col}")
+        
+        col_choice = input(f"컬럼 선택 (1-{len(columns)}) [1]: ").strip() or "1"
+        if col_choice.isdigit():
+            idx = int(col_choice) - 1
+            if 0 <= idx < len(columns):
+                selected_column = columns[idx]
+            else:
+                print("❌ 잘못된 번호입니다.")
+                return None
+        else:
+            print("❌ 잘못된 입력입니다.")
+            return None
+            
+        # 🆕 검색 방법 선택
+        print(f"\n🔍 '{selected_column}' 컬럼에서 검색 방법:")
+        print("  1. 단순 텍스트 검색 (LIKE)")
+        print("  2. JSON 파싱 후 검색")
+        
+        method_choice = input("검색 방법 (1-2) [1]: ").strip() or "1"
+        
+        if method_choice == "1":
+            # 단순 LIKE 검색
+            print(f"\n🔍 단순 텍스트 검색 실행:")
+            print(f"  텍스트: '{search_text}'")
+            print(f"  컬럼: {selected_column}")
+            
+            sql = duck_client.json_queries.search_text_in_column(
+                table="catalog",
+                column=selected_column,
+                search_text=search_text,
+                search_type="simple",
+                engine="duckdb"
+            )
+            return duck_client.execute_query(sql)
+            
+        elif method_choice == "2":
+            # JSON 파싱 검색
+            json_path = input("JSON 경로 (예: $.image.text.content): ").strip()
+            if not json_path:
+                print("❌ JSON 경로가 필요합니다.")
+                return None
+            
+            # Variant 선택 (JSON 검색시에만)
+            partitions_df = duck_client.retrieve_partitions("catalog")
+            variants = sorted(partitions_df['variant'].unique().tolist())
+            
+            print(f"\n🏷️ 사용 가능한 Variant ({len(variants)}개):")
+            for i, variant in enumerate(variants, 1):
+                count = len(partitions_df[partitions_df['variant'] == variant])
+                print(f"  {i}. {variant} ({count}개 파티션)")
+            
+            variant_choice = input(f"Variant 선택 (1-{len(variants)}) [1]: ").strip() or "1"
+            if variant_choice.isdigit():
+                idx = int(variant_choice) - 1
+                if 0 <= idx < len(variants):
+                    selected_variant = variants[idx]
+                else:
+                    print("❌ 잘못된 번호입니다.")
+                    return None
+            else:
+                if variant_choice in variants:
+                    selected_variant = variant_choice
+                else:
+                    print(f"❌ Variant '{variant_choice}'가 존재하지 않습니다.")
+                    return None
+            
+            print(f"\n🔍 JSON 파싱 검색 실행:")
+            print(f"  텍스트: '{search_text}'")
+            print(f"  컬럼: {selected_column}")
+            print(f"  JSON 경로: {json_path}")
+            print(f"  Variant: {selected_variant}")
+            
+            # Variant 조건 추가
+            partition_conditions = {"variant": selected_variant}
+            
+            sql = duck_client.json_queries.search_text_in_column(
+                table="catalog",
+                column=selected_column,
+                search_text=search_text,
+                search_type="json",
+                json_loc=json_path,
+                partition_conditions=partition_conditions,
+                engine="duckdb"
+            )
+            return duck_client.execute_query(sql)
+        
+        else:
+            print("❌ 잘못된 선택입니다.")
+            return None
+
+    def _download_options(self, search_results):
+        """다운로드 옵션 선택 및 실행"""
+        print("\n💾 다운로드 옵션:")
+        print("  1. 메타데이터만 (Parquet)")
+        print("  2. 메타데이터만 (Arrow Dataset)")
+        print("  3. 메타데이터 + 이미지 (Dataset format)")
+        
+        download_choice = input("다운로드 옵션 (1-3) [1]: ").strip() or "1"
+        
+        # 저장 경로 입력
+        default_path = f"./downloads/export_{len(search_results)}_items"
+        save_path = input(f"저장 경로 [{default_path}]: ").strip() or default_path
+        save_path = Path(save_path)
+        
+        try:
+            if download_choice == "1":
+                # Parquet 저장
+                parquet_path = save_path.with_suffix('.parquet')
+                parquet_path.parent.mkdir(parents=True, exist_ok=True)
+                search_results.to_parquet(parquet_path, index=False)
+                print(f"✅ Parquet 저장 완료: {parquet_path}")
+                print(f"📊 {len(search_results):,}개 항목, {parquet_path.stat().st_size / 1024 / 1024:.1f}MB")
+                
+            elif download_choice == "2":
+                # Arrow Dataset 저장
+                return self._save_as_dataset(search_results, save_path, include_images=False)
+                
+            elif download_choice == "3":
+                # Dataset + 이미지 저장
+                return self._save_as_dataset(search_results, save_path, include_images=True)
+                
+            else:
+                print("❌ 잘못된 선택입니다.")
+                return False
+                
+            return True
+            
+        except Exception as e:
+            print(f"❌ 저장 중 오류: {e}")
+            return False
+        
+    def _save_as_dataset(self, search_results, save_path, include_images=False):
+        """datasets 라이브러리를 사용하여 Dataset 형태로 저장"""
+        try:
+            save_path = Path(save_path)
+            save_path.mkdir(parents=True, exist_ok=True)
+            
+            if include_images:
+                print(f"\n📥 이미지 포함 Dataset 생성 중...")
+                
+                path_column = None
+                for col in ['hash', 'path']:
+                    if col in search_results.columns:
+                        path_column = col
+                        break
+                
+                if path_column is None:
+                    print("❌ 이미지 경로 컬럼을 찾을 수 없습니다.")
+                    return False
+                
+                # 이미지 로드 함수
+                def load_image(example):
+                    try:
+                        if example[path_column] and pd.notna(example[path_column]):
+                            image_path = self.data_manager.assets_path / example[path_column]
+                            if image_path.exists():
+                                # PIL Image로 로드
+                                pil_image = Image.open(image_path)
+                                example['image'] = pil_image
+                            else:
+                                example['image'] = None
+                        else:
+                            example['image'] = None
+                    except Exception as e:
+                        print(f"⚠️ 이미지 로드 실패: {example.get(path_column, 'unknown')} - {e}")
+                        example['image'] = None
+                    return example
+                
+                # DataFrame을 Dataset으로 변환
+                dataset = Dataset.from_pandas(search_results)
+                
+                # 이미지 로드 (배치 단위로 처리)
+                print("🖼️ 이미지 로딩 중...")
+                dataset_with_images = dataset.map(
+                    load_image,
+                    desc="이미지 로딩",
+                    num_proc=self.data_manager.num_proc,
+                )
+                
+                # 성공적으로 로드된 이미지 개수 확인
+                valid_images = sum(1 for example in dataset_with_images if example['image'] is not None)
+                total_items = len(dataset_with_images)
+                
+                print(f"📊 이미지 로딩 완료: {valid_images}/{total_items}개 성공")
+                
+                # Dataset 저장
+                dataset_with_images.save_to_disk(str(save_path))
+                
+                print(f"✅ Dataset 저장 완료: {save_path}")
+                print(f"📊 {total_items:,}개 항목 (이미지 {valid_images:,}개)")
+                print(f"💾 총 크기: {sum(f.stat().st_size for f in save_path.rglob('*') if f.is_file()) / 1024 / 1024:.1f}MB")
+                
+                # 사용법 안내
+                print(f"\n💡 사용법:")
+                print(f"```python")
+                print(f"from datasets import load_from_disk")
+                print(f"dataset = load_from_disk('{save_path}')")
+                print(f"# 이미지 확인: dataset[0]['image'].show()")
+                print(f"```")
+                
+            else:
+                # 메타데이터만 Dataset으로 저장
+                print(f"\n📄 메타데이터 Dataset 생성 중...")
+                
+                # DataFrame을 Dataset으로 변환
+                dataset = Dataset.from_pandas(search_results)
+                
+                # Dataset 저장
+                dataset.save_to_disk(str(save_path))
+                
+                print(f"✅ Dataset 저장 완료: {save_path}")
+                print(f"📊 {len(dataset):,}개 항목")
+                print(f"💾 크기: {sum(f.stat().st_size for f in save_path.rglob('*') if f.is_file()) / 1024 / 1024:.1f}MB")
+                
+                # 사용법 안내
+                print(f"\n💡 사용법:")
+                print(f"```python")
+                print(f"from datasets import load_from_disk")
+                print(f"dataset = load_from_disk('{save_path}')")
+                print(f"df = dataset.to_pandas()  # pandas로 변환")
+                print(f"```")
+            
+            return True
+            
+        except ImportError:
+            print("❌ datasets 라이브러리가 설치되지 않았습니다.")
+            print("💡 설치 명령: pip install datasets")
+            return False
+        except Exception as e:
+            print(f"❌ Dataset 저장 실패: {e}")
+            return False
         
     def trigger_processing(self):
         """NAS 처리 수동 시작"""
@@ -628,7 +1235,7 @@ class DataManagerCLI:
 
 def main():
     parser = argparse.ArgumentParser(
-        description="📊 Data Manager CLI - 데이터 업로드 및 처리 관리",
+        description="📊 Data Manager CLI - 데이터 업로드/처리/다운로드 관리",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 📋 사용 가능한 명령어:
@@ -646,28 +1253,40 @@ def main():
   python cli.py config task remove            # Task 제거
 
 📥 데이터 관리:
-  python cli.py upload                         # 데이터 업로드 (대화형)
+  python cli.py upload                         # 데이터 업로드
+  python cli.py download                       # 데이터 다운로드
 
+  다운로드 포맷:
+    1. Parquet (메타데이터만)
+    2. Arrow Dataset (메타데이터만) 
+    3. Dataset + 이미지 (HuggingFace datasets 형태)
 🔄 처리 관리:
-  python cli.py process                        # 처리 시작 (대화형)
+  python cli.py process                        # 처리 시작 
   python cli.py process start                  # 새 처리 시작
   python cli.py process status JOB_ID          # 작업 상태 확인
   python cli.py process list                   # 내 데이터 현황
 
+📊 Catalog DB 관리:
+  python cli.py catalog info                   # Catalog DB 정보 확인
+  python cli.py catalog rebuild                # Catalog DB 강제 재구축
+  
 📊 상태 확인:
   python cli.py status                         # 전체 상태 대시보드
 
-💡 팁: 각 명령어는 부분 입력 시 사용 가능한 하위 옵션을 안내합니다.
+💡 팁: Dataset 형태로 저장하면 datasets 라이브러리로 쉽게 로드할 수 있습니다.
+     from datasets import load_from_disk
+     dataset = load_from_disk('./downloads/my_dataset')
         """
     )
     parser.add_argument("--base-path", default="/mnt/AI_NAS/datalake/migrate_test",
                        help="데이터 저장 기본 경로")
-    parser.add_argument("--nas-url", default="http://localhost:8000", 
+    parser.add_argument("--nas-url", default="http://192.168.20.62:8091", 
                        help="NAS API 서버 URL")
     parser.add_argument("--log-level", default="INFO",
                        help="로깅 레벨 (DEBUG, INFO, WARNING, ERROR, CRITICAL)")
     
     subparsers = parser.add_subparsers(dest='command', help='명령어')
+    
     
     # Config 관리 (Provider + Task)
     config_parser = subparsers.add_parser('config', help='설정 관리 (Provider, Task)')
@@ -692,6 +1311,9 @@ def main():
     
     # 데이터 업로드
     subparsers.add_parser('upload', help='데이터 업로드')
+    # 데이터 다운로드
+    subparsers.add_parser('download', help='데이터 다운로드')
+    
     
     # 처리 관리
     process_parser = subparsers.add_parser('process', help='데이터 처리 관리')
@@ -701,7 +1323,11 @@ def main():
     job_status_parser = process_subparsers.add_parser('status', help='특정 작업 상태 확인')
     job_status_parser.add_argument('job_id', help='작업 ID')
     
-    
+    # Catalog DB 관리
+    catalog_parser = subparsers.add_parser('catalog', help='Catalog DB 관리')
+    catalog_subparsers = catalog_parser.add_subparsers(dest='catalog_action')
+    catalog_subparsers.add_parser('info', help='Catalog DB 정보 확인')
+    catalog_subparsers.add_parser('rebuild', help='Catalog DB 강제 재구축')
     
     # 상태 확인
     subparsers.add_parser('status', help='전체 상태 확인')
@@ -713,7 +1339,9 @@ def main():
         print("\n사용 가능한 주요 명령어:")
         print("  🔧 python cli.py config     - 설정 관리 (Provider, Task)")
         print("  📥 python cli.py upload     - 데이터 업로드")
+        print("  📤 python cli.py download   - 데이터 다운로드")
         print("  🔄 python cli.py process    - 데이터 처리")
+        print("  📊 python cli.py catalog    - Catalog DB 관리")
         print("  📊 python cli.py status     - 상태 확인")
         
         print("\n🌟 처음 사용하시나요? 다음 순서로 시작해보세요:")
@@ -721,9 +1349,19 @@ def main():
         print("  2️⃣ python cli.py config task create      # 작업 유형 정의")
         print("  3️⃣ python cli.py upload                  # 데이터 업로드")
         print("  4️⃣ python cli.py process                 # 데이터 처리 시작")
-        
+        print("\n 💡 데이터 다운로드는 'python cli.py download' 명령으로 가능합니다.")
+        print("  1️⃣ python cli.py catalog rebuild         # Catalog DB 구축")
+        print("  2️⃣ python cli.py download                # 데이터 다운로드")
+        print("      → 옵션 1: Parquet (메타데이터만)")
+        print("      → 옵션 2: Arrow Dataset (메타데이터만)")  
+        print("      → 옵션 3: Dataset + 이미지 (HuggingFace 형태)")
+
+
         print("\n💡 각 명령어 뒤에 -h 또는 --help를 붙이면 상세 도움말을 볼 수 있습니다.")
         print("   예: python cli.py config -h")
+        print("\n🔥 Dataset 형태로 저장하면 ML 작업에 바로 사용할 수 있어요!")
+        print("   from datasets import load_from_disk")
+        print("   dataset = load_from_disk('./downloads/my_dataset')")
         print("\n" + "="*60)
         return
     
@@ -805,7 +1443,8 @@ def main():
         
         elif args.command == 'upload':
             cli.upload_data_interactive()
-        
+        elif args.command == 'download':
+            cli.download_data_interactive()
         elif args.command == 'process':
             if not args.process_action:
                 print("\n❓ process 하위 명령어를 선택해주세요:")
@@ -823,6 +1462,18 @@ def main():
         
         elif args.command == 'status':
             cli.show_status()
+        
+        elif args.command == 'catalog':
+            if not args.catalog_action:
+                print("\n❓ catalog 하위 명령어를 선택해주세요:")
+                print("  📊 python cli.py catalog info     - Catalog DB 정보 확인")
+                print("  🔨 python cli.py catalog rebuild  - Catalog DB 강제 재구축")
+                return
+                
+            if args.catalog_action == 'info':
+                cli.show_catalog_db_info()
+            elif args.catalog_action == 'rebuild':
+                cli.rebuild_catalog_db()
             
     except KeyboardInterrupt:
         print("\n👋 작업이 중단되었습니다.")

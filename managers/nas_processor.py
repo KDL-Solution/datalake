@@ -166,17 +166,17 @@ class NASDataProcessor:
             provider = metadata['provider']
             dataset_name = metadata['dataset']
             assets_base = self.assets_path / f"provider={provider}" / f"dataset={dataset_name}"
-            assets_base.mkdir(mode=0o775, parents=True, exist_ok=True)
-            
             # 해시 캐시 구축 (공통)
             self._build_hash_cache(assets_base)
 
             # 이미지 처리
             if metadata.get('has_images', False) and self.image_data_key in dataset_obj.column_names:
+                assets_base.mkdir(mode=0o775, parents=True, exist_ok=True)
                 dataset_obj = self._process_images_with_map(dataset_obj, metadata, assets_base)
             
             # 파일 처리
             if metadata.get('has_files', False) and self.file_path_key in dataset_obj.column_names:
+                assets_base.mkdir(mode=0o775, parents=True, exist_ok=True)
                 dataset_obj = self._process_files_with_map(dataset_obj, metadata, assets_base)
         
         # Catalog에 저장
