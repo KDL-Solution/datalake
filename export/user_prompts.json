@@ -1,6 +1,0 @@
-{
-    "recognition": "Read every text.",
-    "base_kie": "Extract the following information from the image. Return the result in the following structured JSON format (formatted with zero-space indentation and without newlines), filling in both <|value|> and <|bbox|>:",
-    "base_layout_reading_order": "Extract all layout elements. Reading order must be preserved.",
-    "base_layout_no_reading_order": "Extract all layout elements. Reading order does not matter."
-}

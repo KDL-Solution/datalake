@@ -2,6 +2,7 @@ import re
 import json
 import math
 import pandas as pd
+from pathlib import Path
 from typing import List, Dict, Any
 
 
@@ -45,6 +46,10 @@ def save_df_as_jsonl(
     df: pd.DataFrame,
     jsonl_path: str,
 ) -> None:
+    Path(jsonl_path).parent.mkdir(
+        parents=True,
+        exist_ok=True,
+    )
     with open(jsonl_path, "w", encoding="utf-8") as f:
         for row in df.itertuples(index=False):
             json_obj = to_chat_format(

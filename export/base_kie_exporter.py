@@ -4,6 +4,7 @@ from pathlib import Path
 import pandas as pd
 from typing import Dict, Any
 
+from prep.utils import DATALAKE_DIR
 from export.utils import (
     save_df_as_jsonl,
     denormalize_bboxes,
@@ -123,9 +124,9 @@ class KIEStructExporter(object):
     def export(
         self,
         df: pd.DataFrame,
-        datalake_dir: str,
+        user_prompt: str,
         jsonl_path: str,
-        user_prompt: str = "Extract the following information from the image. Return the result in the following structured JSON format (formatted with zero-space indentation and without newlines), filling in both <|value|> and <|bbox|>:",
+        datalake_dir: str = DATALAKE_DIR.as_posix(),
         value_key: str = "<|value|>",
         bbox_key: str = "<|bbox|>",
         indent: int = None,
@@ -171,18 +172,29 @@ class KIEStructExporter(object):
 
 if __name__ == "__main__":
     from athena.src.core.athena_client import AthenaClient
+    from export.user_prompts import user_prompt_dict
 
     client = AthenaClient()
+    exporter = KIEStructExporter()
+    ROOT = Path(__file__).resolve().parent
+
+    # df = client.retrieve_with_existing_cols(
+    #     datasets=[
+    #         "real_kie",
+    #     ],
+    # )
+    # exporter.export(
+    #     df=df,
+    #     jsonl_path="/home/eric/workspace/Qwen-SFT/real_kie.jsonl",
+    # )
 
     df = client.retrieve_with_existing_cols(
         datasets=[
-            "real_kie",
+            "post_handwritten_plain_text",
         ],
     )
-
-    exporter = KIEStructExporter()
     exporter.export(
         df=df,
-        datalake_dir="/mnt/AI_NAS/datalake",
-        jsonl_path="/home/eric/workspace/Qwen-SFT/real_kie.jsonl",
+        user_prompt=user_prompt_dict["post_handwritten_plain_text"],
+        jsonl_path=(ROOT / "data/post_handwritten_plain_text.jsonl").as_posix(),
     )
