@@ -229,7 +229,15 @@ class DuckDBClient:
         table: str = "catalog"
     ) -> pd.DataFrame:
         """존재하는 컬럼만 포함해서 조회"""
-        
+        # str 일경우 리스트로 변경
+        if isinstance(providers, str):
+            providers = [providers]
+        if isinstance(datasets, str):
+            datasets = [datasets]
+        if isinstance(tasks, str):
+            tasks = [tasks]
+        if isinstance(variants, str):
+            variants = [variants]
         # WHERE 조건 구성
         conditions = []
         

@@ -12,7 +12,7 @@ from pathlib import Path
 from datetime import datetime
 from datasets import Dataset, load_from_disk
 from datasets.features import Image as ImageFeature
-from typing import Dict, Optional, List
+from typing import Dict, Optional, List, Union
 from PIL import Image
 
 import sys
@@ -96,7 +96,6 @@ class DatalakeClient:
             variant=file_info['type'],
             total_rows=len(dataset_obj),
             data_type="raw",
-            source_task=None,  # 원본 작업이므로 None
             has_images=file_info['has_image_data'],
             has_files= file_info['has_file_paths'],
             dataset_description=dataset_description,
@@ -116,29 +115,33 @@ class DatalakeClient:
 
     def upload_task_data(
         self,
-        data_file: str,
+        data_file: Union[str, Path, pd.DataFrame],
         provider: str,
         dataset: str,
         task: str,
         variant: str,
         dataset_description: str = "",
-        source_task: str = None,
         auto_process: bool = False,
         overwrite: bool = False,
-        **kwargs
+        meta: Optional[Dict] = None,
     ) -> str:
         """Task 데이터 업로드 (기존 catalog에서 특정 task 추출, 이미지 참조만)"""
         self.logger.info(f"📥 Task data 업로드 시작: {provider}/{dataset}/{task}/{variant}")
         
-        # 1. Provider 검증
+        if not self._check_raw_data_exists(provider, dataset):
+            self.logger.warning(f"⚠️ Raw 데이터가 없습니다: {provider}/{dataset}")
+            self.logger.info("💡 먼저 upload_raw_data()로 원본 데이터를 업로드하세요")
+            raise FileNotFoundError(
+                f"❌ Raw 데이터가 존재하지 않습니다: {provider}/{dataset}"
+            )
+        
         if not self.schema_manager.validate_provider(provider):
             raise ValueError(f"❌ 지원하지 않는 provider입니다: {provider}")
         
-        # 2. Task 메타데이터 검증
-        is_valid, error_msg = self.schema_manager.validate_task_metadata(task, kwargs)
+        is_valid, error_msg = self.schema_manager.validate_task_metadata(task, meta)
         if not is_valid:
             raise ValueError(f"❌ Task 메타데이터 검증 실패: {error_msg}")
-        
+
         # 기존 pending 데이터 정리
         existing_dirs =  self._cleanup_existing_pending(provider, dataset, task, variant=variant, is_raw=False)
                 # 기존 데이터 삭제
@@ -165,12 +168,11 @@ class DatalakeClient:
             task=task,
             variant=variant,
             dataset_description=dataset_description,
-            source_task=source_task,
             has_images=file_info['has_image_data'],
             has_files=file_info['has_file_paths'],
             total_rows=len(dataset_obj),
             data_type='task',
-            **kwargs
+            meta=meta,
         )
         
         # Staging에 저장
@@ -286,7 +288,7 @@ class DatalakeClient:
             self.logger.error(f"❌ API 요청 실패 ({elapsed:.2f}초): {e}")
             return None
     
-    def get_job_status(self, job_id: str) -> Optional[Dict]:
+    def get_job_status(self, job_id: str) -> Optional[dict]:
         """작업 상태 조회"""
         try:
             response = requests.get(f"{self.nas_api_url}/jobs/{job_id}", timeout=10)
@@ -302,7 +304,7 @@ class DatalakeClient:
             self.logger.error(f"❌ NAS API 연결 실패: {e}")
             return None
         
-    def wait_for_job_completion(self, job_id: str, polling_interval: int = 60, timeout: int = 3600) -> Dict:
+    def wait_for_job_completion(self, job_id: str, polling_interval: int = 60, timeout: int = 3600) -> dict:
         """작업 완료까지 대기 (폴링)"""
         self.logger.info(f"⏳ 작업 완료 대기 중: {job_id}")
         
@@ -334,7 +336,20 @@ class DatalakeClient:
                 time.sleep(polling_interval)
         
         raise TimeoutError(f"작업 완료 대기 시간 초과: {job_id}")    
+
+    def _check_raw_data_exists(self, provider: str, dataset: str) -> bool:
+        """해당 provider/dataset의 raw 데이터 존재 여부 확인"""
+        raw_task_path = self.catalog_path / f"provider={provider}" / f"dataset={dataset}" / "task=raw"
         
+        # raw task 디렉토리가 존재하고, 그 안에 variant가 하나 이상 있는지 확인
+        if not raw_task_path.exists():
+            return False
+        
+        # raw 디렉토리 안에 variant 폴더가 있는지 확인 (variant=image, variant=text, variant=mixed 등)
+        variant_dirs = [d for d in raw_task_path.iterdir() 
+                    if d.is_dir() and d.name.startswith("variant=")]
+        return len(variant_dirs) > 0     
+    
     def _check_nas_api_connection(self):
         """NAS API 서버 연결 확인"""
         try:
@@ -355,12 +370,11 @@ class DatalakeClient:
         variant: str,
         total_rows: int,
         data_type: str,
-        source_task: Optional[str],
         has_images: bool = False,
         has_files: bool = False,
         dataset_description: str = "",
         original_source: str = "",
-        **kwargs
+        meta: Optional[Dict] = None,
     ) -> Dict:
         """메타데이터 생성"""
         metadata = {
@@ -371,15 +385,16 @@ class DatalakeClient:
             'data_type': data_type,
             'dataset_description': dataset_description,
             'original_source': original_source,
-            'source_task': source_task,
             'has_images': has_images,
             'has_files': has_files,
             'total_rows': total_rows,
             'uploaded_by': os.getenv('USER', 'unknown'),
             'uploaded_at': datetime.now().isoformat(),
             'file_id': str(uuid.uuid4())[:8],
+            
         }
-        metadata.update(kwargs) # task의 추가 필드
+        if meta:
+            metadata.update(meta)
         self.logger.debug(f"📄 메타데이터: {metadata}")
         return metadata
 
@@ -430,35 +445,61 @@ class DatalakeClient:
                 continue
         return existing_dirs
     
-    def _load_data(self, data_file: str) -> Dataset:
-        """데이터 파일을 로드하는 메서드"""
-        data_path = Path(data_file).resolve()
-        if not data_path.exists():
-            raise FileNotFoundError(f"❌ 데이터 파일이 존재하지 않습니다: {data_path}")
+    def _load_data(self, data_file) -> tuple[Dataset, dict]:
         
-        self.logger.info(f"📂 데이터 파일 로드 중: {data_path}")   
-        
-        if data_path.is_dir():
+        if isinstance(data_file, pd.DataFrame):
+            self.logger.info(f"📊 pandas DataFrame 로드 중: {len(data_file)} 행")
             try:
-                dataset_obj = load_from_disk(str(data_path))
-                self.logger.info(f"✅ datasets 폴더 로드 완료: {len(dataset_obj)} 행")
+                dataset_obj = Dataset.from_pandas(data_file)
+                self.logger.info(f"✅ pandas DataFrame 로드 완료: {len(data_file)} 행")
             except Exception as e:
-                raise ValueError(f"❌ datasets 폴더 로드 실패: {e}")   
-        elif data_path.suffix == '.parquet':
-            try:
-                df = pd.read_parquet(data_path)
-                dataset_obj = Dataset.from_pandas(df)
-                self.logger.info(f"✅ Parquet 파일 로드 완료: {len(df)} 행")
-            except Exception as e:
-                raise ValueError(f"❌ Parquet 파일 로드 실패: {e}")
+                raise ValueError(f"❌ pandas DataFrame 변환 실패: {e}")
+                
+        # 파일 경로인 경우 (기존 로직)
+        elif isinstance(data_file, (str, Path)):
+            data_path = Path(data_file).resolve()
+            if not data_path.exists():
+                raise FileNotFoundError(f"❌ 데이터 파일이 존재하지 않습니다: {data_path}")
+            
+            self.logger.info(f"📂 데이터 파일 로드 중: {data_path}")   
+            
+            if data_path.is_dir():
+                try:
+                    dataset_obj = load_from_disk(str(data_path))
+                    self.logger.info(f"✅ datasets 폴더 로드 완료: {len(dataset_obj)} 행")
+                except Exception as e:
+                    raise ValueError(f"❌ datasets 폴더 로드 실패: {e}")   
+            elif data_path.suffix == '.parquet':
+                try:
+                    df = pd.read_parquet(data_path)
+                    dataset_obj = Dataset.from_pandas(df)
+                    self.logger.info(f"✅ Parquet 파일 로드 완료: {len(df)} 행")
+                except Exception as e:
+                    raise ValueError(f"❌ Parquet 파일 로드 실패: {e}")
+            else:
+                raise ValueError(f"❌ 지원하지 않는 파일 형식: {data_path.suffix}")
+                
+            self.logger.info(f"✅ 데이터 파일 로드 완료: {data_file}")
+            
         else:
-            raise ValueError(f"❌ 지원하지 않는 파일 형식: {data_path.suffix}")
-        
-        self.logger.info(f"✅ 데이터 파일 로드 완료: {data_file}")
-        
+            raise TypeError(f"❌ 지원하지 않는 데이터 타입: {type(data_file)}. "
+                        f"파일 경로(str/Path) 또는 pandas.DataFrame을 사용하세요.")
+                
         column_names = dataset_obj.column_names
         self.logger.info(f"데이터셋 컬럼: {column_names}")
                 
+        metadata_columns_to_remove = [
+            'provider', 'dataset', 'task', 'variant', 
+            'data_type', 'uploaded_by', 'uploaded_at', 'file_id'
+        ]
+        
+        columns_to_remove = [col for col in metadata_columns_to_remove 
+                            if col in dataset_obj.column_names]
+        
+        if columns_to_remove:
+            dataset_obj = dataset_obj.remove_columns(columns_to_remove)
+            self.logger.info(f"🗑️ 기존 메타데이터 컬럼 제거: {columns_to_remove}")
+            
        # 통합된 컬럼 타입 변환 처리 (JSON dumps + 이미지)
         dataset_obj = self._process_cast_columns(dataset_obj)
         file_info = self._detect_file_columns_and_type(dataset_obj)

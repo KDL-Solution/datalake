@@ -38,7 +38,7 @@ class SchemaManager:
         config = self._read_config()
         return config.get('tasks', {}).get(task, {}).get('allowed_values', {})
     
-    def validate_task_metadata(self, task: str, metadata: dict) -> tuple[bool, str]:
+    def validate_task_metadata(self, task: str, meta: dict) -> tuple[bool, str]:
         """Task 메타데이터 검증"""
         if not self.validate_task(task):
             return False, f"지원하지 않는 task입니다: {task}"
@@ -46,14 +46,19 @@ class SchemaManager:
         required_fields = self.get_required_fields(task)
         allowed_values = self.get_allowed_values(task)
         
+        # required_fields에 없는 필드는 모두 차단
+        for field in meta.keys():
+            if field not in required_fields:
+                return False, f"허용되지 않은 필드입니다: '{field}'. 허용 필드: {required_fields}"
+        
         # 필수 필드 확인
         for field in required_fields:
-            if field not in metadata:
+            if field not in meta:
                 return False, f"필수 필드 '{field}'가 없습니다"
             
             # 허용 값 확인
             if field in allowed_values:
-                if metadata[field] not in allowed_values[field]:
+                if meta[field] not in allowed_values[field]:
                     return False, f"'{field}' 값이 잘못되었습니다. 허용값: {allowed_values[field]}"
         
         return True, "검증 성공"
