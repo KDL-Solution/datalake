@@ -5,18 +5,19 @@ import requests
 import fitz  # PyMuPDF
 import requests
 import json
+import re
 from datasets import load_dataset, Dataset
 from pathlib import Path
-from typing import List, Dict, Any, Set
+from typing import List, Dict, Any
 from urllib.parse import urlparse
 from pathlib import Path
 from pathlib import Path
 from PIL import Image
 from urllib.parse import urlparse, unquote
 
-import sys
-sys.path.insert(0, "C:/Users/korea/workspace/datalake/")
-from prep.utils import DATALAKE_DIR, get_safe_image_hash_from_pil
+# import sys
+# sys.path.insert(0, "C:/Users/korea/workspace/datalake/")
+from prep.utils import get_safe_image_hash_from_pil
 
 
 def build_dynamic_headers(
@@ -39,14 +40,37 @@ def build_dynamic_headers(
         "Upgrade-Insecure-Requests": "1",
         "Host": host,
     }
+pdf_url = "https://publicfiles.fcc.gov/api/manager/download/7df2a047-b59d-9012-9a6b-c0b18be7390d/36c9e056-87ea-4fe8-9504-9298fe7ac0af.pdf"
+session = requests.Session()
+session.max_redirects = 5
+response = session.get(
+    pdf_url,
+    headers=build_dynamic_headers(
+        pdf_url,
+    ),
+    stream=True,
+    timeout=20,
+    allow_redirects=True,
+)
+response.raise_for_status()
+
+
+def sanitize_filename(
+    filename: str,
+) -> str:
+    """Windows에서 사용할 수 없는 문자 제거
+    """
+    return re.sub(r'[<>:"/\\|?*]', '_', filename)
 
 
 class KVP10kProcessor(object):
     def __init__(
         self,
+        max_redirects: int = 5,
     ):
         self.failed = set()
-
+        self.session = requests.Session()
+        self.session.max_redirects = max_redirects
 
     def download_pdf(
         self,
@@ -59,41 +83,42 @@ class KVP10kProcessor(object):
             return False
 
         file_name = Path(unquote(urlparse(pdf_url).path)).name
+        file_name = sanitize_filename(
+            file_name,
+        )
         output_path = Path(save_dir) / file_name
         if output_path.exists():
             return True
 
-        headers = build_dynamic_headers(
-            pdf_url,
-        )
         try:
-            response = requests.get(
+            response = self.session.get(
                 pdf_url,
-                headers=headers,
+                headers=build_dynamic_headers(
+                    pdf_url,
+                ),
                 stream=True,
                 timeout=timeout,
+                allow_redirects=False,
             )
             response.raise_for_status()
-        except (
-            requests.exceptions.HTTPError,
-            requests.exceptions.ReadTimeout,
-        ):
+
+            content_type = response.headers.get("Content-Type", "")
+            if "application/pdf" not in content_type:
+                self.failed.add(pdf_url)
+                return False
+
+            output_path.parent.mkdir(
+                parents=True,
+                exist_ok=True,
+            )
+            with open(output_path.as_posix(), "wb") as f:
+                for chunk in response.iter_content(chunk_size=chunk_size):
+                    if chunk:
+                        f.write(chunk)
+            return True
+        except:
             self.failed.add(pdf_url)
             return False
-
-        content_type = response.headers.get("Content-Type", "")
-        if "application/pdf" not in content_type:
-            self.failed.add(pdf_url)
-            return False
-
-        output_path.parent.mkdir(
-            parents=True,
-            exist_ok=True,
-        )
-        with open(output_path, "wb") as f:
-            for chunk in response.iter_content(chunk_size=chunk_size):
-                f.write(chunk)
-        return True
 
     def save_images_and_generate_labels(
         self,
@@ -119,10 +144,11 @@ class KVP10kProcessor(object):
             if not pdf_path.exists():
                 continue
 
-            pdf = fitz.open(pdf_path)
             try:
+                pdf = fitz.open(pdf_path)
+                # pymupdf.FileDataError
                 page = pdf[example["page_number"] - 1]
-            except IndexError:
+            except:
                 continue
 
             pix = page.get_pixmap(
@@ -177,7 +203,6 @@ class KVP10kProcessor(object):
 
                 data[annot["_id"]] = {
                     "text": text,
-                    # "type": annot["label"],
                     "key": linking["value"],
                     "bbox": [
                         round(left * width),
@@ -217,6 +242,23 @@ class KVP10kProcessor(object):
             "label": labels,
         }
 
+    def filter_valid_pdfs(
+        self,
+        batch: Dict[str, List[Any]],
+            pdfs_dir: str,
+        ) -> List[bool]:
+            keep = []
+            for example in zip(*batch.values()):
+                example = dict(zip(batch.keys(), example))
+
+                keep.append(
+                    self.download_pdf(
+                        pdf_url=example["image_url"],
+                        save_dir=pdfs_dir,
+                    )
+                )
+            return keep
+
     def export(
         self,
         dataset: Dataset,
@@ -227,26 +269,10 @@ class KVP10kProcessor(object):
         indent: int = None,
         batch_size: int = 32,
     ):
-        # dataset=train_dataset
-        def filter_valid_pdfs(
-            batch: Dict[str, List[Any]],
-                pdfs_dir: str,
-            ) -> List[bool]:
-                keep = []
-                for example in zip(*batch.values()):
-                    example = dict(zip(batch.keys(), example))
-
-                    keep.append(
-                        self.download_pdf(
-                            pdf_url=example["image_url"],
-                            save_dir=pdfs_dir,
-                        )
-                    )
-                return keep
 
         # .pdf를 다운로드부터 받아 놓음:
         dataset = dataset.filter(
-            lambda x: filter_valid_pdfs(
+            lambda x: self.filter_valid_pdfs(
                 x,
                 pdfs_dir=pdfs_dir,
             ),
@@ -257,7 +283,7 @@ class KVP10kProcessor(object):
         if self.failed:
             print("\n❌ Failed to download the following PDFs:")
             for url in self.failed:
-                print(" •", url)
+                print(f"  • {url}")
 
         dataset = dataset.map(
             lambda x: self.save_images_and_generate_labels(
@@ -268,7 +294,7 @@ class KVP10kProcessor(object):
                 indent=indent,
             ),
             batched=True,
-            batch_size=batch_size,
+            batch_size=16,
             remove_columns=dataset.column_names,
         )
         dataset = dataset.filter(
@@ -288,9 +314,11 @@ class KVP10kProcessor(object):
 
 
 if __name__ == "__main__":
-    datalake_dir = "W:/datalake"
+    from prep.utils import DATALAKE_DIR
+
+    DATALAKE_DIR = "W:/datalake"
     dataset="kvp10k"
-    pdfs_dir = Path(datalake_dir) / f"source/provider=huggingface/dataset={dataset}"
+    pdfs_dir = Path(DATALAKE_DIR) / f"source/provider=huggingface/dataset={dataset}"
     train_dataset, test_dataset = load_dataset(
         "parquet",
         data_files={
@@ -303,6 +331,14 @@ if __name__ == "__main__":
         ],
     )
 
+
+    pdf_urls = list(train_dataset["image_url"])
+    # .txt 파일로 저장
+    with open("C:/Users/korea/workspace/datalake/prep/huggingface/kvp10k/pdf_url.txt", "w") as f:
+        for pdf_url in pdf_urls:
+            if pdf_url:  # 빈 URL 제외
+                _ = f.write(pdf_url + "\n")
+
     processor = KVP10kProcessor()
     processor.export(
         dataset=train_dataset,
@@ -310,7 +346,7 @@ if __name__ == "__main__":
         images_dir="C:/Users/korea/workspace/datalake/prep/huggingface/kvp10k/images_train",
         parquet_path="C:/Users/korea/workspace/datalake/prep/huggingface/kvp10k/train.parquet",
     )
-    export(
+    processor.export(
         dataset=test_dataset,
         pdfs_dir="C:/Users/korea/workspace/datalake/prep/huggingface/kvp10k/pdfs",
         images_dir="C:/Users/korea/workspace/datalake/prep/huggingface/kvp10k/images_test",
