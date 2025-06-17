@@ -61,17 +61,26 @@ def save_df_as_jsonl(
             _ = f.write(json.dumps(json_obj, ensure_ascii=False) + "\n")
 
 
-def round_by_factor(number: int, factor: int) -> int:
+def round_by_factor(
+    number: int,
+    factor: int,
+) -> int:
     """Returns the closest integer to 'number' that is divisible by 'factor'."""
     return round(number / factor) * factor
 
 
-def ceil_by_factor(number: int, factor: int) -> int:
+def ceil_by_factor(
+    number: int,
+    factor: int,
+) -> int:
     """Returns the smallest integer greater than or equal to 'number' that is divisible by 'factor'."""
     return math.ceil(number / factor) * factor
 
 
-def floor_by_factor(number: int, factor: int) -> int:
+def floor_by_factor(
+    number: int,
+    factor: int,
+) -> int:
     """Returns the largest integer less than or equal to 'number' that is divisible by 'factor'."""
     return math.floor(number / factor) * factor
 

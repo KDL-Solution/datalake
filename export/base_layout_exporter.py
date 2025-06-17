@@ -195,6 +195,7 @@ if __name__ == "__main__":
     exporter.export(
         df=df,
         jsonl_path=(ROOT / "data/office_docs.jsonl").as_posix(),
+        images_dir="/mnt/AI_NAS/datalake/catalog/"
     )
 
     # df = client.retrieve_with_existing_cols(

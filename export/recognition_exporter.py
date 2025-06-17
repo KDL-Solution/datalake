@@ -8,14 +8,14 @@ from pathlib import Path
 from PIL import Image
 
 from prep.utils import DATALAKE_DIR
-from export.utils import save_df_as_jsonl
+from export.utils import save_df_as_jsonl, user_prompt_dict
 
 
 class RecogntionCharExporter(object):
     def __init__(
         self,
         datalake_dir: str = DATALAKE_DIR,
-        user_prompt = "Read every text.",
+        user_prompt = user_prompt_dict["recognition"],
         charset_path: str = (
             Path(__file__).resolve().parent / "charset.txt"
         ).as_posix(),
@@ -194,14 +194,14 @@ if __name__ == "__main__":
 
     exporter.export(
         df=df,
-        jsonl_path="/home/eric/workspace/Qwen-SFT/diverse_ocr_char.jsonl",
+        jsonl_path="/home/eric/workspace/datalake/export/data/diverse_ocr_char.jsonl",
     )
-    exporter.export_with_composition(
-        df=df,
-        num_paragraphs=8,
-        images_per_paragraph=20,
-        images_dir="/home/eric/workspace/diverse_ocr_images",
-        jsonl_path="/home/eric/workspace/Qwen-SFT/diverse_ocr_char_composed.jsonl",
-        x_padding=80,
-        y_padding=20,
-    )
+    # exporter.export_with_composition(
+    #     df=df,
+    #     num_paragraphs=8,
+    #     images_per_paragraph=20,
+    #     images_dir="/home/eric/workspace/diverse_ocr_images",
+    #     jsonl_path="/home/eric/workspace/Qwen-SFT/diverse_ocr_char_composed.jsonl",
+    #     x_padding=80,
+    #     y_padding=20,
+    # )
