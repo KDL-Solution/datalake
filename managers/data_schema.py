@@ -8,27 +8,15 @@ class SchemaManager:
     
     def __init__(
         self, 
-        config_path: str = "/mnt/AI_NAS/datalake/config/schema.yaml",
+        base_path: str = "/mnt/AI_NAS/datalake",
         create_default: bool = False
     ):
-        self.config_path = Path(config_path)
+        self.config_path = Path(base_path) / "config" / "schema.yaml"
         if not self.config_path.exists():
             if create_default:
                 self.create_default_schema()
             else:
                 raise FileNotFoundError(f"❌ 스키마 설정 파일이 없습니다: {self.config_path}")
-    
-    def _read_config(self):
-        """파일락으로 안전하게 설정 읽기"""
-        with open(self.config_path, 'r', encoding='utf-8') as f:
-            fcntl.flock(f.fileno(), fcntl.LOCK_SH)  # 공유락
-            return yaml.safe_load(f)
-    
-    def _write_config(self, config):
-        """파일락으로 안전하게 설정 쓰기"""
-        with open(self.config_path, 'w', encoding='utf-8') as f:
-            fcntl.flock(f.fileno(), fcntl.LOCK_EX)  # 배타적 락
-            yaml.dump(config, f, default_flow_style=False, allow_unicode=True, indent=2)
     
     def validate_provider(self, provider: str) -> bool:
         """Provider 유효성 검증"""
@@ -50,7 +38,7 @@ class SchemaManager:
         config = self._read_config()
         return config.get('tasks', {}).get(task, {}).get('allowed_values', {})
     
-    def validate_task_metadata(self, task: str, metadata: dict) -> tuple[bool, str]:
+    def validate_task_metadata(self, task: str, meta: dict) -> tuple[bool, str]:
         """Task 메타데이터 검증"""
         if not self.validate_task(task):
             return False, f"지원하지 않는 task입니다: {task}"
@@ -58,14 +46,19 @@ class SchemaManager:
         required_fields = self.get_required_fields(task)
         allowed_values = self.get_allowed_values(task)
         
+        # required_fields에 없는 필드는 모두 차단
+        for field in meta.keys():
+            if field not in required_fields:
+                return False, f"허용되지 않은 필드입니다: '{field}'. 허용 필드: {required_fields}"
+        
         # 필수 필드 확인
         for field in required_fields:
-            if field not in metadata:
+            if field not in meta:
                 return False, f"필수 필드 '{field}'가 없습니다"
             
             # 허용 값 확인
             if field in allowed_values:
-                if metadata[field] not in allowed_values[field]:
+                if meta[field] not in allowed_values[field]:
                     return False, f"'{field}' 값이 잘못되었습니다. 허용값: {allowed_values[field]}"
         
         return True, "검증 성공"
@@ -152,7 +145,18 @@ class SchemaManager:
         config = self._read_config()
         return config.get('tasks', {})
     
+    def _read_config(self):
+        """파일락으로 안전하게 설정 읽기"""
+        with open(self.config_path, 'r', encoding='utf-8') as f:
+            fcntl.flock(f.fileno(), fcntl.LOCK_SH)  # 공유락
+            return yaml.safe_load(f)
     
+    def _write_config(self, config):
+        """파일락으로 안전하게 설정 쓰기"""
+        with open(self.config_path, 'w', encoding='utf-8') as f:
+            fcntl.flock(f.fileno(), fcntl.LOCK_EX)  # 배타적 락
+            yaml.dump(config, f, default_flow_style=False, allow_unicode=True, indent=2)
+            
     def _get_default_schema(self) -> dict:
         """기본 스키마 구조 반환"""
         return {
@@ -213,7 +217,7 @@ class SchemaManager:
             return False
         
         # 디렉토리 생성
-        self.config_path.parent.mkdir(parents=True, exist_ok=True)
+        self.config_path.parent.mkdir(mode=0o775,parents=True, exist_ok=True)
         
         # 기본 스키마 생성
         default_schema = self._get_default_schema()
@@ -228,6 +232,36 @@ class SchemaManager:
         except Exception as e:
             print(f"❌ 스키마 파일 생성 실패: {e}")
             return False
+        
+    def show_schema_info(self):
+        """스키마 정보 대시보드 출력"""
+        print("\n" + "="*60)
+        print("📋 Schema Configuration Dashboard")
+        print("="*60)
+        
+        # Providers
+        providers = self.get_all_providers()
+        print(f"\n🏢 Providers ({len(providers)}개):")
+        for provider in providers:
+            print(f"  • {provider}")
+        
+        # Tasks
+        tasks = self.get_all_tasks()
+        print(f"\n📝 Tasks ({len(tasks)}개):")
+        for task_name, task_config in tasks.items():
+            print(f"  • {task_name}")
+            
+            required_fields = task_config.get('required_fields', [])
+            if required_fields:
+                print(f"    📝 필수 필드: {', '.join(required_fields)}")
+            
+            allowed_values = task_config.get('allowed_values', {})
+            if allowed_values:
+                print(f"    🔧 허용 값:")
+                for field, values in allowed_values.items():
+                    print(f"      - {field}: {', '.join(values)}")
+        
+        print("="*60 + "\n")
     
 if __name__ == "__main__":
     import argparse

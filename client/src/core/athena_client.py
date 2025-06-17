@@ -25,13 +25,13 @@ class AthenaClient:
         session (boto3.Session): AWS 세션 객체
 
     Partition Info Example
-        catalog --- provider=A --- dataset=B --- task=D --- variant=X --- lang=Y --- src=Z --- abc.parquet  
+        catalog --- provider=A --- dataset=B --- task=D --- variant=X --- abc.parquet  
                 |__ ...        |__ ...        
                 |__ ...        |__ ...
                 |__ ...        |__ dataset=C --- ...
                 |__ ...
                 |__ provider=K --- ... 
-        Partitions = [provider, dataset, task, variant, lang, src]
+        Partitions = [provider, dataset, task, variant]
     """
 
     def __init__(
@@ -153,7 +153,7 @@ class AthenaClient:
             partition_conditions (Optional[Dict[str, str]], optional): 파티션 조건.
                 {파티션컬럼: 값} 형태로 지정. Defaults to None.
         Returns:
-            pd.DataFrame: 검색된 데이터의 image_path를 포함한 DataFrame
+            pd.DataFrame: 검색된 데이터의 hash, path를 포함한 DataFrame
         Example:
             >>> client = AthenaClient(database="my_db", s3_output="s3://my-bucket/output")
             >>> df = client.search_valid_content(
@@ -200,7 +200,7 @@ class AthenaClient:
             partition_conditions (Optional[Dict[str, str]], optional): 파티션 조건.
                 {파티션컬럼: 값} 형태로 지정. Defaults to None.
         Returns:
-            pd.DataFrame: 검색된 데이터의 image_path를 포함한 DataFrame
+            pd.DataFrame: 검색된 데이터의 hash,path를 포함한 DataFrame
         Example:
             >>> client = AthenaClient(database="my_db", s3_output="s3://my-bucket/output")
             >>> df = client.search_text_in_content(
@@ -246,69 +246,52 @@ class AthenaClient:
 
     def retrieve_with_existing_cols(
         self,
+        providers: List = [],
         tasks: List = [],
         variants: List = [],
         datasets: List = [],
-        providers: List = [],
+        table: str = "catalog"
     ) -> pd.DataFrame:
         """존재하는 컬럼만 포함해서 조회.
         """
-        sql_for_cols = f"""
-        SELECT *
-        FROM catalog"""
-
+        
+        conditions = []
+        
+        if providers:
+            provider_condition = " OR ".join([f"provider = '{i}'" for i in providers])
+            conditions.append(f"({provider_condition})")
+        
+        if datasets:
+            dataset_condition = " OR ".join([f"dataset = '{i}'" for i in datasets])
+            conditions.append(f"({dataset_condition})")
+            
         if tasks:
-            sql_for_cols += f" WHERE"
-            where_task = " OR ".join(
-                [f"task = '{i}'" for i in tasks]
-            )
-            sql_for_cols += f" ({where_task})"
+            tasks_condition = " OR ".join([f"task = '{i}'" for i in tasks])
+            conditions.append(f"({tasks_condition})")
 
         if variants:
-            variant_key = "AND" if tasks else "WHERE"
-            sql_for_cols += f" {variant_key}"
-            where_variant = " OR ".join(
-                [f"variant = '{i}'" for i in variants]
-            )
-            sql_for_cols += f" ({where_variant})"
+            variant_condition = " OR ".join([f"variant = '{i}'" for i in variants])
+            conditions.append(f"({variant_condition})")
 
-        if datasets:
-            dataset_key = "AND" if tasks or variants else "WHERE"
-            sql_for_cols += f" {dataset_key}"
-            where_dataset = " OR ".join(
-                [f"dataset = '{i}'" for i in datasets]
-            )
-            sql_for_cols += f" ({where_dataset})"
+        sql_for_cols = f"SELECT * FROM {table}"
+        if conditions:
+            sql_for_cols += f" WHERE {' AND '.join(conditions)}"
+        sql_for_cols += " LIMIT 1"
+        
+        try:
+            df_cols = self.execute_query(sql_for_cols)
+            if df_cols.empty:
+                return pd.DataFrame()
+            
+            cols = [k for k, v in df_cols.iloc[0].to_dict().items() if pd.notna(v)]
 
-        if providers:
-            provider_key = "AND" if tasks or variants or datasets else "WHERE"
-            sql_for_cols += f" {provider_key}"
-            where_provider = " OR ".join(
-                [f"provider = '{i}'" for i in providers]
-            )
-            sql_for_cols += f" ({where_provider})"
-
-        sql_for_cols += "\nLIMIT 1"
-        df_cols = self.execute_query(
-            sql=sql_for_cols
-        )
-        cols = [k for k, v in df_cols.iloc[0].to_dict().items() if v is not None]
-
-        sql = f"""
-        SELECT {", ".join(cols)}
-        FROM catalog"""
-
-        if tasks:
-            sql += f" WHERE ({where_task})"
-        if variants:
-            sql += f" {variant_key} ({where_variant})"
-        if datasets:
-            sql += f" {dataset_key} ({where_dataset})"
-        if providers:
-            sql += f" {provider_key} ({where_provider})"
-        return self.execute_query(
-            sql=sql
-        )
+            sql = f"SELECT {", ".join(cols)} FROM catalog"
+            if conditions:
+                sql += f" WHERE {' AND '.join(conditions)}"
+            return self.execute_query(sql)
+        except Exception as e:
+            print(f"컬럼 조회 실패: {str(e)}")
+            return pd.DataFrame()
 
     def run_crawler(
         self,
