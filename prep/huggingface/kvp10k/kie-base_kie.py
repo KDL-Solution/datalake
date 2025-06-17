@@ -6,6 +6,7 @@ import fitz  # PyMuPDF
 import requests
 import json
 import re
+import subprocess
 from datasets import load_dataset, Dataset
 from pathlib import Path
 from typing import List, Dict, Any
@@ -14,53 +15,122 @@ from pathlib import Path
 from pathlib import Path
 from PIL import Image
 from urllib.parse import urlparse, unquote
+import subprocess
+from pathlib import Path
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from tqdm import tqdm
 
 # import sys
-# sys.path.insert(0, "C:/Users/korea/workspace/datalake/")
+# sys.path.insert(0, "/home/eric/workspace/datalake/")
 from prep.utils import get_safe_image_hash_from_pil
 
 
-def build_dynamic_headers(
-    url: str,
-) -> dict:
-    parsed = urlparse(url)
-    host = parsed.netloc
-    referer = f"{parsed.scheme}://{host}"
-    return {
-        "User-Agent": (
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-            "AppleWebKit/537.36 (KHTML, like Gecko) "
-            "Chrome/122.0.0.0 Safari/537.36"
-        ),
-        "Accept": "application/pdf,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
-        "Accept-Encoding": "gzip, deflate, br",
-        "Accept-Language": "en-US,en;q=0.5",
-        "Referer": referer,
-        "Connection": "keep-alive",
-        "Upgrade-Insecure-Requests": "1",
-        "Host": host,
-    }
-pdf_url = "https://publicfiles.fcc.gov/api/manager/download/7df2a047-b59d-9012-9a6b-c0b18be7390d/36c9e056-87ea-4fe8-9504-9298fe7ac0af.pdf"
-session = requests.Session()
-session.max_redirects = 5
-response = session.get(
-    pdf_url,
-    headers=build_dynamic_headers(
-        pdf_url,
-    ),
-    stream=True,
-    timeout=20,
-    allow_redirects=True,
-)
-response.raise_for_status()
-
-
-def sanitize_filename(
-    filename: str,
+def sanitize(
+    s: str,
 ) -> str:
     """Windows에서 사용할 수 없는 문자 제거
     """
-    return re.sub(r'[<>:"/\\|?*]', '_', filename)
+    return re.sub(r'[<>:"/\\|?*]', '_', s)
+
+
+def url_to_filename(
+    url: str,
+) -> str:
+    filename = url.split("/")[-1].split("?")[0]
+    filename = sanitize(
+        filename,
+    )
+    if not filename.lower().endswith(".pdf"):
+        filename += ".pdf"
+    return filename
+
+
+def download(
+    url: str,
+    pdfs_dir: str,
+) -> str:
+    filename = url_to_filename(
+        url,
+    )
+
+    output_path = Path(pdfs_dir) / filename
+    if output_path.exists():
+        return
+
+    try:
+        subprocess.run(
+            [
+                "wget",
+                "--quiet",
+                "--tries=1",
+                "--timeout=20",
+                "--max-redirect=20",
+                "-nc",
+                url,
+                "-O",
+                output_path.as_posix(),
+            ],
+            check=True
+        )
+        # return f"✅ Downloaded: {url}"
+    except subprocess.CalledProcessError:
+        # return f"❌ Failed: {url}"
+        return
+
+
+def download_pdfs(
+    pdf_urls: List[str],
+    save_dir: str,
+):
+    if not isinstance(pdf_urls, list):
+        pdf_urls = list(pdf_urls)
+    pdf_urls.sort()
+
+    # .txt 파일로 저장:
+    txt_path = Path(__file__).resolve().parent / "pdf_urls.txt"
+    with open(txt_path.as_posix(), "w") as f:
+        for pdf_url in pdf_urls:
+            if pdf_url:  # 빈 URL 제외
+                _ = f.write(pdf_url + "\n")
+
+    # pdfs_dir = Path(__file__).resolve().parent / "pdfs"
+    save_dir.mkdir(
+        parents=True,
+        exist_ok=True,
+    )
+
+    # 병렬 다운로드 수행
+    max_workers = 16  # 병렬 개수 조정 가능
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        futures = [executor.submit(download, url) for url in pdf_urls]
+        # for future in tqdm(as_completed(futures), total=len(futures), desc="Downloading PDFs"):
+        #     result = future.result()
+        #     if result:
+        #         tqdm.write(result)  # 다운로드되었거나 실패한 경우만 출력
+        for _ in tqdm(as_completed(futures), total=len(futures), desc="Downloading PDFs"):
+            pass
+
+
+# def build_dynamic_headers(
+#     url: str,
+# ) -> dict:
+#     parsed = urlparse(url)
+#     host = parsed.netloc
+#     referer = f"{parsed.scheme}://{host}"
+#     return {
+#         "User-Agent": (
+#             "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+#             "AppleWebKit/537.36 (KHTML, like Gecko) "
+#             "Chrome/122.0.0.0 Safari/537.36"
+#         ),
+#         "Accept": "application/pdf,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
+#         "Accept-Encoding": "gzip, deflate, br",
+#         "Accept-Language": "en-US,en;q=0.5",
+#         "Referer": referer,
+#         "Connection": "keep-alive",
+#         "Upgrade-Insecure-Requests": "1",
+#         "Host": host,
+#     }
 
 
 class KVP10kProcessor(object):
@@ -72,53 +142,53 @@ class KVP10kProcessor(object):
         self.session = requests.Session()
         self.session.max_redirects = max_redirects
 
-    def download_pdf(
-        self,
-        pdf_url: str,
-        save_dir: str,
-        chunk_size: int = 8192,
-        timeout: int = 5,
-    ) -> Path:
-        if pdf_url in self.failed:
-            return False
+    # def download_pdf(
+    #     self,
+    #     pdf_url: str,
+    #     save_dir: str,
+    #     chunk_size: int = 8192,
+    #     timeout: int = 5,
+    # ) -> Path:
+    #     if pdf_url in self.failed:
+    #         return False
 
-        file_name = Path(unquote(urlparse(pdf_url).path)).name
-        file_name = sanitize_filename(
-            file_name,
-        )
-        output_path = Path(save_dir) / file_name
-        if output_path.exists():
-            return True
+    #     filename = Path(unquote(urlparse(pdf_url).path)).name
+    #     filename = sanitize_filename(
+    #         filename,
+    #     )
+    #     output_path = Path(save_dir) / filename
+    #     if output_path.exists():
+    #         return True
 
-        try:
-            response = self.session.get(
-                pdf_url,
-                headers=build_dynamic_headers(
-                    pdf_url,
-                ),
-                stream=True,
-                timeout=timeout,
-                allow_redirects=False,
-            )
-            response.raise_for_status()
+    #     try:
+    #         response = self.session.get(
+    #             pdf_url,
+    #             headers=build_dynamic_headers(
+    #                 pdf_url,
+    #             ),
+    #             stream=True,
+    #             timeout=timeout,
+    #             allow_redirects=False,
+    #         )
+    #         response.raise_for_status()
 
-            content_type = response.headers.get("Content-Type", "")
-            if "application/pdf" not in content_type:
-                self.failed.add(pdf_url)
-                return False
+    #         content_type = response.headers.get("Content-Type", "")
+    #         if "application/pdf" not in content_type:
+    #             self.failed.add(pdf_url)
+    #             return False
 
-            output_path.parent.mkdir(
-                parents=True,
-                exist_ok=True,
-            )
-            with open(output_path.as_posix(), "wb") as f:
-                for chunk in response.iter_content(chunk_size=chunk_size):
-                    if chunk:
-                        f.write(chunk)
-            return True
-        except:
-            self.failed.add(pdf_url)
-            return False
+    #         output_path.parent.mkdir(
+    #             parents=True,
+    #             exist_ok=True,
+    #         )
+    #         with open(output_path.as_posix(), "wb") as f:
+    #             for chunk in response.iter_content(chunk_size=chunk_size):
+    #                 if chunk:
+    #                     f.write(chunk)
+    #         return True
+    #     except:
+    #         self.failed.add(pdf_url)
+    #         return False
 
     def save_images_and_generate_labels(
         self,
@@ -139,8 +209,11 @@ class KVP10kProcessor(object):
 
             example = dict(zip(batch.keys(), example))
 
-            file_name = Path(unquote(urlparse(example["image_url"]).path)).name
-            pdf_path = Path(pdfs_dir) / file_name
+            # filename = Path(unquote(urlparse(example["image_url"]).path)).name
+            filename = url_to_filename(
+                example["image_url"],
+            )
+            pdf_path = Path(pdfs_dir) / filename
             if not pdf_path.exists():
                 continue
 
@@ -269,21 +342,15 @@ class KVP10kProcessor(object):
         indent: int = None,
         batch_size: int = 32,
     ):
-
-        # .pdf를 다운로드부터 받아 놓음:
+        print(len(dataset))
         dataset = dataset.filter(
-            lambda x: self.filter_valid_pdfs(
-                x,
-                pdfs_dir=pdfs_dir,
-            ),
-            batched=True,
-            batch_size=batch_size,
-            desc="Filtering valid PDFs",
+            lambda x: (
+                Path(pdfs_dir) / url_to_filename(
+                    x["image_url"],
+                )
+            ).exists()
         )
-        if self.failed:
-            print("\n❌ Failed to download the following PDFs:")
-            for url in self.failed:
-                print(f"  • {url}")
+        print(len(dataset))
 
         dataset = dataset.map(
             lambda x: self.save_images_and_generate_labels(
@@ -294,13 +361,14 @@ class KVP10kProcessor(object):
                 indent=indent,
             ),
             batched=True,
-            batch_size=16,
+            batch_size=batch_size,
             remove_columns=dataset.column_names,
         )
         dataset = dataset.filter(
             lambda x: x["label"] is not None,
             desc="Filtering valid samples",
         )
+        print(len(dataset))
 
         parquet_path = Path(parquet_path).resolve()
         parquet_path.parent.mkdir(
@@ -313,12 +381,14 @@ class KVP10kProcessor(object):
         )
 
 
-if __name__ == "__main__":
+def main(
+    download_pdfs: bool = True,
+) -> None:
     from prep.utils import DATALAKE_DIR
 
-    DATALAKE_DIR = "W:/datalake"
+    DATALAKE_DIR = "/mnt/AI_NAS/datalake"
     dataset="kvp10k"
-    pdfs_dir = Path(DATALAKE_DIR) / f"source/provider=huggingface/dataset={dataset}"
+    pdfs_dir = Path(DATALAKE_DIR) / f"archive/source/provider=huggingface/dataset={dataset}"
     train_dataset, test_dataset = load_dataset(
         "parquet",
         data_files={
@@ -330,25 +400,31 @@ if __name__ == "__main__":
             "test",
         ],
     )
+    pdfs_dir = "/home/eric/workspace/datalake/prep/huggingface/kvp10k/pdfs"
 
-
-    pdf_urls = list(train_dataset["image_url"])
-    # .txt 파일로 저장
-    with open("C:/Users/korea/workspace/datalake/prep/huggingface/kvp10k/pdf_url.txt", "w") as f:
-        for pdf_url in pdf_urls:
-            if pdf_url:  # 빈 URL 제외
-                _ = f.write(pdf_url + "\n")
+    if download_pdfs:
+        # pdf_urls = list(set(train_dataset["image_url"]) | set(test_dataset["image_url"]))
+        # download_pdfs(
+        #     pdf_urls=pdf_urls,
+        #     save_dir = Path("/home/eric/workspace/datalake/prep/huggingface/kvp10k/pdfs"),
+        # )
 
     processor = KVP10kProcessor()
     processor.export(
         dataset=train_dataset,
-        pdfs_dir="C:/Users/korea/workspace/datalake/prep/huggingface/kvp10k/pdfs",
-        images_dir="C:/Users/korea/workspace/datalake/prep/huggingface/kvp10k/images_train",
-        parquet_path="C:/Users/korea/workspace/datalake/prep/huggingface/kvp10k/train.parquet",
+        pdfs_dir=pdfs_dir,
+        images_dir="/home/eric/workspace/datalake/prep/huggingface/kvp10k/images_train",
+        parquet_path="/home/eric/workspace/datalake/prep/huggingface/kvp10k/train.parquet",
     )
     processor.export(
         dataset=test_dataset,
-        pdfs_dir="C:/Users/korea/workspace/datalake/prep/huggingface/kvp10k/pdfs",
-        images_dir="C:/Users/korea/workspace/datalake/prep/huggingface/kvp10k/images_test",
-        parquet_path="C:/Users/korea/workspace/datalake/prep/huggingface/kvp10k/test.parquet",
+        pdfs_dir=pdfs_dir,
+        images_dir="/home/eric/workspace/datalake/prep/huggingface/kvp10k/images_test",
+        parquet_path="/home/eric/workspace/datalake/prep/huggingface/kvp10k/test.parquet",
+    )
+if __name__ == "__main__":
+    import fire
+
+    fire.Fire(
+        main,
     )
