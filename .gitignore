@@ -198,3 +198,4 @@ pyrightconfig.json
 */data/
 *.sh
 *.arrow
+*.db

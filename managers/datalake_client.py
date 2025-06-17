@@ -15,15 +15,13 @@ from datasets.features import Image as ImageFeature
 from typing import Dict, Optional, List, Union
 from PIL import Image
 
-import sys
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from managers.data_schema import SchemaManager
-from managers.logging_setup import setup_logging
+from .data_schema import SchemaManager
+from .logging_setup import setup_logging
 
 class DatalakeClient:
     def __init__(
         self, 
-        base_path: str = "/mnt/AI_NAS/datalake/migrate_test",
+        base_path: str = "/mnt/AI_NAS/datalake/",
         nas_api_url: str = "http://192.168.20.62:8091",
         log_level: str = "INFO",
         num_proc: int = 8, # 병렬 처리 프로세스 수

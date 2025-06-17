@@ -16,13 +16,13 @@ from datasets import Dataset, load_from_disk
 from datasets.features import Image as ImageFeature
 from functools import partial
 
-from managers.logging_setup import setup_logging
+from .logging_setup import setup_logging
 
 class NASDataProcessor:
     
     def __init__(
         self,
-        base_path: str = "/mnt/AI_NAS/datalake/migrate_test",
+        base_path: str = "/mnt/AI_NAS/datalake/",
         log_level: str = "INFO",
         num_proc: int = 4,
         batch_size: int = 1000,  # map()의 배치 크기

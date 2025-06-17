@@ -57,7 +57,6 @@ class DuckDBClient:
             else:
                 # 인메모리 데이터베이스
                 self.connection = duckdb.connect(':memory:', read_only=read_only)
-            
             # 기본 확장 설치
             self._install_extensions()
             
@@ -113,7 +112,6 @@ class DuckDBClient:
                 """
             else:
                 sql = self.json_queries.create_table_from_parquet_duckdb(table_name, parquet_path)
-            
             self.connection.execute(sql)
             print(f"✅ 테이블 '{table_name}' 생성 완료")
             
