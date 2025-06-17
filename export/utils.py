@@ -54,7 +54,7 @@ def save_df_as_jsonl(
     with open(jsonl_path, "w", encoding="utf-8") as f:
         for row in df.itertuples(index=False):
             json_obj = to_chat_format(
-                image_paths=row.image_path,
+                image_paths=row.path,
                 user_prompts=row.query,
                 system_prompts=row.label,
             )

@@ -47,8 +47,9 @@ class RecogntionCharExporter(object):
             )
         ]
 
-        df_copied["image_path"] = df_copied["image_path"].apply(
-            lambda x: (Path(self.datalake_dir) / x).as_posix(),
+        df_copied["path"] = df_copied["path"].apply(
+            # lambda x: (Path(self.datalake_dir) / x).as_posix(),
+            lambda x: (Path(self.datalake_dir) / "assets" / x).as_posix(),
         )
         df_copied["query"] = self.user_prompt
 
@@ -127,11 +128,11 @@ class RecogntionCharExporter(object):
     ) -> None:
         df_copied = df.copy()
 
-        df_copied["image_path"] = df_copied["image_path"].apply(
+        df_copied["path"] = df_copied["path"].apply(
             lambda x: (Path(self.datalake_dir) / x).as_posix(),
         )
 
-        image_paths = df_copied["image_path"].tolist()
+        image_paths = df_copied["path"].tolist()
         labels = df_copied["label"].astype(str).tolist()
         total = len(image_paths)
 
@@ -167,7 +168,7 @@ class RecogntionCharExporter(object):
 
             export_data.append(
                 {
-                    "image_path": image_path.as_posix(),
+                    "path": image_path.as_posix(),
                     "query": self.user_prompt,
                     "label": composed_text,
                 }
@@ -180,21 +181,32 @@ class RecogntionCharExporter(object):
 
 
 if __name__ == "__main__":
-    from athena.src.core.athena_client import AthenaClient
+    # from athena.src.core.athena_client import AthenaClient
 
-    client = AthenaClient()
+    # client = AthenaClient()
 
-    df = client.retrieve_with_existing_cols(
-        datasets=[
-            "diverse_ocr_char",
-        ],
-    )
+    # df = client.retrieve_with_existing_cols(
+    #     datasets=[
+    #         "diverse_ocr_char",
+    #     ],
+    # )
+    import duckdb
+
+    conn = duckdb.connect()
+    read_parquet = "read_parquet('/mnt/AI_NAS/datalake/catalog/provider=*/dataset=*/task=*/variant=*/data.parquet', union_by_name=True, filename=True, hive_partitioning=True)"
+    sql=f"""SELECT *
+    FROM {read_parquet}
+    WHERE dataset = 'diverse_ocr_char' or dataset = 'diverse_ocr_word'
+        AND task != 'raw'"""
+    df = conn.execute(
+        sql,
+    ).fetchdf()
 
     exporter = RecogntionCharExporter()
 
     exporter.export(
         df=df,
-        jsonl_path="/home/eric/workspace/datalake/export/data/diverse_ocr_char.jsonl",
+        jsonl_path="/home/eric/workspace/datalake/export/data/diverse_ocr.jsonl",
     )
     # exporter.export_with_composition(
     #     df=df,
