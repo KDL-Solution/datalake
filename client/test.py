@@ -135,7 +135,7 @@ with DuckDBClient() as memory_db:  # database_path=None이면 인메모리
     # 특정 파일만 로드해서 분석
     memory_db.execute_query("""
         CREATE TABLE temp_analysis AS
-        SELECT * FROM read_parquet('/mnt/AI_NAS/datalake/migrate_test/catalog/provider=*/dataset=*/task=*/variant=*/*.parquet', hive_partitioning=true, union_by_name=true)
+        SELECT * FROM read_parquet('/mnt/AI_NAS/datalake/catalog/provider=*/dataset=*/task=*/variant=*/*.parquet', hive_partitioning=true, union_by_name=true)
         WHERE provider = 'huggingface'
     """)
     

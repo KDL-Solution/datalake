@@ -11,9 +11,8 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI, HTTPException, BackgroundTasks
 from pydantic import BaseModel
 
-sys.path.append(str(Path(__file__).resolve().parent.parent))  # 상위 디렉토리 추가
-from managers.nas_processor import NASDataProcessor
-from managers.logging_setup import setup_logging
+from .nas_processor import NASDataProcessor
+from .logging_setup import setup_logging
 # Request/Response 모델들
 class ProcessRequest(BaseModel):
     """처리 요청 모델"""
@@ -257,7 +256,7 @@ if __name__ == "__main__":
     parser.add_argument("--port", type=int, default=8000, help="Port to bind to")
     parser.add_argument("--workers", type=int, default=1, help="Number of workers")
     parser.add_argument("--log-level", default="INFO", help="Logging level (DEBUG, INFO, WARNING, ERROR, CRITICAL)")
-    parser.add_argument("--base-path", default="/mnt/AI_NAS/datalake/migrate_test", help="Base path for NAS data")
+    parser.add_argument("--base-path", default="/mnt/AI_NAS/datalake/", help="Base path for NAS data")
     parser.add_argument("--num-proc", type=int, default=16, help="Number of processing threads")
     parser.add_argument("--batch-size", type=int, default=1000, help="Batch size for processing")
     

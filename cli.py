@@ -1,15 +1,32 @@
 import argparse
-import sys
 import json
 import shutil
 import pandas as pd
+import psutil
 
 from datasets import Dataset
 from PIL import Image
 from pathlib import Path
-sys.path.append(str(Path(__file__).resolve().parent.parent))  # 상위 디렉토리 추가
-from managers.datalake_client import DatalakeClient
+
+from managers.datalake_client import DatalakeClient  
 from client.src.core.duckdb_client import DuckDBClient
+
+class CatalogError(Exception):
+    """Catalog 관련 오류"""
+    pass
+
+class CatalogNotFoundError(CatalogError):
+    """Catalog DB 파일이 없음"""
+    pass
+
+class CatalogEmptyError(CatalogError):
+    """Catalog에 데이터가 없음"""
+    pass
+
+class CatalogLockError(CatalogError):
+    """Catalog DB가 잠금 상태"""
+    pass
+
 
 class DataManagerCLI:
     """Data Manager CLI 인터페이스"""
@@ -26,18 +43,19 @@ class DataManagerCLI:
             log_level=log_level,
         )
         self.schema_manager = self.data_manager.schema_manager
+        self.duckdb_path = self.data_manager.base_path / "db" / "catalog.duckdb"
     
     def _check_and_update_catalog_db(self, duck_client, catalog_path):
-        """Catalog DB 상태 확인 및 업데이트 필요 여부 판단"""
+        """Catalog DB 상태 확인 및 업데이트 필요 여부 판단 (잠금 오류 방지)"""
         try:
             # 테이블 존재 여부 확인
             tables = duck_client.list_tables()
             if tables.empty or 'catalog' not in tables['name'].values:
                 print("📝 새로운 Catalog DB 생성 필요")
-                return True
+                raise Exception("Catalog 테이블이 존재하지 않습니다.")
             
             # DB 파일과 Parquet 파일들의 수정 시간 비교
-            db_path = self.data_manager.base_path / "catalog.duckdb"
+            db_path = self.duckdb_path
             db_mtime = db_path.stat().st_mtime if db_path.exists() else 0
             
             # 가장 최근 Parquet 파일의 수정 시간 확인
@@ -48,39 +66,42 @@ class DataManagerCLI:
                     latest_parquet_mtime = file_mtime
             
             if latest_parquet_mtime > db_mtime:
-                print("🔄 Parquet 파일이 DB보다 최신 → 업데이트 필요")
+                print("🔄 Parquet 파일이 DB보다 최신입니다.")
+                print("⚠️ 최신 데이터를 보려면 DB 업데이트가 필요합니다.")
+                
+                # 사용자에게 선택권 제공
+                choice = input("\n현재 DB로 계속 진행하시겠습니까? (y/N): ").strip().lower()
+                if choice not in ['y', 'yes']:
+                    print("❌ 작업이 취소되었습니다.")
+                    raise Exception("DB 업데이트가 필요합니다.")
+                
+                print("✅ 기존 DB로 계속 진행합니다.")
                 return True
             else:
-                print("✅ DB가 최신 상태")
-                return False
+                print("✅ DB가 최신 상태입니다.")
+                return True
                 
         except Exception as e:
-            print(f"⚠️ DB 상태 확인 실패, 재생성 진행: {e}")
-            return True
+            print(f"⚠️ DB 상태 확인 실패: {e}")
+            print("💡 'python cli.py catalog update' 명령으로 DB를 업데이트 할 수 있습니다.")
+            return False
 
-    def rebuild_catalog_db(self):
+    def _build_catalog_db(self):
         """Catalog DB 강제 재구축"""
-        print("\n" + "="*50)
-        print("🔨 Catalog DB 재구축")
-        print("="*50)
-        
         try:
-            db_path = self.data_manager.base_path / "catalog.duckdb"
+            db_path = self.duckdb_path
             catalog_path = self.data_manager.catalog_path
-            
             if not catalog_path.exists():
                 print("❌ Catalog 디렉토리가 존재하지 않습니다.")
                 return False
             
-            # 기존 DB 파일 백업
-            if db_path.exists():
-                backup_path = db_path.with_suffix('.duckdb.backup')
-                shutil.copy2(db_path, backup_path)
-                print(f"💾 기존 DB 백업: {backup_path}")
+            # # 기존 DB 파일 백업
+            # if db_path.exists():
+            #     backup_path = db_path.with_suffix('.duckdb.backup')
+            #     shutil.copy(db_path, backup_path)
+            #     print(f"💾 기존 DB 백업: {backup_path}")
             
-            print("🔄 Catalog DB 재구축 중...")
-            
-            with DuckDBClient(str(db_path), read_only=True) as duck_client:
+            with DuckDBClient(str(db_path), read_only=False) as duck_client:
                 # 기존 테이블 삭제 (있다면)
                 try:
                     duck_client.execute_query("DROP TABLE IF EXISTS catalog")
@@ -119,7 +140,7 @@ class DataManagerCLI:
         print("="*50)
         
         try:
-            db_path = self.data_manager.base_path / "catalog.duckdb"
+            db_path = self.duckdb_path
             
             if not db_path.exists():
                 print("❌ Catalog DB 파일이 없습니다.")
@@ -580,81 +601,91 @@ class DataManagerCLI:
         print("="*50)
         
         try:
-            # DuckDB 클라이언트 생성 (임시 DB 사용)
-            db_path = self.data_manager.base_path / "catalog.duckdb"
-            with DuckDBClient(str(db_path), read_only=True) as duck_client:
-                
-                print("🔄 Catalog 데이터 로딩 중...")
-                catalog_path = self.data_manager.catalog_path
+            db_path = self.duckdb_path
+            
+            # DB 파일 존재 확인
+            if not db_path.exists():
+                raise CatalogNotFoundError(
+                    "Catalog DB 파일이 없습니다. "
+                    "'python cli.py catalog update' 명령으로 먼저 DB를 생성해주세요."
+                )
+            
+            # Read-only 모드로 DuckDB 연결
+            try:
+                with DuckDBClient(str(db_path), read_only=True) as duck_client:
+                    print("🔄 Catalog 데이터 로딩 중...")
+                    catalog_path = self.data_manager.catalog_path
 
-                needs_update = self._check_and_update_catalog_db(duck_client, catalog_path)
-                if needs_update:
-                    print("🔄 Catalog DB 업데이트 중...")
-                    try:
-                        duck_client.create_table_from_parquet(
-                            "catalog",
-                            str(catalog_path / "**" / "*.parquet"),
-                            hive_partitioning=True,
-                            union_by_name=True
+                    # 업데이트 필요 여부만 확인하고 강제 업데이트하지 않음
+                    db_is_current = self._check_and_update_catalog_db(duck_client, catalog_path)
+                    if not db_is_current:
+                        raise CatalogError(
+                            "Catalog DB가 최신 상태가 아닙니다. "
+                            "'python cli.py catalog update' 명령으로 DB를 업데이트해주세요."
                         )
-                        print("✅ Catalog DB 업데이트 완료")
-                    except Exception as e:
-                        print(f"❌ Catalog DB 업데이트 실패: {e}")
-                        return False
-                else:
-                    print("✅ 기존 Catalog DB 사용")
                     
-                # 사용 가능한 파티션 확인
-                partitions_df = duck_client.retrieve_partitions("catalog")
-                if partitions_df.empty:
-                    print("❌ Catalog에 데이터가 없습니다.")
-                    return False
+                    # 사용 가능한 파티션 확인
+                    partitions_df = duck_client.retrieve_partitions("catalog")
+                    if partitions_df.empty:
+                        raise CatalogEmptyError(
+                            "Catalog에 데이터가 없습니다. "
+                            "'python cli.py catalog update' 명령으로 DB를 다시 구축해보세요."
+                        )
+                        
+                    print(f"📊 {len(partitions_df)} 개 파티션 사용 가능")
+            
+                    search_results = self._perform_search(duck_client, partitions_df)
                     
-                print(f"📊 {len(partitions_df)} 개 파티션 사용 가능")
-            
-                # 1. 검색 방법 선택
-                print("\n🔍 검색 방법을 선택하세요:")
-                print("  1. 파티션 기반 검색 (Provider/Dataset/Task/Variant)")
-                print("  2. 텍스트 검색 (JSON 라벨 내 텍스트)")
-            
-                search_choice = input("검색 방법 (1-2) [1]: ").strip() or "1"
-                
-                search_results = None
-                
-                if search_choice == "1":
-                    # 파티션 기반 검색
-                    search_results = self._partition_based_search(duck_client, partitions_df)
-                    print("\n📊 파티션 기반 검색 결과:")
-                    print(search_results.head(3).to_string(index=False, max_cols=5))
-                elif search_choice == "2":
-                    # 텍스트 검색
-                    search_results = self._text_based_search(duck_client)
-                else:
-                    print("❌ 잘못된 선택입니다.")
-                    return False
-                
-                if search_results is None or search_results.empty:
-                    print("❌ 검색 결과가 없습니다.")
-                    return False
-                
-                print(f"\n📊 검색 결과: {len(search_results):,}개 항목")
-                
-                # 결과 미리보기
-                print("\n📋 결과 미리보기:")
-                print(search_results.head(10))
-                if len(search_results) > 3:
-                    print(f"... (총 {len(search_results):,}개 항목)")
-                
-                # 다운로드 옵션 선택
-                return self._download_options(search_results)
-                
-        except KeyboardInterrupt:
-            print("\n❌ 다운로드가 취소되었습니다.")
-            return False
-        except Exception as e:
-            print(f"❌ 다운로드 중 오류: {e}")
-            return False
+                    if search_results is None or search_results.empty:
+                        raise CatalogError("검색 결과가 없습니다.")
+                    
+                    print(f"\n📊 검색 결과: {len(search_results):,}개 항목")
+                    
+                    # 결과 미리보기
+                    print("\n📋 결과 미리보기:")
+                    print(search_results.head(10))
+                    if len(search_results) > 3:
+                        print(f"... (총 {len(search_results):,}개 항목)")
+                    
+                    # 다운로드 옵션 선택
+                    return self._download_options(search_results)
 
+                    
+            except Exception as db_error:
+                if "lock" in str(db_error).lower() or "locked" in str(db_error).lower():
+                    raise CatalogLockError(
+                        "DB가 다른 프로세스에서 사용 중입니다. "
+                        "다른 CLI 세션이나 Jupyter 노트북에서 DB를 사용 중인지 확인해주세요."
+                    ) from db_error
+                else:
+                    raise CatalogError(f"DB 연결 오류: {db_error}") from db_error
+                    
+        except KeyboardInterrupt:
+            raise CatalogError("다운로드가 사용자에 의해 취소되었습니다.") from None
+        except CatalogError:
+            # 이미 우리가 정의한 예외는 그대로 전파
+            raise
+        except Exception as e:
+            raise CatalogError(f"다운로드 중 예상치 못한 오류: {e}") from e
+
+    def _perform_search(self, duck_client, partitions_df):
+        """검색 수행"""
+        print("\n🔍 검색 방법을 선택하세요:")
+        print("  1. 파티션 기반 검색 (Provider/Dataset/Task/Variant)")
+        print("  2. 텍스트 검색 (JSON 라벨 내 텍스트)")
+
+        search_choice = input("검색 방법 (1-2) [1]: ").strip() or "1"
+        
+        if search_choice == "1":
+            search_results = self._partition_based_search(duck_client, partitions_df)
+            print("\n📊 파티션 기반 검색 결과:")
+            print(search_results.head(3).to_string(index=False, max_cols=5))
+            return search_results
+        elif search_choice == "2":
+            return self._text_based_search(duck_client)
+        else:
+            raise CatalogError("잘못된 검색 방법을 선택했습니다.")
+    
     def _partition_based_search(self, duck_client: DuckDBClient, partitions_df: pd.DataFrame):
         """파티션 기반 검색 (Provider/Dataset/Task/Variant)"""
         print("\n🏢 Provider 선택:")
@@ -1219,18 +1250,217 @@ class DataManagerCLI:
         except Exception as e:
             print(f"❌ 데이터 현황 조회 중 오류: {e}")
             return False
-    
-    def show_status(self):
-        """상태 정보 출력"""
-        print("\n" + "="*60)
-        print("📊 Data Manager Status")
-        print("="*60)
+    def check_db_processes(self):
+        """DB 사용 중인 프로세스 확인 (개선된 버전)"""
+        print("\n🔍 DB 사용 중인 프로세스 확인")
+        print("="*50)
         
-        # Schema 정보
-        self.schema_manager.show_schema_info()
+        db_path = Path(self.duckdb_path).resolve()  # 절대경로로 변환
         
-        # NAS 상태
-        self.data_manager.show_nas_dashboard()
+        try:
+            using_processes = []
+            
+            for proc in psutil.process_iter(['pid', 'name', 'cmdline']):
+                try:
+                    # 1. cmdline 검사 (기존 방식)
+                    cmdline_match = False
+                    if proc.info['cmdline']:
+                        cmdline = ' '.join(proc.info['cmdline'])
+                        if str(db_path) in cmdline or 'catalog.duckdb' in cmdline:
+                            cmdline_match = True
+                    
+                    # 2. 열린 파일 디스크립터 검사 (새로운 방식)
+                    file_match = False
+                    try:
+                        process = psutil.Process(proc.info['pid'])
+                        open_files = process.open_files()
+                        for f in open_files:
+                            file_path = Path(f.path).resolve()
+                            # DB 파일이나 관련 파일들 확인
+                            if (file_path == db_path or 
+                                file_path.name == db_path.name or
+                                str(file_path).endswith('.duckdb') or
+                                str(file_path).endswith('.duckdb.wal') or
+                                str(file_path).endswith('.duckdb.tmp')):
+                                file_match = True
+                                break
+                    except (psutil.AccessDenied, psutil.NoSuchProcess):
+                        # 권한이 없거나 프로세스가 사라진 경우
+                        pass
+                    
+                    # 3. 메모리 매핑 검사 (추가)
+                    memory_match = False
+                    try:
+                        process = psutil.Process(proc.info['pid'])
+                        memory_maps = process.memory_maps()
+                        for m in memory_maps:
+                            if str(db_path) in m.path:
+                                memory_match = True
+                                break
+                    except (psutil.AccessDenied, psutil.NoSuchProcess, AttributeError):
+                        # 일부 시스템에서는 memory_maps()가 없을 수 있음
+                        pass
+                    
+                    # 하나라도 매치되면 DB 사용 중인 프로세스
+                    if cmdline_match or file_match or memory_match:
+                        match_type = []
+                        if cmdline_match: match_type.append("cmdline")
+                        if file_match: match_type.append("open_files")
+                        if memory_match: match_type.append("memory_map")
+                        
+                        using_processes.append({
+                            'pid': proc.info['pid'],
+                            'name': proc.info['name'],
+                            'cmdline': cmdline[:100] + '...' if len(cmdline) > 100 else cmdline,
+                            'match_type': ', '.join(match_type)
+                        })
+                        
+                except (psutil.NoSuchProcess, psutil.AccessDenied):
+                    continue
+            
+            if using_processes:
+                print(f"⚠️ {len(using_processes)}개 프로세스가 DB를 사용 중:")
+                for proc in using_processes:
+                    print(f"  PID {proc['pid']}: {proc['name']} (감지: {proc['match_type']})")
+                    print(f"    명령어: {proc['cmdline']}")
+                
+                print(f"\n💡 종료 방법:")
+                print(f"  - Jupyter 노트북: 커널 재시작")
+                print(f"  - Python 스크립트: Ctrl+C로 종료")
+                print(f"  - 강제 종료: kill -9 <PID>")
+                
+                # 4. lsof로도 한번 더 확인 (Linux/Mac)
+                print(f"\n🔍 lsof로 추가 확인:")
+                try:
+                    import subprocess
+                    result = subprocess.run(['lsof', str(db_path)], 
+                                        capture_output=True, text=True, timeout=5)
+                    if result.stdout:
+                        print(result.stdout)
+                    else:
+                        print("  lsof에서 추가 프로세스 발견되지 않음")
+                except (subprocess.TimeoutExpired, FileNotFoundError, subprocess.SubprocessError):
+                    print("  lsof 명령어 사용 불가")
+                    
+            else:
+                print("✅ DB를 사용 중인 프로세스가 없습니다.")
+                
+                # 그래도 잠금 상태라면 파일 시스템 이슈일 수 있음
+                print(f"\n🔍 DB 파일 상태 확인:")
+                print(f"  경로: {db_path}")
+                print(f"  존재: {db_path.exists()}")
+                if db_path.exists():
+                    stat = db_path.stat()
+                    print(f"  크기: {stat.st_size:,} bytes")
+                    print(f"  수정시간: {datetime.fromtimestamp(stat.st_mtime)}")
+                    
+                    # WAL 파일도 확인
+                    wal_file = db_path.with_suffix('.duckdb.wal')
+                    if wal_file.exists():
+                        print(f"  ⚠️ WAL 파일 존재: {wal_file} (비정상 종료 가능성)")
+                        
+        except ImportError:
+            print("❌ psutil 라이브러리가 필요합니다: pip install psutil")
+        except Exception as e:
+            print(f"❌ 프로세스 확인 실패: {e}")
+
+    def safe_update_catalog_db(self):
+        """잠금 상태 확인 후 안전한 DB 업데이트"""
+        print("\n" + "="*50)
+        print("🔄 Catalog DB 안전 업데이트")
+        print("="*50)
+        
+        db_path = self.duckdb_path
+        
+        # 1. 잠금 테스트
+        print("🔍 DB 잠금 상태 확인 중...")
+        try:
+            # 임시 연결로 잠금 테스트
+            with DuckDBClient(str(db_path), read_only=False) as test_client:
+                test_client.execute_query("SELECT 1")
+            print("✅ DB 잠금 없음 - 업데이트 가능")
+            
+        except Exception as e:
+            if "lock" in str(e).lower():
+                print("❌ DB가 잠금 상태입니다.")
+                print("\n🔍 사용 중인 프로세스 확인:")
+                self.check_db_processes()
+                
+                force = input("\n그래도 강제 업데이트하시겠습니까? (y/N): ").strip().lower()
+                if force not in ['y', 'yes']:
+                    print("❌ 업데이트가 취소되었습니다.")
+                    return False
+            else:
+                print(f"❌ DB 연결 테스트 실패: {e}")
+                return False
+        
+        # 2. 실제 업데이트
+        print("\n🔄 업데이트 시작...")
+        return self._build_catalog_db()
+
+    def quick_catalog_check(self):
+        """빠른 카탈로그 상태 확인"""
+        print("\n📊 Catalog 빠른 상태 확인")
+        print("="*40)
+        
+        try:
+            db_path = self.duckdb_path
+            catalog_path = self.data_manager.catalog_path
+            
+            if not db_path.exists():
+                print("❌ DB 파일 없음")
+                return False
+            
+            if not catalog_path.exists():
+                print("❌ Catalog 디렉토리 없음")
+                return False
+            
+            # 파일 정보
+            from datetime import datetime
+            db_mtime = datetime.fromtimestamp(db_path.stat().st_mtime)
+            db_size = db_path.stat().st_size / 1024 / 1024
+            
+            # 최신 Parquet 파일 확인
+            latest_parquet = None
+            latest_parquet_mtime = 0
+            
+            for parquet_file in catalog_path.rglob("*.parquet"):
+                file_mtime = parquet_file.stat().st_mtime
+                if file_mtime > latest_parquet_mtime:
+                    latest_parquet_mtime = file_mtime
+                    latest_parquet = parquet_file
+            
+            print(f"📁 DB: {db_size:.1f}MB ({db_mtime.strftime('%m-%d %H:%M')})")
+            
+            if latest_parquet:
+                latest_parquet_dt = datetime.fromtimestamp(latest_parquet_mtime)
+                print(f"📄 최신 Parquet: {latest_parquet_dt.strftime('%m-%d %H:%M')}")
+                
+                if latest_parquet_mtime > db_path.stat().st_mtime:
+                    print("⚠️ DB 업데이트 필요")
+                else:
+                    print("✅ DB 최신 상태")
+            
+            # 잠금 상태 확인
+            try:
+                with DuckDBClient(str(db_path), read_only=True) as duck_client:
+                    tables = duck_client.list_tables()
+                    if 'catalog' in tables['name'].values:
+                        count = duck_client.execute_query("SELECT COUNT(*) as total FROM catalog")
+                        print(f"📊 총 {count['total'].iloc[0]:,}개 행")
+                    else:
+                        print("❌ catalog 테이블 없음")
+            except Exception as e:
+                if "lock" in str(e).lower():
+                    print("🔒 DB 잠금 상태 (다른 프로세스 사용 중)")
+                else:
+                    print(f"❌ DB 연결 실패: {e}")
+            
+            return True
+            
+        except Exception as e:
+            print(f"❌ 상태 확인 실패: {e}")
+            return False
 
 
 def main():
@@ -1269,6 +1499,7 @@ def main():
 📊 Catalog DB 관리:
   python cli.py catalog info                   # Catalog DB 정보 확인
   python cli.py catalog rebuild                # Catalog DB 강제 재구축
+  python cli.py catalog update                 # Catalog DB 업데이트 
   
 📊 상태 확인:
   python cli.py status                         # 전체 상태 대시보드
@@ -1278,7 +1509,7 @@ def main():
      dataset = load_from_disk('./downloads/my_dataset')
         """
     )
-    parser.add_argument("--base-path", default="/mnt/AI_NAS/datalake/migrate_test",
+    parser.add_argument("--base-path", default="/mnt/AI_NAS/datalake",
                        help="데이터 저장 기본 경로")
     parser.add_argument("--nas-url", default="http://192.168.20.62:8091", 
                        help="NAS API 서버 URL")
@@ -1328,9 +1559,10 @@ def main():
     catalog_subparsers = catalog_parser.add_subparsers(dest='catalog_action')
     catalog_subparsers.add_parser('info', help='Catalog DB 정보 확인')
     catalog_subparsers.add_parser('rebuild', help='Catalog DB 강제 재구축')
-    
+    catalog_subparsers.add_parser('check', help='Catalog 빠른 상태 확인')
+    catalog_subparsers.add_parser('update', help='Catalog DB 안전 업데이트')
+    catalog_subparsers.add_parser('processes', help='DB 사용 프로세스 확인')
     # 상태 확인
-    subparsers.add_parser('status', help='전체 상태 확인')
     
     args = parser.parse_args()
     if not args.command:
@@ -1342,7 +1574,6 @@ def main():
         print("  📤 python cli.py download   - 데이터 다운로드")
         print("  🔄 python cli.py process    - 데이터 처리")
         print("  📊 python cli.py catalog    - Catalog DB 관리")
-        print("  📊 python cli.py status     - 상태 확인")
         
         print("\n🌟 처음 사용하시나요? 다음 순서로 시작해보세요:")
         print("  1️⃣ python cli.py config provider create  # 데이터 제공자 생성")
@@ -1460,20 +1691,23 @@ def main():
             elif args.process_action == 'list':
                 cli.list_all_data()
         
-        elif args.command == 'status':
-            cli.show_status()
-        
         elif args.command == 'catalog':
             if not args.catalog_action:
                 print("\n❓ catalog 하위 명령어를 선택해주세요:")
-                print("  📊 python cli.py catalog info     - Catalog DB 정보 확인")
-                print("  🔨 python cli.py catalog rebuild  - Catalog DB 강제 재구축")
+                print("  📊 python cli.py catalog info     - Catalog DB 상세 정보")
+                print("  🔍 python cli.py catalog check    - Catalog 빠른 상태 확인")
+                print("  🔄 python cli.py catalog update   - Catalog DB 안전 업데이트")
+                print("  🔍 python cli.py catalog processes - DB 사용 프로세스 확인")
                 return
                 
             if args.catalog_action == 'info':
                 cli.show_catalog_db_info()
-            elif args.catalog_action == 'rebuild':
-                cli.rebuild_catalog_db()
+            elif args.catalog_action == 'check':  # 새로 추가
+                cli.quick_catalog_check()
+            elif args.catalog_action == 'update':  # 새로 추가
+                cli.safe_update_catalog_db()
+            elif args.catalog_action == 'processes':  # 새로 추가
+                cli.check_db_processes() 
             
     except KeyboardInterrupt:
         print("\n👋 작업이 중단되었습니다.")
@@ -1487,9 +1721,17 @@ def main():
     except ConnectionError as e:
         print(f"❌ 연결 오류: {e}")
         print("💡 NAS 서버 연결을 확인해주세요.")
+    except CatalogNotFoundError as e:
+        print(f"❌ {e}")
+    except CatalogEmptyError as e:
+        print(f"❌ {e}")
+    except CatalogLockError as e:
+        print(f"❌ {e}")
+        print("💡 잠시 후 다시 시도해주세요.")
+    except CatalogError as e:
+        print(f"❌ {e}")
     except Exception as e:
-        print(f"❌ 예상하지 못한 오류가 발생했습니다: {e}")
-        print("💡 문제가 지속되면 관리자에게 문의해주세요.")
+        print(f"❌ 예상치 못한 오류: {e}")
 
 
 if __name__ == "__main__":

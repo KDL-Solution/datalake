@@ -267,7 +267,7 @@ if __name__ == "__main__":
     import argparse
     parser = argparse.ArgumentParser(description="Schema Manager")
     parser.add_argument('--init', action='store_true', help='기본 스키마 파일 생성')
-    parser.add_argument('--config', default='/mnt/AI_NAS/datalake/migrate_test/config/schema.yaml', 
+    parser.add_argument('--config', default='/mnt/AI_NAS/datalake/config/schema.yaml', 
                        help='스키마 파일 경로')
     args = parser.parse_args()
     schema_manager = SchemaManager(args.config, create_default=args.init)
