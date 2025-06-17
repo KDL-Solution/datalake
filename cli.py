@@ -1241,8 +1241,8 @@ class DataManagerCLI:
             
         except ImportError:
             print("❌ datasets 라이브러리가 필요합니다: pip install datasets")
-            print("🔄 기본 방식으로 대체 실행...")
-            return self._validate_data_integrity_fallback(provider, fix_issues, generate_report)
+            return False
+            
         except Exception as e:
             print(f"❌ 검사 중 오류: {e}")
             return False
