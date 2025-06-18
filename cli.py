@@ -1201,51 +1201,115 @@ class DataManagerCLI:
             return False
 
     def _build_catalog_db(self):
-        """Catalog DB 강제 재구축"""
+        """Catalog DB 완전 재구축 (기존 파일 삭제)"""
         try:
             db_path = self.duckdb_path
             catalog_path = self.data_manager.catalog_path
+            
             if not catalog_path.exists():
                 print("❌ Catalog 디렉토리가 존재하지 않습니다.")
                 return False
             
-            # # 기존 DB 파일 백업
-            # if db_path.exists():
-            #     backup_path = db_path.with_suffix('.duckdb.backup')
-            #     shutil.copy(db_path, backup_path)
-            #     print(f"💾 기존 DB 백업: {backup_path}")
+            print("🔄 Catalog DB 완전 재구축 시작...")
             
-            with DuckDBClient(str(db_path), read_only=False) as duck_client:
-                # 기존 테이블 삭제 (있다면)
+            # 1. 기존 DB 파일 완전 삭제
+            if db_path.exists():
                 try:
-                    duck_client.execute_query("DROP TABLE IF EXISTS catalog")
-                except:
-                    pass
+                    print(f"🗑️ 기존 DB 파일 삭제: {db_path}")
+                    db_path.unlink()
+                    
+                    # WAL, SHM 파일도 삭제
+                    wal_file = db_path.with_suffix('.duckdb-wal')
+                    if wal_file.exists():
+                        wal_file.unlink()
+                        print(f"🗑️ WAL 파일 삭제: {wal_file}")
+                    
+                    shm_file = db_path.with_suffix('.duckdb-shm')  
+                    if shm_file.exists():
+                        shm_file.unlink()
+                        print(f"🗑️ SHM 파일 삭제: {shm_file}")
+                        
+                    # 기타 DuckDB 관련 파일들
+                    for ext in ['.duckdb.wal', '.duckdb.tmp', '.duckdb.lock']:
+                        temp_file = db_path.with_suffix(ext)
+                        if temp_file.exists():
+                            temp_file.unlink()
+                            print(f"🗑️ 임시 파일 삭제: {temp_file}")
+                            
+                except Exception as e:
+                    print(f"⚠️ 기존 파일 삭제 중 오류: {e}")
+                    # 계속 진행
+            
+            # 2. 디렉토리 생성 (없으면)
+            db_path.parent.mkdir(parents=True, exist_ok=True)
+            
+            # 3. 완전히 새로운 DB 생성
+            print("🔨 새 DB 파일 생성 중...")
+            with DuckDBClient(str(db_path), read_only=False) as duck_client:
                 
-                # 새로 생성
+                # 4. Parquet 파일들 확인
+                parquet_pattern = str(catalog_path / "**" / "*.parquet")
+                parquet_files = list(catalog_path.rglob("*.parquet"))
+                
+                if not parquet_files:
+                    print("❌ Parquet 파일을 찾을 수 없습니다.")
+                    return False
+                
+                print(f"📂 발견된 Parquet 파일: {len(parquet_files)}개")
+                
+                # 5. 새 테이블 생성
+                print("📊 Catalog 테이블 생성 중...")
                 duck_client.create_table_from_parquet(
                     "catalog",
-                    str(catalog_path / "**" / "*.parquet"),
+                    parquet_pattern,
                     hive_partitioning=True,
                     union_by_name=True
                 )
                 
-                # 결과 확인
+                # 6. 결과 검증
+                print("✅ 생성 완료! 결과 검증 중...")
+                
+                # 행 수 확인
                 count_result = duck_client.execute_query("SELECT COUNT(*) as total FROM catalog")
                 total_rows = count_result['total'].iloc[0]
                 
-                partitions_df = duck_client.retrieve_partitions("catalog")
-                total_partitions = len(partitions_df)
+                # 파티션 확인
+                try:
+                    partitions_df = duck_client.retrieve_partitions("catalog")
+                    total_partitions = len(partitions_df)
+                except Exception as e:
+                    print(f"⚠️ 파티션 정보 조회 실패: {e}")
+                    total_partitions = "알 수 없음"
                 
-                print(f"✅ Catalog DB 재구축 완료!")
-                print(f"📊 총 {total_rows:,}개 행, {total_partitions}개 파티션")
+                # 컬럼 확인
+                try:
+                    table_info = duck_client.get_table_info("catalog")
+                    columns = table_info['column_name'].tolist()
+                    print(f"📋 컬럼: {len(columns)}개 - {', '.join(columns[:5])}{'...' if len(columns) > 5 else ''}")
+                except Exception as e:
+                    print(f"⚠️ 컬럼 정보 조회 실패: {e}")
+                
+                # 샘플 데이터 확인
+                try:
+                    sample = duck_client.execute_query("SELECT * FROM catalog LIMIT 3")
+                    print(f"📄 샘플 데이터 확인됨: {len(sample)}개 행")
+                except Exception as e:
+                    print(f"⚠️ 샘플 데이터 조회 실패: {e}")
+                
+                print("\n" + "="*60)
+                print("✅ Catalog DB 재구축 완료!")
+                print(f"📊 총 {total_rows:,}개 행")
+                print(f"🏷️ 파티션: {total_partitions}개")  
                 print(f"💾 DB 파일: {db_path}")
                 print(f"📁 파일 크기: {db_path.stat().st_size / 1024 / 1024:.1f}MB")
+                print("="*60)
                 
                 return True
                 
         except Exception as e:
             print(f"❌ DB 재구축 실패: {e}")
+            import traceback
+            traceback.print_exc()
             return False
         
     def _perform_search(self, duck_client, partitions_df):
