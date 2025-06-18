@@ -37,7 +37,7 @@ class DataManagerCLI:
         base_path: str = "/mnt/AI_NAS/datalake",
         nas_api_url: str = "http://192.168.20.62:8091",
         log_level: str = "INFO",
-        num_proc: int = 8,
+        num_proc: int = 16,
     ):
         self.data_manager = DatalakeClient(
             base_path=base_path,
@@ -1235,148 +1235,196 @@ class DataManagerCLI:
         search_choice = input("검색 방법 (1-2) [1]: ").strip() or "1"
         
         if search_choice == "1":
-            search_results = self._partition_based_search(duck_client, partitions_df)
+            search_results = self._partition_search(duck_client, partitions_df)
             print("\n📊 파티션 기반 검색 결과:")
             print(search_results.head(3).to_string(index=False, max_cols=5))
             return search_results
         elif search_choice == "2":
-            return self._text_based_search(duck_client)
+            return self._text_search(duck_client)
         else:
             raise CatalogError("잘못된 검색 방법을 선택했습니다.")
     
-    def _partition_based_search(self, duck_client: DuckDBClient, partitions_df: pd.DataFrame):
-        """파티션 기반 검색 (Provider/Dataset/Task/Variant)"""
-        print("\n🏢 Provider 선택:")
+    def _partition_search(self, duck_client: DuckDBClient, partitions_df: pd.DataFrame):
+        """파티션 기반 검색"""
         
-        providers = sorted(partitions_df['provider'].unique().tolist())
-        print("사용 가능한 Provider:")
-        for i, provider in enumerate(providers, 1):
-            count = len(partitions_df[partitions_df['provider'] == provider])
-            print(f"  {i}. {provider} ({count}개 파티션)")
+        # 1. Provider 선택
+        providers = self._select_items(
+            items=sorted(partitions_df['provider'].unique().tolist()),
+            name="Provider",
+            partitions_df=partitions_df,
+            column='provider',
+            level="task",
+        )
+        if not providers:
+            return None
         
-        provider_choice = input("Provider 선택 (번호/이름, 전체는 Enter): ").strip()
-        selected_providers = []
+        # 2. Dataset 선택 (필터링된 결과에서)
+        filtered_df = partitions_df[partitions_df['provider'].isin(providers)]
+        datasets = self._select_items(
+            items=sorted(filtered_df['dataset'].unique().tolist()),
+            name="Dataset",
+            partitions_df=filtered_df,
+            column='dataset',
+            level="task",
+        )
+        if not datasets:
+            return None
         
-        if not provider_choice:
-            selected_providers = providers
-            print("✅ 모든 Provider 선택")
-        elif provider_choice.isdigit():
-            idx = int(provider_choice) - 1
-            if 0 <= idx < len(providers):
-                selected_providers = [providers[idx]]
-            else:
-                print("❌ 잘못된 번호입니다.")
-                return None
-        else:
-            if provider_choice in providers:
-                selected_providers = [provider_choice]
-            else:
-                print(f"❌ Provider '{provider_choice}'가 존재하지 않습니다.")
-                return None
+        # 3. Task 선택
+        filtered_df = filtered_df[filtered_df['dataset'].isin(datasets)]
+        tasks = self._select_items(
+            items=sorted(filtered_df['task'].unique().tolist()),
+            name="Task",
+            partitions_df=filtered_df,
+            column='task',
+            level='variant',
+        )
+        if not tasks:
+            return None
         
-        # Dataset 선택
-        filtered_partitions = partitions_df[partitions_df['provider'].isin(selected_providers)]
-        datasets = sorted(filtered_partitions['dataset'].unique().tolist())
+        # 4. Variant 선택
+        filtered_df = filtered_df[filtered_df['task'].isin(tasks)]
+        variants = self._select_items(
+            items=sorted(filtered_df['variant'].unique().tolist()),
+            name="Variant",
+            partitions_df=filtered_df,
+            column='variant',
+            level="dataset"
+        )
+        if not variants:
+            return None
         
-        print(f"\n📦 Dataset 선택 ({len(datasets)}개 사용 가능):")
-        for i, dataset in enumerate(datasets, 1):
-            count = len(filtered_partitions[filtered_partitions['dataset'] == dataset])
-            print(f"  {i}. {dataset} ({count}개 파티션)")
-        
-        dataset_choice = input("Dataset 선택 (번호/이름, 전체는 Enter): ").strip()
-        selected_datasets = []
-        
-        if not dataset_choice:
-            selected_datasets = datasets
-            print("✅ 모든 Dataset 선택")
-        elif dataset_choice.isdigit():
-            idx = int(dataset_choice) - 1
-            if 0 <= idx < len(datasets):
-                selected_datasets = [datasets[idx]]
-            else:
-                print("❌ 잘못된 번호입니다.")
-                return None
-        else:
-            if dataset_choice in datasets:
-                selected_datasets = [dataset_choice]
-            else:
-                print(f"❌ Dataset '{dataset_choice}'가 존재하지 않습니다.")
-                return None
-        
-        # Task 선택
-        filtered_partitions = filtered_partitions[filtered_partitions['dataset'].isin(selected_datasets)]
-        tasks = sorted(filtered_partitions['task'].unique().tolist())
-        
-        print(f"\n📝 Task 선택 ({len(tasks)}개 사용 가능):")
-        for i, task in enumerate(tasks, 1):
-            count = len(filtered_partitions[filtered_partitions['task'] == task])
-            print(f"  {i}. {task} ({count}개 파티션)")
-        
-        task_choice = input("Task 선택 (번호/이름, 전체는 Enter): ").strip()
-        selected_tasks = []
-        
-        if not task_choice:
-            selected_tasks = tasks
-            print("✅ 모든 Task 선택")
-        elif task_choice.isdigit():
-            idx = int(task_choice) - 1
-            if 0 <= idx < len(tasks):
-                selected_tasks = [tasks[idx]]
-            else:
-                print("❌ 잘못된 번호입니다.")
-                return None
-        else:
-            if task_choice in tasks:
-                selected_tasks = [task_choice]
-            else:
-                print(f"❌ Task '{task_choice}'가 존재하지 않습니다.")
-                return None
-        
-        # Variant 선택
-        filtered_partitions = filtered_partitions[filtered_partitions['task'].isin(selected_tasks)]
-        variants = sorted(filtered_partitions['variant'].unique().tolist())
-        
-        print(f"\n🏷️ Variant 선택 ({len(variants)}개 사용 가능):")
-        for i, variant in enumerate(variants, 1):
-            count = len(filtered_partitions[filtered_partitions['variant'] == variant])
-            print(f"  {i}. {variant} ({count}개 파티션)")
-        
-        variant_choice = input("Variant 선택 (번호/이름, 전체는 Enter): ").strip()
-        selected_variants = []
-        
-        if not variant_choice:
-            selected_variants = variants
-            print("✅ 모든 Variant 선택")
-        elif variant_choice.isdigit():
-            idx = int(variant_choice) - 1
-            if 0 <= idx < len(variants):
-                selected_variants = [variants[idx]]
-            else:
-                print("❌ 잘못된 번호입니다.")
-                return None
-        else:
-            if variant_choice in variants:
-                selected_variants = [variant_choice]
-            else:
-                print(f"❌ Variant '{variant_choice}'가 존재하지 않습니다.")
-                return None
-        
-        # 쿼리 실행
-        print(f"\n🔍 검색 중...")
-        print(f"  Provider: {selected_providers}")
-        print(f"  Dataset: {selected_datasets}")
-        print(f"  Task: {selected_tasks}")
-        print(f"  Variant: {selected_variants}")
+        # 5. 검색 실행
+        print(f"\n🔍 검색 실행:")
+        print(f"  Provider: {providers}")
+        print(f"  Dataset: {datasets}")
+        print(f"  Task: {tasks}")
+        print(f"  Variant: {variants}")
         
         return duck_client.retrieve_with_existing_cols(
-            providers=selected_providers,
-            datasets=selected_datasets,
-            tasks=selected_tasks,
-            variants=selected_variants,
+            providers=providers,
+            datasets=datasets,
+            tasks=tasks,
+            variants=variants,
             table="catalog"
         )
 
-    def _text_based_search(self, duck_client: DuckDBClient):
+    def _select_items(self, items, name, partitions_df, column, level):
+        """아이템 다중 선택"""
+        if not items:
+            print(f"❌ 사용 가능한 {name}가 없습니다.")
+            return None
+        
+        self._show_matrix(partitions_df, column, level)
+                
+        print(f"\n{self._get_icon(name)} {name} 선택 ({len(items)}개):")
+        for i, item in enumerate(items, 1):
+            count = len(partitions_df[partitions_df[column] == item])
+            print(f"  {i:2d}. {item} ({count}개)")
+            
+        print(f"\n선택: 번호(1,2,3), 범위(1-5), 이름, 전체(Enter)")
+        user_input = input(f"{name}: ").strip()
+        
+        # 전체 선택
+        if not user_input:
+            print(f"✅ 전체 선택 ({len(items)}개)")
+            return items
+        
+        # 선택 파싱
+        selected = self._parse_input(user_input, items)
+        
+        if selected:
+            print(f"✅ {len(selected)}개 선택: {selected}")
+            return selected
+        else:
+            print(f"❌ 잘못된 입력")
+            return None
+
+    def _parse_input(self, user_input, items):
+        """입력 파싱"""
+        selected = set()
+        parts = user_input.split(',')
+        
+        for part in parts:
+            part = part.strip()
+            
+            if '-' in part and not part.startswith('-'):
+                # 범위: 1-5
+                try:
+                    start, end = part.split('-', 1)
+                    start_idx = int(start) - 1
+                    end_idx = int(end) - 1
+                    
+                    if 0 <= start_idx < len(items) and 0 <= end_idx < len(items):
+                        for i in range(min(start_idx, end_idx), max(start_idx, end_idx) + 1):
+                            selected.add(items[i])
+                except ValueError:
+                    print(f"⚠️ 잘못된 범위: {part}")
+                    
+            elif part.isdigit():
+                # 번호: 1, 2, 3
+                idx = int(part) - 1
+                if 0 <= idx < len(items):
+                    selected.add(items[idx])
+                else:
+                    print(f"⚠️ 잘못된 번호: {part}")
+                    
+            else:
+                # 이름: imagenet, coco
+                if part in items:
+                    selected.add(part)
+                else:
+                    print(f"⚠️ 찾을 수 없음: {part}")
+        
+        return list(selected) if selected else None
+
+    def _get_icon(self, name):
+        """아이콘 반환"""
+        icons = {
+            "Provider": "🏢",
+            "Dataset": "📦", 
+            "Task": "📝",
+            "Variant": "🏷️"
+        }
+        return icons.get(name, "📋")
+
+    def _show_matrix(self, partitions_df, level1, level2):
+        print(f"\n📊 {level1.title()}-{level2.title()} 조합 매트릭스:")
+        
+        items1 = sorted(partitions_df[level1].unique())
+        items2 = sorted(partitions_df[level2].unique())
+        
+        # 헤더 (첫 번째 컬럼 너비 조정)
+        col_width = max(len(level1.title()), 15)
+        print(level1.title().ljust(col_width), end=" | ")
+        for item2 in items2:
+            print(item2[:8].ljust(8), end=" | ")
+        print()
+        
+        # 구분선
+        print("-" * (col_width + len(items2) * 11))
+        
+        # 데이터 행
+        for idx, item1 in enumerate(items1):
+            data1 = partitions_df[partitions_df[level1] == item1]
+            #print(item1[:col_width-1].ljust(col_width), end=" | ")
+            item_name = f"{idx+1:>2}. {item1}"
+            print(f"{item_name[:col_width-1].ljust(col_width)}", end=" | ")
+            
+            for item2 in items2:
+                data12 = data1[data1[level2] == item2]
+                count = len(data12) if not data12.empty else 0
+                
+                if count > 0:
+                    print(f"{count:>3}".ljust(8), end=" | ")
+                else:
+                    print(" - ".ljust(8), end=" | ")
+            print()
+        
+        print(f"💡 숫자: 파티션 수, '-': 조합 없음")
+
+
+    def _text_search(self, duck_client: DuckDBClient):
         """텍스트 기반 검색"""
         print("\n🔤 텍스트 검색:")
         
@@ -1530,65 +1578,95 @@ class DataManagerCLI:
             
             if include_images:
                 print(f"\n📥 이미지 포함 Dataset 생성 중...")
-                
-                path_column = None
-                for col in ['hash', 'path']:
-                    if col in search_results.columns:
-                        path_column = col
-                        break
-                
-                if path_column is None:
+                path_column = 'path'
+
+                if path_column not in search_results.columns:
                     print("❌ 이미지 경로 컬럼을 찾을 수 없습니다.")
                     return False
-                
-                # 이미지 로드 함수
-                def load_image(example):
+                            
+                def load_and_validate_image(example):
+                    """이미지 로드 및 유효성 검사"""
                     try:
                         if example[path_column] and pd.notna(example[path_column]):
                             image_path = self.data_manager.assets_path / example[path_column]
                             if image_path.exists():
-                                # PIL Image로 로드
                                 pil_image = Image.open(image_path)
+                                pil_image.verify()  # 손상된 이미지 체크
+                                pil_image = Image.open(image_path) 
+                                
                                 example['image'] = pil_image
+                                example['has_valid_image'] = True
+                                return example
                             else:
-                                example['image'] = None
+                                print(f"⚠️ 파일 없음: {example[path_column]}")
                         else:
-                            example['image'] = None
+                            print(f"⚠️ 경로 없음: {example.get('hash', 'unknown')}")
                     except Exception as e:
                         print(f"⚠️ 이미지 로드 실패: {example.get(path_column, 'unknown')} - {e}")
-                        example['image'] = None
+                    
+                    # 실패한 경우
+                    example['image'] = None
+                    example['has_valid_image'] = False
                     return example
-                
+
                 # DataFrame을 Dataset으로 변환
                 dataset = Dataset.from_pandas(search_results)
-                
+
                 # 이미지 로드 (배치 단위로 처리)
-                print("🖼️ 이미지 로딩 중...")
-                dataset_with_images = dataset.map(
-                    load_image,
-                    desc="이미지 로딩",
+                print("🖼️ 이미지 검증 및 로딩 중...")
+                dataset_with_validation = dataset.map(
+                    load_and_validate_image,
+                    desc="이미지 검증",
                     num_proc=self.data_manager.num_proc,
                 )
-                
-                # 성공적으로 로드된 이미지 개수 확인
-                valid_images = sum(1 for example in dataset_with_images if example['image'] is not None)
-                total_items = len(dataset_with_images)
-                
-                print(f"📊 이미지 로딩 완료: {valid_images}/{total_items}개 성공")
-                
-                # Dataset 저장
-                dataset_with_images.save_to_disk(str(save_path))
-                
+
+                # 유효한 이미지만 필터링
+                print("🔍 유효한 이미지만 필터링 중...")
+                valid_dataset = dataset_with_validation.filter(
+                    lambda x: x,
+                    desc="유효 이미지 필터링",
+                    input_columns=['has_valid_image'],
+                    num_proc=self.data_manager.num_proc
+                )
+
+                # 불필요한 컬럼 제거
+                valid_dataset = valid_dataset.remove_columns(['has_valid_image'])
+
+                # 결과 출력
+                total_items = len(dataset)
+                valid_images = len(valid_dataset)
+                filtered_out = total_items - valid_images
+
+                print(f"📊 이미지 로딩 결과:")
+                print(f"  🔢 총 항목: {total_items:,}개")
+                print(f"  ✅ 유효 이미지: {valid_images:,}개")
+                print(f"  ❌ 제외된 항목: {filtered_out:,}개")
+
+                if filtered_out > 0:
+                    success_rate = (valid_images / total_items) * 100
+                    print(f"  📈 성공률: {success_rate:.1f}%")
+                    
+                    # 사용자에게 확인
+                    if filtered_out > total_items * 0.1:  # 10% 이상 실패
+                        print(f"⚠️ 주의: {filtered_out}개 항목이 제외되었습니다.")
+                        continue_choice = input("계속 진행하시겠습니까? (y/N): ").strip().lower()
+                        if continue_choice not in ['y', 'yes']:
+                            return False
+
+                print(f"\n💾 Dataset 저장 중...")
+                valid_dataset.save_to_disk(str(save_path))
+
                 print(f"✅ Dataset 저장 완료: {save_path}")
-                print(f"📊 {total_items:,}개 항목 (이미지 {valid_images:,}개)")
+                print(f"📊 최종 {valid_images:,}개 항목 (이미지 포함)")
                 print(f"💾 총 크기: {sum(f.stat().st_size for f in save_path.rglob('*') if f.is_file()) / 1024 / 1024:.1f}MB")
-                
+
                 # 사용법 안내
                 print(f"\n💡 사용법:")
                 print(f"```python")
                 print(f"from datasets import load_from_disk")
                 print(f"dataset = load_from_disk('{save_path}')")
-                print(f"# 이미지 확인: dataset[0]['image'].show()")
+                print(f"# 모든 항목에 유효한 이미지가 있습니다")
+                print(f"# dataset[0]['image'].show()")
                 print(f"```")
                 
             else:
@@ -1680,7 +1758,7 @@ def main():
     parser.add_argument("--log-level", default="INFO",
                        help="로깅 레벨 (DEBUG, INFO, WARNING, ERROR, CRITICAL)")
     parser.add_argument("--num-proc", type=int, default=8,
-                       help="병렬 처리 프로세스 수 (기본값: 8)")
+                       help="병렬 처리 프로세스 수")
     
     subparsers = parser.add_subparsers(dest='command', help='명령어')
     
