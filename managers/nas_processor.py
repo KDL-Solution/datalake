@@ -171,12 +171,10 @@ class NASDataProcessor:
 
             # 이미지 처리
             if metadata.get('has_images', False) and self.image_data_key in dataset_obj.column_names:
-                assets_base.mkdir(mode=0o775, parents=True, exist_ok=True)
                 dataset_obj = self._process_images_with_map(dataset_obj, metadata, assets_base)
             
             # 파일 처리
             if metadata.get('has_files', False) and self.file_path_key in dataset_obj.column_names:
-                assets_base.mkdir(mode=0o775, parents=True, exist_ok=True)
                 dataset_obj = self._process_files_with_map(dataset_obj, metadata, assets_base)
         
         # Catalog에 저장
@@ -188,7 +186,6 @@ class NASDataProcessor:
     
     def _process_images_with_map(self, dataset_obj: Dataset, metadata: Dict, assets_base: Path) -> Dataset:
         """이미지 처리 (PIL Image/bytes → hash.jpg)"""
-        print(metadata)
         total_images = len(dataset_obj)
         self.logger.info(f"🖼️ 이미지 처리 시작: {self.image_data_key} ({total_images}개)")
 
@@ -196,7 +193,7 @@ class NASDataProcessor:
         self.logger.info(f"🔧 샤딩 설정: {shard_config['info']}")
         
         dataset_obj = dataset_obj.cast_column(self.image_data_key, ImageFeature())
-        
+        assets_base.mkdir(mode=0o775, parents=True, exist_ok=True)
         process_batch_func = partial(
             self._process_image_batch,
             assets_base=assets_base,
@@ -235,6 +232,7 @@ class NASDataProcessor:
         
         shard_config = self._get_shard_config(total_files)
         self.logger.info(f"🔧 샤딩 설정: {shard_config['info']}")
+        assets_base.mkdir(mode=0o775, parents=True, exist_ok=True)
         process_batch_func = partial(
             self._process_file_batch,
             assets_base=assets_base,
@@ -422,25 +420,27 @@ class NASDataProcessor:
         return hash_sha256.hexdigest()
     
     def _get_shard_config(self, total_images: int) -> Dict:
-        """샤딩 설정"""
-        if total_images < 1000:
-            return {"levels": 0, "info": "샤딩 없음"}
-        elif total_images < 50000:
-            return {"levels": 1, "info": "1단계 샤딩 (xx/)"}
+        
+        if total_images < 10000:
+            # 샤딩 없음
+            return {"levels": 0, "dirs": 1}
+        elif total_images < 2500000:  # 256 * 10000
+            # 1단계: xx/ (256개 폴더)
+            return {"levels": 1, "dirs": 256}
         else:
-            return {"levels": 2, "info": "2단계 샤딩 (xx/xx/)"}
+            # 2단계: xx/xx/ (65536개 폴더)  
+            return {"levels": 2, "dirs": 65536}
 
     def _get_level_path(self, base_path: Path, shard_config: Dict, image_hash: str) -> Path:
-        """샤딩 설정에 따른 경로"""
+        
         levels = shard_config["levels"]
+        
         if levels == 0:
             return base_path / f"{image_hash}.jpg"
         elif levels == 1:
             return base_path / image_hash[:2] / f"{image_hash}.jpg"
         elif levels == 2:  
             return base_path / image_hash[:2] / image_hash[2:4] / f"{image_hash}.jpg"
-        else:
-            raise ValueError(f"잘못된 샤딩 레벨: {levels}")
     
     def _save_to_catalog(self, dataset_obj: Dataset, metadata: Dict):
         """Catalog에 저장"""

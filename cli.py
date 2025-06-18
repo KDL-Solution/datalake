@@ -7,6 +7,7 @@ import psutil
 from datasets import Dataset
 from PIL import Image
 from pathlib import Path
+from datetime import datetime
 
 from managers.datalake_client import DatalakeClient  
 from client.src.core.duckdb_client import DuckDBClient
@@ -35,12 +36,14 @@ class DataManagerCLI:
         self, 
         base_path: str = "/mnt/AI_NAS/datalake",
         nas_api_url: str = "http://192.168.20.62:8091",
-        log_level: str = "INFO"
+        log_level: str = "INFO",
+        num_proc: int = 8,
     ):
         self.data_manager = DatalakeClient(
             base_path=base_path,
             nas_api_url=nas_api_url,
             log_level=log_level,
+            num_proc=num_proc
         )
         self.schema_manager = self.data_manager.schema_manager
         self.duckdb_path = self.data_manager.base_path / "db" / "catalog.duckdb"
@@ -985,11 +988,6 @@ class DataManagerCLI:
         
         issues = {
             'missing_files': [],
-            'orphaned_files': [],
-            'broken_metadata': [],
-            'invalid_paths': [],
-            'duplicate_hashes': [],
-            'size_mismatches': [],
         }
         
         try:
@@ -1003,8 +1001,8 @@ class DataManagerCLI:
                 # 검사할 데이터 조회
                 if provider:
                     print(f"🏢 Provider '{provider}' 검사 중...")
-                    query = "SELECT * FROM catalog WHERE provider = ?"
-                    catalog_data = duck_client.execute_query(query, [provider])
+                    query = f"SELECT * FROM catalog WHERE provider = '{provider}'"
+                    catalog_data = duck_client.execute_query(query)
                 else:
                     print("🌍 전체 데이터 검사 중...")
                     catalog_data = duck_client.execute_query("SELECT * FROM catalog")
@@ -1025,23 +1023,14 @@ class DataManagerCLI:
                 
                 def check_file_exists(example):
                     """파일 존재 여부 확인"""
-                    hash_val = example.get('hash')
-                    if not hash_val or pd.isna(hash_val):
+                    path_val = example.get('path')
+                    if not path_val:
                         example['file_exists'] = None
-                        example['file_size_actual'] = None
                         return example
                     
-                    file_path = self.data_manager.assets_path / hash_val
+                    file_path = self.data_manager.assets_path / path_val
                     exists = file_path.exists()
                     example['file_exists'] = exists
-                    
-                    if exists:
-                        try:
-                            example['file_size_actual'] = file_path.stat().st_size
-                        except:
-                            example['file_size_actual'] = None
-                    else:
-                        example['file_size_actual'] = None
                     
                     return example
                 
@@ -1049,152 +1038,29 @@ class DataManagerCLI:
                 dataset_with_file_check = dataset.map(
                     check_file_exists,
                     desc="파일 존재 확인",
-                    num_proc=min(self.data_manager.num_proc, 8),  # 최대 8개 프로세스
+                    num_proc=min(self.data_manager.num_proc, 16),
                     load_from_cache_file=False
                 )
                 
                 # 누락된 파일 찾기
                 missing_files_data = dataset_with_file_check.filter(
-                    lambda x: x['hash'] is not None and not pd.isna(x['hash']) and not x['file_exists'],
+                    lambda x: not x['file_exists'],
                     desc="누락 파일 필터링"
                 )
                 
                 issues['missing_files'] = [
                     {
                         'hash': item['hash'],
+                        'path': item.get('path'),
                         'provider': item.get('provider'),
                         'dataset': item.get('dataset'),
-                        'expected_path': str(self.data_manager.assets_path / item['hash'])
+                        'task': item.get('task'),
+                        'variant': item.get('variant')
                     }
                     for item in missing_files_data
                 ]
                 
                 print(f"    ❌ 누락된 파일: {len(issues['missing_files'])}개")
-                
-                # 2. 메타데이터 검사 (병렬 처리)
-                print("\n2️⃣ 메타데이터 무결성 검사 (병렬 처리 중)...")
-                
-                def check_metadata_integrity(example):
-                    """메타데이터 무결성 확인"""
-                    broken_columns = []
-                    json_columns = ['labels', 'metadata']  # 실제 컬럼명에 맞게 조정
-                    
-                    for col in json_columns:
-                        if col in example and example[col] is not None and not pd.isna(example[col]):
-                            try:
-                                if isinstance(example[col], str):
-                                    json.loads(example[col])
-                            except json.JSONDecodeError:
-                                broken_columns.append(col)
-                    
-                    example['broken_metadata_columns'] = broken_columns
-                    return example
-                
-                dataset_with_metadata_check = dataset_with_file_check.map(
-                    check_metadata_integrity,
-                    desc="메타데이터 검사",
-                    num_proc=min(self.data_manager.num_proc, 4),
-                    load_from_cache_file=False
-                )
-                
-                # 손상된 메타데이터 찾기
-                broken_metadata_data = dataset_with_metadata_check.filter(
-                    lambda x: len(x['broken_metadata_columns']) > 0,
-                    desc="손상된 메타데이터 필터링"
-                )
-                
-                for item in broken_metadata_data:
-                    for col in item['broken_metadata_columns']:
-                        issues['broken_metadata'].append({
-                            'hash': item.get('hash'),
-                            'column': col,
-                            'provider': item.get('provider'),
-                            'dataset': item.get('dataset')
-                        })
-                
-                print(f"    🔧 손상된 메타데이터: {len(issues['broken_metadata'])}개")
-                
-                # 3. 파일 크기 불일치 검사
-                print("\n3️⃣ 파일 크기 불일치 검사...")
-                
-                valid_files_dataset = dataset_with_metadata_check.filter(
-                    lambda x: (x['file_exists'] and 
-                            x['file_size_actual'] is not None and 
-                            x.get('file_size') is not None),
-                    desc="유효한 파일 필터링"
-                )
-                
-                def check_size_mismatch(example):
-                    """파일 크기 불일치 확인"""
-                    expected_size = example.get('file_size')
-                    actual_size = example.get('file_size_actual')
-                    
-                    if expected_size and actual_size:
-                        size_diff = abs(actual_size - expected_size)
-                        example['size_mismatch'] = size_diff > 1024  # 1KB 오차 허용
-                        example['size_diff'] = size_diff
-                    else:
-                        example['size_mismatch'] = False
-                        example['size_diff'] = 0
-                    
-                    return example
-                
-                dataset_with_size_check = valid_files_dataset.map(
-                    check_size_mismatch,
-                    desc="파일 크기 검사",
-                    num_proc=min(self.data_manager.num_proc, 4),
-                    load_from_cache_file=False
-                )
-                
-                size_mismatch_data = dataset_with_size_check.filter(
-                    lambda x: x['size_mismatch'],
-                    desc="크기 불일치 필터링"
-                )
-                
-                issues['size_mismatches'] = [
-                    {
-                        'hash': item['hash'],
-                        'expected_size': item['file_size'],
-                        'actual_size': item['file_size_actual'],
-                        'provider': item.get('provider'),
-                        'size_diff': item['size_diff']
-                    }
-                    for item in size_mismatch_data
-                ]
-                
-                print(f"    📏 크기 불일치: {len(issues['size_mismatches'])}개")
-                
-                # 4. 중복 해시 검사 (pandas 사용이 더 효율적)
-                print("\n4️⃣ 중복 해시 검사...")
-                
-                catalog_df = catalog_data[catalog_data['hash'].notna()]
-                hash_counts = catalog_df['hash'].value_counts()
-                duplicates = hash_counts[hash_counts > 1]
-                
-                for hash_val, count in duplicates.items():
-                    duplicate_rows = catalog_df[catalog_df['hash'] == hash_val]
-                    issues['duplicate_hashes'].append({
-                        'hash': hash_val,
-                        'count': count,
-                        'locations': duplicate_rows[['provider', 'dataset', 'task', 'variant']].to_dict('records')
-                    })
-                
-                print(f"    🔄 중복 해시: {len(duplicates)}개")
-                
-            # 5. 고아 파일 검사 (별도 처리)
-            print("\n5️⃣ 고아 파일 검사...")
-            catalog_hashes = set(catalog_data['hash'].dropna())
-            assets_files = set()
-            
-            if self.data_manager.assets_path.exists():
-                print("    📁 Assets 디렉토리 스캔 중...")
-                for file_path in self.data_manager.assets_path.rglob("*"):
-                    if file_path.is_file():
-                        assets_files.add(file_path.name)
-            
-            orphaned_files = assets_files - catalog_hashes
-            issues['orphaned_files'] = list(orphaned_files)
-            print(f"    🏠 고아 파일: {len(orphaned_files)}개")
             
             # 결과 출력
             print("\n" + "="*50)
@@ -1213,11 +1079,6 @@ class DataManagerCLI:
                 if issue_list:
                     issue_names = {
                         'missing_files': '누락된 파일',
-                        'orphaned_files': '고아 파일', 
-                        'broken_metadata': '손상된 메타데이터',
-                        'invalid_paths': '잘못된 경로',
-                        'duplicate_hashes': '중복 해시',
-                        'size_mismatches': '파일 크기 불일치'
                     }
                     print(f"  • {issue_names[issue_type]}: {len(issue_list)}개")
             
@@ -1227,12 +1088,7 @@ class DataManagerCLI:
             # 처리 옵션
             print(f"\n💡 처리 옵션:")
             if issues['missing_files']:
-                print(f"  🗑️ 누락된 파일 레코드 제거")
-            if issues['orphaned_files']:
-                orphaned_size = self._calculate_orphaned_size(issues['orphaned_files'])
-                print(f"  🧹 고아 파일 삭제 (총 {orphaned_size:.1f}MB)")
-            if issues['duplicate_hashes']:
-                print(f"  🔗 중복 해시 병합")
+                print("  - 누락된 파일은 자동으로 복구할 수 없습니다. 수동으로 업로드가 필요합니다.")
             
             if generate_report:
                 self._generate_validation_report(issues)
@@ -1255,32 +1111,7 @@ class DataManagerCLI:
             print(f"\n  📁 누락된 파일 (상위 3개):")
             for item in issues['missing_files'][:3]:
                 print(f"    • {item['hash'][:16]}... ({item['provider']}/{item['dataset']})")
-        
-        # 고아 파일 샘플
-        if issues['orphaned_files']:
-            print(f"\n  🏠 고아 파일 (상위 3개):")
-            for filename in issues['orphaned_files'][:3]:
-                file_path = self.data_manager.assets_path / filename
-                if file_path.exists():
-                    size_mb = file_path.stat().st_size / 1024 / 1024
-                    print(f"    • {filename[:16]}... ({size_mb:.1f}MB)")
-        
-        # 크기 불일치 샘플
-        if issues['size_mismatches']:
-            print(f"\n  📏 크기 불일치 (상위 3개):")
-            for item in issues['size_mismatches'][:3]:
-                expected_mb = item['expected_size'] / 1024 / 1024
-                actual_mb = item['actual_size'] / 1024 / 1024
-                print(f"    • {item['hash'][:16]}... 예상:{expected_mb:.1f}MB 실제:{actual_mb:.1f}MB")
 
-    def _calculate_orphaned_size(self, orphaned_files):
-        """고아 파일들의 총 크기 계산"""
-        total_size = 0
-        for filename in orphaned_files:
-            file_path = self.data_manager.assets_path / filename
-            if file_path.exists():
-                total_size += file_path.stat().st_size
-        return total_size / 1024 / 1024  # MB 단위
 
     def _generate_validation_report(self, issues):
         """검사 보고서 생성"""
@@ -1848,6 +1679,8 @@ def main():
                        help="NAS API 서버 URL")
     parser.add_argument("--log-level", default="INFO",
                        help="로깅 레벨 (DEBUG, INFO, WARNING, ERROR, CRITICAL)")
+    parser.add_argument("--num-proc", type=int, default=8,
+                       help="병렬 처리 프로세스 수 (기본값: 8)")
     
     subparsers = parser.add_subparsers(dest='command', help='명령어')
     
@@ -1898,6 +1731,7 @@ def main():
     
     # 데이터 무결성 검사
     validate_parser = subparsers.add_parser('validate', help='Catalog DB 상태 검사 및 문제 해결')
+    validate_parser.add_argument('--provider', type=str, help='특정 Provider만 검사')
     validate_parser.add_argument('--fix', action='store_true', help='문제 자동 수정')
     validate_parser.add_argument('--report', action='store_true', help='검사 보고서 생성')
     validate_parser.add_argument('--generate-report', action='store_true', help='검사 후 보고서 생성')
@@ -1931,8 +1765,7 @@ def main():
         print("\n🔍 데이터 관리 및 문제 해결:")
         print("  📊 python cli.py catalog check            # 빠른 상태 확인")
         print("  🔍 python cli.py validate                 # 데이터 무결성 검사")
-        print("  🔧 python cli.py validate --fix           # 문제 자동 수정")
-        print("  📄 python cli.py validate --report        # 검사 보고서 생성")
+        
 
         print("\n💡 각 명령어 뒤에 -h 또는 --help를 붙이면 상세 도움말을 볼 수 있습니다.")
         print("   예: python cli.py config -h")
@@ -1948,6 +1781,7 @@ def main():
         base_path=args.base_path,
         nas_api_url=args.nas_url,
         log_level=args.log_level,
+        num_proc=args.num_proc
     )
     
     try:
@@ -2059,7 +1893,7 @@ def main():
             # 매개변수 확인 및 정리
             provider = getattr(args, 'provider', None)
             fix_issues = getattr(args, 'fix', False)
-            generate_report = getattr(args, 'report', False)
+            generate_report = getattr(args, 'generate_report', False)
             
             if provider:
                 print(f"🏢 검사 대상: Provider '{provider}'")
