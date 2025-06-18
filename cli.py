@@ -903,14 +903,11 @@ class DataManagerCLI:
                 print("❌ DB가 잠금 상태입니다.")
                 print("\n🔍 사용 중인 프로세스 확인:")
                 self.check_db_processes()
-                
-                force = input("\n그래도 강제 업데이트하시겠습니까? (y/N): ").strip().lower()
-                if force not in ['y', 'yes']:
-                    print("❌ 업데이트가 취소되었습니다.")
-                    return False
+                print("\n💡 잠금 해제 후 다시 시도해주세요.")
+                return False
             else:
                 print(f"❌ DB 연결 테스트 실패: {e}")
-                return False
+            return False
         
         # 2. 실제 업데이트
         print("\n🔄 업데이트 시작...")
@@ -980,7 +977,7 @@ class DataManagerCLI:
             print(f"❌ 상태 확인 실패: {e}")
             return False
 
-    def validate_data_integrity(self, provider=None, generate_report=False):
+    def validate_data_integrity(self, report=False):
         """데이터 무결성 검사 (Dataset library 최적화 버전)"""
         print("\n" + "="*50)
         print("🔍 데이터 무결성 검사 (병렬 처리)")
@@ -991,34 +988,63 @@ class DataManagerCLI:
         }
         
         try:
-            from datasets import Dataset
-            
             db_path = self.duckdb_path
             if not db_path.exists():
                 raise CatalogNotFoundError("Catalog DB가 없습니다.")
             
+            
             with DuckDBClient(str(db_path), read_only=True) as duck_client:
-                # 검사할 데이터 조회
-                if provider:
-                    print(f"🏢 Provider '{provider}' 검사 중...")
-                    query = f"SELECT * FROM catalog WHERE provider = '{provider}'"
-                    catalog_data = duck_client.execute_query(query)
-                else:
-                    print("🌍 전체 데이터 검사 중...")
-                    catalog_data = duck_client.execute_query("SELECT * FROM catalog")
+                print("🔄 Catalog 데이터 로딩 중...")
+                catalog_path = self.data_manager.catalog_path
+
+                # 업데이트 필요 여부만 확인하고 강제 업데이트하지 않음
+                db_is_current = self._check_and_update_catalog_db(duck_client, catalog_path)
+                if not db_is_current:
+                    raise CatalogError(
+                        "Catalog DB가 최신 상태가 아닙니다. "
+                        "'python cli.py catalog update' 명령으로 DB를 업데이트해주세요."
+                    )
+                                
+                # 사용 가능한 파티션 확인
+                partitions_df = duck_client.retrieve_partitions("catalog")
+                if partitions_df.empty:
+                    raise CatalogEmptyError(
+                        "Catalog에 데이터가 없습니다. "
+                        "'python cli.py catalog update' 명령으로 DB를 다시 구축해보세요."
+                    )
+                    
+                print(f"📊 {len(partitions_df)} 개 파티션 사용 가능")
+        
+                search_results = self._perform_search(duck_client, partitions_df)
                 
-                total_items = len(catalog_data)
-                print(f"📊 검사 대상: {total_items:,}개 항목")
+                if search_results is None or search_results.empty:
+                    raise CatalogError("검색 결과가 없습니다.")
                 
-                if total_items == 0:
-                    print("📭 검사할 데이터가 없습니다.")
-                    return True
+                print(f"\n📊 검색 결과: {len(search_results):,}개 항목")
                 
                 # DataFrame을 Dataset으로 변환
-                dataset = Dataset.from_pandas(catalog_data)
+                dataset = Dataset.from_pandas(search_results)
                 print(f"🔄 Dataset 생성 완료: {len(dataset):,}개 행")
                 
                 # 1. 파일 존재 여부 검사 (병렬 처리)
+                # sample 만 확인할지 선택
+                sample_check = input("샘플 데이터만 검사하시겠습니까? (y/N): ").strip().lower()
+                if sample_check in ['y', 'yes']:
+                    print("🔍 샘플 데이터 검사 중...")
+                    # percent =0.1 (10%) 확인
+                    sample_percent = input("샘플 비율 입력 (0.1 = 10%): ").strip()
+                    if not sample_percent:
+                        sample_percent = 0.1
+                    else:
+                        try:
+                            sample_percent = float(sample_percent)
+                        except ValueError:
+                            print("❌ 잘못된 비율입니다. 기본값 0.1(10%) 사용합니다.")
+                            sample_percent = 0.1
+                    dataset = dataset.select(range(int(len(dataset) * sample_percent)))
+                else:
+                    print("🔍 전체 데이터 검사 중...")
+                    
                 print("\n1️⃣ 파일 존재 여부 검사 (병렬 처리 중)...")
                 
                 def check_file_exists(example):
@@ -1048,17 +1074,7 @@ class DataManagerCLI:
                     desc="누락 파일 필터링"
                 )
                 
-                issues['missing_files'] = [
-                    {
-                        'hash': item['hash'],
-                        'path': item.get('path'),
-                        'provider': item.get('provider'),
-                        'dataset': item.get('dataset'),
-                        'task': item.get('task'),
-                        'variant': item.get('variant')
-                    }
-                    for item in missing_files_data
-                ]
+                issues['missing_files'] = missing_files_data.to_list()
                 
                 print(f"    ❌ 누락된 파일: {len(issues['missing_files'])}개")
             
@@ -1090,7 +1106,7 @@ class DataManagerCLI:
             if issues['missing_files']:
                 print("  - 누락된 파일은 자동으로 복구할 수 없습니다. 수동으로 업로드가 필요합니다.")
             
-            if generate_report:
+            if report:
                 self._generate_validation_report(issues)
             
             return len(issues['missing_files']) == 0  # 중요한 문제만 False 반환
@@ -1237,7 +1253,7 @@ class DataManagerCLI:
         if search_choice == "1":
             search_results = self._partition_search(duck_client, partitions_df)
             print("\n📊 파티션 기반 검색 결과:")
-            print(search_results.head(3).to_string(index=False, max_cols=5))
+            print(search_results.head(10))
             return search_results
         elif search_choice == "2":
             return self._text_search(duck_client)
@@ -1741,10 +1757,8 @@ def main():
   python cli.py catalog update                 # Catalog DB 업데이트 
   
 🔍 데이터 무결성 검사:
-  python cli.py validate                       # 전체 데이터 무결성 검사
-  python cli.py validate --provider=NAME       # 특정 Provider만 검사
-  python cli.py validate --fix                 # 문제 자동 수정
-  python cli.py validate --report              # 상세 보고서 생성
+  python cli.py validate                       # 데이터 무결성 검사
+  python cli.py validate --report              # 검사 보고서 생성
 
 💡 팁: Dataset 형태로 저장하면 datasets 라이브러리로 쉽게 로드할 수 있습니다.
      from datasets import load_from_disk
@@ -1809,10 +1823,7 @@ def main():
     
     # 데이터 무결성 검사
     validate_parser = subparsers.add_parser('validate', help='Catalog DB 상태 검사 및 문제 해결')
-    validate_parser.add_argument('--provider', type=str, help='특정 Provider만 검사')
-    validate_parser.add_argument('--fix', action='store_true', help='문제 자동 수정')
     validate_parser.add_argument('--report', action='store_true', help='검사 보고서 생성')
-    validate_parser.add_argument('--generate-report', action='store_true', help='검사 후 보고서 생성')
     # 상태 확인
     
     args = parser.parse_args()
@@ -1969,34 +1980,20 @@ def main():
                 cli.check_db_processes() 
         elif args.command == 'validate':
             # 매개변수 확인 및 정리
-            provider = getattr(args, 'provider', None)
-            fix_issues = getattr(args, 'fix', False)
-            generate_report = getattr(args, 'generate_report', False)
-            
-            if provider:
-                print(f"🏢 검사 대상: Provider '{provider}'")
-            if fix_issues:
-                # 구현안됌
-                print("🔧 문제 자동 수정 모드 활성화")
-                raise NotImplementedError("문제 자동 수정 기능은 아직 구현되지 않았습니다.")
-            if generate_report:
+            report = getattr(args, 'report', False)
+            if report:
                 print("📄 보고서 생성 모드 활성화")
             
             # 검사 실행
             success = cli.validate_data_integrity(
-                provider=provider,
-                generate_report=generate_report
+                report=report
             )
             
             if not success:
-                print("\n❌ 검사 중 중요한 문제가 발견되었습니다.")
-                print("💡 'python cli.py validate --fix' 명령으로 자동 수정을 시도할 수 있습니다.")
                 return 1
             else:
                 print("\n✅ 데이터 무결성 검사 완료!")
-                if fix_issues:
-                    print("🔧 발견된 문제들이 자동으로 수정되었습니다.")
-                if generate_report:
+                if report:
                     print("📄 상세 보고서가 생성되었습니다.")
                 return 0
 
