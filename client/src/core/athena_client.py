@@ -230,20 +230,6 @@ class AthenaClient:
             query_func=query_func
         )
 
-    def retrieve_num_samples(
-        self,
-    ) -> pd.DataFrame:
-        """데이터셋별로 샘플 수를 조회
-        """
-        return self.execute_query(
-            sql="""
-            SELECT task, variant, provider, dataset, COUNT(*) AS num_samples
-            FROM catalog
-            GROUP BY task, variant, provider, dataset
-            ORDER BY task, variant, provider, dataset
-            """
-        )
-
     def retrieve_with_existing_cols(
         self,
         providers: List = [],

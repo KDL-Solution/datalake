@@ -3,6 +3,7 @@ import json
 import shutil
 import pandas as pd
 import psutil
+import random 
 
 from datasets import Dataset
 from PIL import Image
@@ -37,7 +38,7 @@ class DataManagerCLI:
         base_path: str = "/mnt/AI_NAS/datalake",
         nas_api_url: str = "http://192.168.20.62:8091",
         log_level: str = "INFO",
-        num_proc: int = 16,
+        num_proc: int = 8,
     ):
         self.data_manager = DatalakeClient(
             base_path=base_path,
@@ -1024,6 +1025,11 @@ class DataManagerCLI:
                 
                 # DataFrame을 Dataset으로 변환
                 dataset = Dataset.from_pandas(search_results)
+                dataset = dataset.filter(
+                    lambda x: x.get('hash') and x.get('path'), 
+                    desc="필수 필드 필터링"
+                )
+                
                 print(f"🔄 Dataset 생성 완료: {len(dataset):,}개 행")
                 
                 # 1. 파일 존재 여부 검사 (병렬 처리)
@@ -1041,7 +1047,7 @@ class DataManagerCLI:
                         except ValueError:
                             print("❌ 잘못된 비율입니다. 기본값 0.1(10%) 사용합니다.")
                             sample_percent = 0.1
-                    dataset = dataset.select(range(int(len(dataset) * sample_percent)))
+                    dataset = dataset.select(random.sample(range(len(dataset)), int(len(dataset) * sample_percent)))
                 else:
                     print("🔍 전체 데이터 검사 중...")
                     
@@ -1060,11 +1066,11 @@ class DataManagerCLI:
                     
                     return example
                 
-                # 병렬로 파일 존재 여부 확인
+                # 파일 존재 여부 확인
                 dataset_with_file_check = dataset.map(
                     check_file_exists,
                     desc="파일 존재 확인",
-                    num_proc=min(self.data_manager.num_proc, 16),
+                    num_proc=min(self.data_manager.num_proc, 8),
                     load_from_cache_file=False
                 )
                 

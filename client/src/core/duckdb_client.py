@@ -208,11 +208,6 @@ class DuckDBClient:
             query_func=query_func
         )
 
-    def retrieve_num_samples(self, table: str = "catalog") -> pd.DataFrame:
-        """데이터셋별로 샘플 수를 조회"""
-        sql = self.json_queries.count_samples_by_partition(table)
-        return self.execute_query(sql)
-
     def retrieve_partitions(self, table: str = "catalog") -> pd.DataFrame:
         """모든 파티션 조합 조회"""
         sql = self.json_queries.get_distinct_partitions(table)
@@ -255,27 +250,32 @@ class DuckDBClient:
             variant_condition = " OR ".join([f"variant = '{i}'" for i in variants])
             conditions.append(f"({variant_condition})")
 
-        # 첫 번째 행으로 존재하는 컬럼 확인
-        sql_for_cols = f"SELECT * FROM {table}"
-        if conditions:
-            sql_for_cols += f" WHERE {' AND '.join(conditions)}"
-        sql_for_cols += " LIMIT 1"
-        
         try:
-            df_cols = self.execute_query(sql_for_cols)
-            if df_cols.empty:
+            # 테이블 스키마 확인
+            table_info = self.get_table_info(table)
+            if table_info.empty:
                 return pd.DataFrame()
                 
-            # NULL이 아닌 컬럼만 선택
-            cols = [k for k, v in df_cols.iloc[0].to_dict().items() if pd.notna(v)]
+            # 모든 컬럼명 가져오기
+            all_columns = table_info['column_name'].tolist()
             
-            # 실제 데이터 조회
-            sql = f"SELECT {', '.join(cols)} FROM {table}"
+            # 실제 데이터에서 NULL이 아닌 값이 있는 컬럼 확인
+            non_null_cols = []
+            for col in all_columns:
+                check_sql = f"SELECT COUNT(*) as count FROM {table} WHERE {col} IS NOT NULL"
+                if conditions:
+                    check_sql += f" AND {' AND '.join(conditions)}"
+                
+                result = self.execute_query(check_sql)
+                if result['count'].iloc[0] > 0:
+                    non_null_cols.append(col)
+            
+            # 존재하는 컬럼만으로 조회
+            sql = f"SELECT {', '.join(non_null_cols)} FROM {table}"
             if conditions:
                 sql += f" WHERE {' AND '.join(conditions)}"
-                
-            return self.execute_query(sql)
             
+            return self.execute_query(sql)
         except Exception as e:
             print(f"컬럼 조회 실패: {str(e)}")
             return pd.DataFrame()

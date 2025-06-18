@@ -118,23 +118,14 @@ class JSONQueries:
             FROM extracted_content
             WHERE content LIKE '%{search_text}%'
             """
-        
-    @staticmethod
-    def count_samples_by_partition(table: str) -> str:
-        """파티션별 샘플 수 조회"""
-        return f"""
-        SELECT provider, dataset, task, variant, COUNT(*) AS num_samples
-        FROM {table}
-        GROUP BY provider, dataset, task, variant
-        ORDER BY provider, dataset, task, variant
-        """
-    
+            
     @staticmethod
     def get_distinct_partitions(table: str) -> str:
         """모든 파티션 조합 조회"""
         return f"""
-        SELECT DISTINCT provider, dataset, task, variant
+        SELECT DISTINCT provider, dataset, task, variant, COUNT(*) AS num_samples
         FROM {table}
+        GROUP BY provider, dataset, task, variant
         ORDER BY provider, dataset, task, variant
         """
     
