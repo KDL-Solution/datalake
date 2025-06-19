@@ -219,7 +219,8 @@ class DuckDBClient:
         datasets: List = [],
         tasks: List = [],
         variants: List = [],
-        table: str = "catalog"
+        table: str = "catalog",
+        limit: Optional[int] = None,
     ) -> pd.DataFrame:
         """존재하는 컬럼만 포함해서 조회"""
         # str 일경우 리스트로 변경
@@ -274,6 +275,8 @@ class DuckDBClient:
             sql = f"SELECT {', '.join(non_null_cols)} FROM {table}"
             if conditions:
                 sql += f" WHERE {' AND '.join(conditions)}"
+            if limit is not None:
+                sql += f" LIMIT {limit}"
             
             return self.execute_query(sql)
         except Exception as e:

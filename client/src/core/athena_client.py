@@ -233,10 +233,11 @@ class AthenaClient:
     def retrieve_with_existing_cols(
         self,
         providers: List = [],
+        datasets: List = [],
         tasks: List = [],
         variants: List = [],
-        datasets: List = [],
-        table: str = "catalog"
+        table: str = "catalog",
+        limit: Optional[int] = None
     ) -> pd.DataFrame:
         """존재하는 컬럼만 포함해서 조회.
         """
@@ -272,8 +273,11 @@ class AthenaClient:
             cols = [k for k, v in df_cols.iloc[0].to_dict().items() if pd.notna(v)]
 
             sql = f"SELECT {', '.join(cols)} FROM catalog"
+            
             if conditions:
                 sql += f" WHERE {' AND '.join(conditions)}"
+            if limit is not None:
+                sql += f" LIMIT {limit}"
             return self.execute_query(sql)
         except Exception as e:
             print(f"컬럼 조회 실패: {str(e)}")
