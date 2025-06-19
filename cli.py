@@ -486,7 +486,7 @@ class DataManagerCLI:
                 print(f"  📦 Dataset: {dataset} (기존)")
                 print(f"  📝 Task: {task}")
                 print(f"  🏷️ Variant: {variant}")
-                print(f"  📋 메타데이터: {metadata}")
+                print(f"  📋 메타데이터: {meta}")
                 
                 confirm = input("\n업로드하시겠습니까? (y/N): ").strip().lower()
                 if confirm in ['y', 'yes']:
