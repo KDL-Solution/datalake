@@ -198,6 +198,11 @@ pyrightconfig.json
 **/images_char/
 **/images_word/
 **/data/
-*.sh
 
 !user_prompts.json
+*/data/
+*.sh
+*.arrow
+*.db
+
+prep/huggingface/kvp10k

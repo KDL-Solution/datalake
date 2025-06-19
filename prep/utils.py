@@ -109,9 +109,9 @@ class KIEVisualizer(object):
                 if not isinstance(v, dict):
                     continue
 
-                bb = list(v.get("bbox", []))
+                bb = list(v.get("<|bbox|>", []))
                 if len(bb) == 4 and any(float(c) != 0 for c in bb):
-                    yield k, v.get("value", ""), bb
+                    yield k, v.get("<|value|>", ""), bb
 
     def _img(
         self,
