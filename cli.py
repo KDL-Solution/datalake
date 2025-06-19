@@ -1241,7 +1241,7 @@ class DataManagerCLI:
                     # 계속 진행
             
             # 2. 디렉토리 생성 (없으면)
-            db_path.parent.mkdir(parents=True, exist_ok=True)
+            db_path.parent.mkdir(mode=0o777, parents=True, exist_ok=True)
             
             # 3. 완전히 새로운 DB 생성
             print("🔨 새 DB 파일 생성 중...")
@@ -1305,7 +1305,8 @@ class DataManagerCLI:
                 print("="*60)
                 
                 return True
-                
+            db_path.chmod(0o777)
+            
         except Exception as e:
             print(f"❌ DB 재구축 실패: {e}")
             import traceback
