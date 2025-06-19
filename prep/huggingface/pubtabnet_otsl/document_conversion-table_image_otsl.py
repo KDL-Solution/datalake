@@ -1,8 +1,8 @@
 if __name__ == "__main__":
-    # datalake/datalake-prep에서 실행하시오: e.g., `python -m huggingface.pubtabnet_otsl.document_conversion-table_image_otsl`.
+    # Run, e.g., `python -m huggingface.pubtabnet_otsl.document_conversion-table_image_otsl`.
     from pathlib import Path
 
-    from huggingface.table_image_otsl import main
+    from datalake.prep.huggingface.pubtabnet_otsl.utils import main
 
     main(
         dataset="pubtabnet_otsl",

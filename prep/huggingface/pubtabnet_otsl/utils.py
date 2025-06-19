@@ -6,7 +6,7 @@ from typing import Dict, Any, List
 from functools import partial
 from PIL import Image
 
-from utils import DATALAKE_DIR, get_safe_image_hash_from_pil
+from prep.utils import DATALAKE_DIR, get_safe_image_hash_from_pil
 
 SYMBOLS_TO_FILTER = [
     "<b>",
@@ -89,7 +89,9 @@ def save_images_and_generate_labels(
                 format="JPEG",
             )
 
-        image_paths.append(str(image_path))
+        image_paths.append(
+            Path(*image_path.parts[-2:]).as_posix()
+        )
         widths.append(width)
         heights.append(height)
 
