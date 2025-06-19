@@ -197,4 +197,7 @@ pyrightconfig.json
 **/images_test/
 **/pdfs/
 **/data/
+*/data/
 *.sh
+*.arrow
+*.db
