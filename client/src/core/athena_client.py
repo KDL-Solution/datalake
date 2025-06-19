@@ -271,7 +271,7 @@ class AthenaClient:
             
             cols = [k for k, v in df_cols.iloc[0].to_dict().items() if pd.notna(v)]
 
-            sql = f"SELECT {", ".join(cols)} FROM catalog"
+            sql = f"SELECT {', '.join(cols)} FROM catalog"
             if conditions:
                 sql += f" WHERE {' AND '.join(conditions)}"
             return self.execute_query(sql)

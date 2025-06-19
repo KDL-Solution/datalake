@@ -461,7 +461,7 @@ class DataManagerCLI:
                 required_fields = task_info.get('required_fields', [])
                 allowed_values = task_info.get('allowed_values', {})
                 
-                metadata = {}
+                meta = {}
                 if required_fields:
                     print(f"\n📝 필수 필드 입력:")
                     for field in required_fields:
@@ -471,10 +471,10 @@ class DataManagerCLI:
                         if not value:
                             print(f"❌ 필수 필드 '{field}'가 누락되었습니다.")
                             return False
-                        metadata[field] = value
+                        meta[field] = value
                 
                 # 검증
-                is_valid, error_msg = self.data_manager.schema_manager.validate_task_metadata(task, metadata)
+                is_valid, error_msg = self.data_manager.schema_manager.validate_task_metadata(task, meta)
                 if not is_valid:
                     print(f"❌ 검증 실패: {error_msg}")
                     return False
@@ -496,7 +496,7 @@ class DataManagerCLI:
                         dataset=dataset,
                         task=task,
                         variant=variant,
-                        **metadata
+                        meta=meta
                     )
                     print(f"✅ 업로드 완료: {staging_dir}")
                     print("💡 'python cli.py process start' 명령으로 처리를 시작할 수 있습니다.")
