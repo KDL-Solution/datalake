@@ -45,6 +45,12 @@ def truncate_lists(
 
 
 class KIEStructExporter(object):
+    def __init__(
+        self,
+        datalake_dir: str = DATALAKE_DIR.as_posix(),
+    ):
+        self.datalake_dir = datalake_dir
+
     def _blank_value_and_bbox(
         self,
         json_str: str,
@@ -126,15 +132,14 @@ class KIEStructExporter(object):
         df: pd.DataFrame,
         user_prompt: str,
         jsonl_path: str,
-        datalake_dir: str = DATALAKE_DIR.as_posix(),
         value_key: str = "<|value|>",
         bbox_key: str = "<|bbox|>",
         indent: int = None,
     ) -> None:
         df_copied = df.copy()
 
-        df_copied["image_path"] = df_copied["image_path"].apply(
-            lambda x: (Path(datalake_dir) / x).as_posix(),
+        df_copied["path"] = df_copied["path"].apply(
+            lambda x: (Path(self.datalake_dir) / "assets" / x).as_posix(),
         )
         df_copied["query"] = df_copied.apply(
             lambda x: user_prompt + "\n" + self._make_target_schema(
@@ -171,30 +176,37 @@ class KIEStructExporter(object):
 
 
 if __name__ == "__main__":
-    from athena.src.core.athena_client import AthenaClient
+    import duckdb
+    from sklearn.model_selection import train_test_split
+
     from export.utils import user_prompt_dict
 
-    client = AthenaClient()
     exporter = KIEStructExporter()
+    conn = duckdb.connect()
     ROOT = Path(__file__).resolve().parent
+    seed = 42
 
-    # df = client.retrieve_with_existing_cols(
-    #     datasets=[
-    #         "real_kie",
-    #     ],
-    # )
-    # exporter.export(
-    #     df=df,
-    #     jsonl_path="/home/eric/workspace/Qwen-SFT/real_kie.jsonl",
-    # )
+    read_parquet = "read_parquet('/mnt/AI_NAS/datalake/catalog/provider=*/dataset=*/task=*/variant=*/data.parquet', union_by_name=True, filename=True, hive_partitioning=True)"
 
-    df = client.retrieve_with_existing_cols(
-        datasets=[
-            "post_handwritten_plain_text",
-        ],
+    sql=f"""SELECT *
+    FROM {read_parquet}
+    WHERE dataset = 'post_handwritten_plain_text'
+        AND task != 'raw'"""
+    df = conn.execute(
+        sql,
+    ).fetchdf()
+    df_train, df_test = train_test_split(
+        df,
+        test_size=10,
+        random_state=seed,
     )
     exporter.export(
-        df=df,
+        df=df_train,
         user_prompt=user_prompt_dict["post_handwritten_plain_text"],
-        jsonl_path=(ROOT / "data/post_handwritten_plain_text.jsonl").as_posix(),
+        jsonl_path=(ROOT / "data/post_handwritten_plain_text_train.jsonl").as_posix(),
+    )
+    exporter.export(
+        df=df_test,
+        user_prompt=user_prompt_dict["post_handwritten_plain_text"],
+        jsonl_path=(ROOT / "data/post_handwritten_plain_text_test.jsonl").as_posix(),
     )

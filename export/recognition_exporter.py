@@ -14,7 +14,7 @@ from export.utils import save_df_as_jsonl, user_prompt_dict
 class RecogntionCharExporter(object):
     def __init__(
         self,
-        datalake_dir: str = DATALAKE_DIR,
+        datalake_dir: str = DATALAKE_DIR.as_posix(),
         user_prompt = user_prompt_dict["recognition"],
         charset_path: str = (
             Path(__file__).resolve().parent / "charset.txt"
@@ -48,7 +48,6 @@ class RecogntionCharExporter(object):
         ]
 
         df_copied["path"] = df_copied["path"].apply(
-            # lambda x: (Path(self.datalake_dir) / x).as_posix(),
             lambda x: (Path(self.datalake_dir) / "assets" / x).as_posix(),
         )
         df_copied["query"] = self.user_prompt
@@ -181,15 +180,6 @@ class RecogntionCharExporter(object):
 
 
 if __name__ == "__main__":
-    # from athena.src.core.athena_client import AthenaClient
-
-    # client = AthenaClient()
-
-    # df = client.retrieve_with_existing_cols(
-    #     datasets=[
-    #         "diverse_ocr_char",
-    #     ],
-    # )
     import duckdb
 
     conn = duckdb.connect()
