@@ -7,7 +7,7 @@ import pandas as pd
 import requests 
 import time 
 import subprocess
-import random
+import psutil
 from pathlib import Path
 from datetime import datetime
 from datasets import Dataset, load_from_disk
@@ -529,22 +529,71 @@ class DatalakeClient:
             self.logger.error(f"❌ 검색 실패: {e}")
             raise
     
+    def _prepare_dataframe(
+        self, 
+        search_results: pd.DataFrame, 
+        absolute_paths: bool = True,
+    ) -> pd.DataFrame:
+        """검색 결과를 처리용 DataFrame으로 준비"""
+        df_copy = search_results.copy()
+        
+        if absolute_paths and 'path' in df_copy.columns:
+            df_copy['path'] = df_copy['path'].apply(
+                lambda x: str(self.assets_path / x) if isinstance(x, str) and x else x
+            )
+            self.logger.debug("📁 경로를 절대경로로 변환")
+        
+        return df_copy
+
+    def to_pandas(
+        self, 
+        search_results: pd.DataFrame, 
+        absolute_paths: bool = True,
+    ) -> pd.DataFrame:
+        """검색 결과를 Pandas DataFrame으로 변환"""
+        self.logger.info("📊 Pandas DataFrame 변환 시작...")
+        
+        df_copy = self._prepare_dataframe(search_results, absolute_paths)
+        
+        self.logger.info(f"✅ DataFrame 변환 완료: {len(df_copy):,}개 항목")
+        return df_copy
+
+    def to_dataset(
+        self,
+        search_results: pd.DataFrame,
+        include_images: bool = False,
+        absolute_paths: bool = True,
+    ):
+        """검색 결과를 HuggingFace Dataset 객체로 변환"""
+        self.logger.info("📥 Dataset 객체 생성 시작...")
+        
+        df_copy = self._prepare_dataframe(search_results, absolute_paths)
+        dataset = Dataset.from_pandas(df_copy)
+        
+        if include_images:
+            dataset = self._add_images_to_dataset(dataset)
+            
+        self.logger.info(f"✅ Dataset 객체 생성 완료: {len(dataset):,}개 항목") 
+        return dataset
+
     def download_as_parquet(
         self, 
         search_results: pd.DataFrame, 
-        output_path: Union[str, Path]
+        output_path: Union[str, Path],
+        absolute_paths: bool = True,
     ) -> Path:
         """검색 결과를 Parquet으로 저장"""
         self.logger.info("💾 Parquet 저장 시작...")
         
+        df_copy = self._prepare_dataframe(search_results, absolute_paths)
+        
         output_path = Path(output_path).with_suffix('.parquet')
         output_path.parent.mkdir(parents=True, exist_ok=True)
-        
-        search_results.to_parquet(output_path, index=False)
+        df_copy.to_parquet(output_path, index=False)
         
         file_size = output_path.stat().st_size / 1024 / 1024
         self.logger.info(f"✅ Parquet 저장 완료: {output_path}")
-        self.logger.info(f"📊 {len(search_results):,}개 항목, {file_size:.1f}MB")
+        self.logger.info(f"📊 {len(df_copy):,}개 항목, {file_size:.1f}MB")
         
         return output_path
 
@@ -552,27 +601,18 @@ class DatalakeClient:
         self,
         search_results: pd.DataFrame,
         output_path: Union[str, Path], 
-        include_images: bool = False
+        include_images: bool = False,
+        absolute_paths: bool = True,
     ) -> Path:
         """검색 결과를 HuggingFace Dataset으로 저장"""
-        self.logger.info("📥 Dataset 생성 시작...")
+        self.logger.info("📥 Dataset 저장 시작...")
         
-        try:
-            from datasets import Dataset
-            from PIL import Image
-        except ImportError:
-            raise ImportError("datasets 라이브러리가 필요합니다: pip install datasets")
+        # Dataset 객체 생성 (기존 로직 재사용)
+        dataset = self.to_dataset(search_results, include_images, absolute_paths)
         
+        # 저장
         output_path = Path(output_path)
         output_path.mkdir(parents=True, exist_ok=True)
-        
-        # DataFrame을 Dataset으로 변환
-        dataset = Dataset.from_pandas(search_results)
-        
-        if include_images:
-            dataset = self._add_images_to_dataset(dataset)
-        
-        # Dataset 저장
         dataset.save_to_disk(str(output_path))
         
         total_size = sum(f.stat().st_size for f in output_path.rglob('*') if f.is_file()) / 1024 / 1024
@@ -675,6 +715,103 @@ class DatalakeClient:
                 'errors': [str(e)]
             }
             
+    def check_db_processes(self):
+        """DB 사용 중인 프로세스 확인 (개선된 버전)"""
+        print("\n🔍 DB 사용 중인 프로세스 확인")
+        print("="*50)
+        
+        db_path = Path(self.duckdb_path).resolve()  # 절대경로로 변환
+        
+        try:
+            using_processes = []
+            
+            for proc in psutil.process_iter(['pid', 'name', 'cmdline']):
+                try:
+                    # 1. cmdline 검사 (기존 방식)
+                    cmdline_match = False
+                    if proc.info['cmdline']:
+                        cmdline = ' '.join(proc.info['cmdline'])
+                        if str(db_path) in cmdline or 'catalog.duckdb' in cmdline:
+                            cmdline_match = True
+                    
+                    # 2. 열린 파일 디스크립터 검사 (새로운 방식)
+                    file_match = False
+                    try:
+                        process = psutil.Process(proc.info['pid'])
+                        open_files = process.open_files()
+                        for f in open_files:
+                            file_path = Path(f.path).resolve()
+                            # DB 파일이나 관련 파일들 확인
+                            if (file_path == db_path or 
+                                file_path.name == db_path.name or
+                                str(file_path).endswith('.duckdb') or
+                                str(file_path).endswith('.duckdb.wal') or
+                                str(file_path).endswith('.duckdb.tmp')):
+                                file_match = True
+                                break
+                    except (psutil.AccessDenied, psutil.NoSuchProcess):
+                        # 권한이 없거나 프로세스가 사라진 경우
+                        pass
+                    
+                    # 3. 메모리 매핑 검사 (추가)
+                    memory_match = False
+                    try:
+                        process = psutil.Process(proc.info['pid'])
+                        memory_maps = process.memory_maps()
+                        for m in memory_maps:
+                            if str(db_path) in m.path:
+                                memory_match = True
+                                break
+                    except (psutil.AccessDenied, psutil.NoSuchProcess, AttributeError):
+                        # 일부 시스템에서는 memory_maps()가 없을 수 있음
+                        pass
+                    
+                    # 하나라도 매치되면 DB 사용 중인 프로세스
+                    if cmdline_match or file_match or memory_match:
+                        match_type = []
+                        if cmdline_match: match_type.append("cmdline")
+                        if file_match: match_type.append("open_files")
+                        if memory_match: match_type.append("memory_map")
+                        
+                        using_processes.append({
+                            'pid': proc.info['pid'],
+                            'name': proc.info['name'],
+                            'cmdline': cmdline[:100] + '...' if len(cmdline) > 100 else cmdline,
+                            'match_type': ', '.join(match_type)
+                        })
+                        
+                except (psutil.NoSuchProcess, psutil.AccessDenied):
+                    continue
+            
+            # DB 파일 상태 정보도 포함
+            db_info = {
+                'path': str(db_path),
+                'exists': db_path.exists()
+            }
+            
+            if db_path.exists():
+                stat = db_path.stat()
+                db_info.update({
+                    'size': stat.st_size,
+                    'modified_time': datetime.fromtimestamp(stat.st_mtime).isoformat()
+                })
+                
+                # WAL 파일 확인
+                wal_file = db_path.with_suffix('.duckdb.wal')
+                db_info['has_wal'] = wal_file.exists()
+            
+            result = {
+                'processes': using_processes,
+                'db_info': db_info
+            }
+            
+            self.logger.info(f"📊 DB 프로세스 확인 완료: {len(using_processes)}개 프로세스 발견")
+            return result
+            
+        except Exception as e:
+            self.logger.error(f"❌ 프로세스 확인 실패: {e}")
+            return {'error': str(e)}
+        
     def _validate_catalog_db(self, duck_client):
         """Catalog DB 유효성 검사"""
         tables = duck_client.list_tables()
@@ -719,7 +856,11 @@ class DatalakeClient:
     def _perform_partition_search(
         self, 
         duck_client, 
-        providers, datasets, tasks, variants, limit
+        providers, 
+        datasets, 
+        tasks, 
+        variants, 
+        limit
     ):
         """파티션 기반 검색 실행"""
         return duck_client.retrieve_with_existing_cols(
@@ -757,7 +898,7 @@ class DatalakeClient:
                 engine="duckdb"
             )
         
-        if limit:
+        if limit is not None:
             sql += f" LIMIT {limit}"
             
         return duck_client.execute_query(sql)
@@ -766,11 +907,10 @@ class DatalakeClient:
         def load_image(example):
             try:
                 if example.get('path'):
-                    image_path = self.assets_path / example['path']
+                    image_path = Path(example['path'])
+                
                     if image_path.exists():
                         pil_image = Image.open(image_path)
-                        pil_image.verify()  # 검증
-                        pil_image = Image.open(image_path)  # 다시 열기
                         example['image'] = pil_image
                         example['has_valid_image'] = True
                         return example
@@ -791,8 +931,10 @@ class DatalakeClient:
         
         # 유효한 이미지만 필터링
         valid_dataset = dataset_with_images.filter(
-            lambda x: x['has_valid_image'],
-            desc="유효 이미지 필터링"
+            lambda x: x,
+            desc="유효 이미지 필터링",
+            input_columns=['has_valid_image'],
+            num_proc=self.num_proc
         )
         
         # 임시 컬럼 제거
