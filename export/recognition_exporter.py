@@ -8,7 +8,11 @@ from pathlib import Path
 from PIL import Image
 
 from prep.utils import DATALAKE_DIR
-from export.utils import save_df_as_jsonl, user_prompt_dict
+from export.utils import (
+    save_df_as_jsonl,
+    user_prompt_dict,
+    filter_valid_image_paths,
+)
 
 
 class RecogntionCharExporter(object):
@@ -50,6 +54,10 @@ class RecogntionCharExporter(object):
         df_copied["path"] = df_copied["path"].apply(
             lambda x: (Path(self.datalake_dir) / "assets" / x).as_posix(),
         )
+        df_copied = filter_valid_image_paths(
+            df_copied,
+        )
+
         df_copied["query"] = self.user_prompt
 
         save_df_as_jsonl(

@@ -241,6 +241,29 @@ class AthenaClient:
     ) -> pd.DataFrame:
         """존재하는 컬럼만 포함해서 조회.
         """
+        if isinstance(providers, str):
+            providers = [providers]
+        if isinstance(datasets, str):
+            datasets = [datasets]
+        if isinstance(tasks, str):
+            tasks = [tasks]
+        if isinstance(variants, str):
+            variants = [variants]
+            
+        if providers is None:
+            providers = []
+        if datasets is None:
+            datasets = []
+        if tasks is None:
+            tasks = []
+        if variants is None:
+            variants = []
+            
+        providers = [i for i in providers if i]
+        datasets = [i for i in datasets if i]
+        tasks = [i for i in tasks if i]
+        variants = [i for i in variants if i]
+            
         
         conditions = []
         

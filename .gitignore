@@ -203,3 +203,8 @@ pyrightconfig.json
 *.sh
 *.arrow
 *.db
+
+# 최상단의 ipynb만 무시
+*.ipynb_checkpoints
+# 특정 디렉토리의 ipynb만 무시
+*/notebooks/*.ipynb_checkpoints

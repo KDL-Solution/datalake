@@ -223,7 +223,6 @@ class DuckDBClient:
         limit: Optional[int] = None,
     ) -> pd.DataFrame:
         """존재하는 컬럼만 포함해서 조회"""
-        # str 일경우 리스트로 변경
         if isinstance(providers, str):
             providers = [providers]
         if isinstance(datasets, str):
@@ -232,6 +231,21 @@ class DuckDBClient:
             tasks = [tasks]
         if isinstance(variants, str):
             variants = [variants]
+        
+        if providers is None:
+            providers = []
+        if datasets is None:
+            datasets = []
+        if tasks is None:
+            tasks = []
+        if variants is None:
+            variants = []
+            
+        providers = [i for i in providers if i]
+        datasets = [i for i in datasets if i]
+        tasks = [i for i in tasks if i]
+        variants = [i for i in variants if i]
+            
         # WHERE 조건 구성
         conditions = []
         
