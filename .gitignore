@@ -195,17 +195,15 @@ pyrightconfig.json
 **/images_train/
 **/images_val/
 **/images_test/
+**/pdfs/
+**/data/
 **/images_char/
 **/images_word/
-**/data/
 
-!user_prompts.json
-*/data/
 *.sh
 *.arrow
 *.db
 
-prep/huggingface/kvp10k
 # 최상단의 ipynb만 무시
 *.ipynb_checkpoints
 # 특정 디렉토리의 ipynb만 무시

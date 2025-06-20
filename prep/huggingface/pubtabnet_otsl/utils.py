@@ -127,18 +127,9 @@ def export_to_parquet(
         ),
         batched=True,
         batch_size=batch_size,
+        remove_columns=dataset.column_names,
     )
-    dataset = dataset.remove_columns(
-        [
-            col for col in dataset.column_names
-            if col not in [
-                "image_path",
-                "width",
-                "height",
-                "label",
-            ]
-        ]
-    )
+
     parquet_path.parent.mkdir(
         parents=True,
         exist_ok=True,
