@@ -6,7 +6,7 @@ from pathlib import Path
 from collections import defaultdict
 from tqdm import tqdm
 
-from utils import DATALAKE_DIR, get_safe_image_hash_from_pil
+from prep.utils import DATALAKE_DIR, get_safe_image_hash_from_pil
 
 
 def unzip_all_zips_in_dir(

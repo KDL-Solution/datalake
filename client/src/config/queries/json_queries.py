@@ -4,7 +4,7 @@ from typing import Dict, Any
 
 class JSONQueries:
     """JSON 데이터 처리를 위한 쿼리 템플릿 모음"""
-    
+
     @staticmethod
     def extract_valid_content(
         table: str, 
@@ -74,13 +74,13 @@ class JSONQueries:
         if search_type == "simple":
             # 단순 LIKE 검색
             conditions = base_conditions + [f"{column} LIKE '%{search_text}%'"]
-            
+
             return f"""
             SELECT DISTINCT hash, path, {column}
             FROM {table}
             WHERE {' AND '.join(conditions)}
             """
-            
+
         elif search_type == "json":
             # JSON 파싱 검색
             if not json_loc:
@@ -118,7 +118,7 @@ class JSONQueries:
             FROM extracted_content
             WHERE content LIKE '%{search_text}%'
             """
-            
+
     @staticmethod
     def get_distinct_partitions(table: str) -> str:
         """모든 파티션 조합 조회"""
@@ -128,7 +128,7 @@ class JSONQueries:
         GROUP BY provider, dataset, task, variant
         ORDER BY provider, dataset, task, variant
         """
-    
+
     @staticmethod
     def create_table_from_parquet_duckdb(
         table_name: str,

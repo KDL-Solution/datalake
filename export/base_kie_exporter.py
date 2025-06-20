@@ -4,7 +4,13 @@ from pathlib import Path
 import pandas as pd
 from typing import Dict, Any
 
-from export.utils import save_df_as_jsonl, denormalize_bboxes
+from prep.utils import DATALAKE_DIR
+from export.utils import (
+    save_df_as_jsonl,
+    denormalize_bboxes,
+    smart_resize,
+    filter_valid_image_paths,
+)
 
 
 def remove_none_values(
@@ -40,6 +46,12 @@ def truncate_lists(
 
 
 class KIEStructExporter(object):
+    def __init__(
+        self,
+        datalake_dir: str = DATALAKE_DIR.as_posix(),
+    ):
+        self.datalake_dir = datalake_dir
+
     def _blank_value_and_bbox(
         self,
         json_str: str,
@@ -119,20 +131,19 @@ class KIEStructExporter(object):
     def export(
         self,
         df: pd.DataFrame,
-        datalake_dir: str,
-        save_path: str,
-        user_prompt: str = "Extract the following information from the image. Return the result in the following structured JSON format (formatted with newlines and zero-space indentation), filling in both <|value|> and <|bbox|>:",
+        user_prompt: str,
+        jsonl_path: str,
         value_key: str = "<|value|>",
         bbox_key: str = "<|bbox|>",
-        indent: int = 0,
+        indent: int = None,
     ) -> None:
         df_copied = df.copy()
-        # df_copied["query"] = df_copied["query"].str.replace("<|value|>", "<|value|>", regex=False).str.replace("<|bbox|>", "<|bbox|>", regex=False)
-        # df_copied["label"] = df_copied["label"].str.replace('"<|value|>"', '"<|value|>"', regex=False).str.replace('"<|bbox|>"', '"<|bbox|>"', regex=False)
-        # df_copied["image_path"] = df_copied["image_path"].str.replace('images/images', 'images', regex=False)
 
-        df_copied["image_path"] = df_copied["image_path"].apply(
-            lambda x: (Path(datalake_dir) / x).as_posix(),
+        df_copied["path"] = df_copied["path"].apply(
+            lambda x: (Path(self.datalake_dir) / "assets" / x).as_posix(),
+        )
+        df_copied = filter_valid_image_paths(
+            df_copied,
         )
         df_copied["query"] = df_copied.apply(
             lambda x: user_prompt + "\n" + self._make_target_schema(
@@ -142,6 +153,14 @@ class KIEStructExporter(object):
                 bbox_key=bbox_key,
             ),
             axis=1,
+        )
+        df_copied[["width", "height"]] = df_copied.apply(
+            lambda x: smart_resize(
+                width=x["width"],
+                height=x["height"],
+            ),
+            axis=1,
+            result_type="expand",
         )
         df_copied["label"] = df_copied.apply(
             lambda x: self._process_kie_label(
@@ -156,5 +175,66 @@ class KIEStructExporter(object):
 
         save_df_as_jsonl(
             df=df_copied,
-            save_path=save_path,
+            jsonl_path=jsonl_path,
         )
+
+
+if __name__ == "__main__":
+    import duckdb
+    from sklearn.model_selection import train_test_split
+
+    from export.utils import user_prompt_dict
+
+    exporter = KIEStructExporter()
+    conn = duckdb.connect()
+    ROOT = Path(__file__).resolve().parent
+    seed = 42
+
+    read_parquet = "read_parquet('/mnt/AI_NAS/datalake/catalog/provider=*/dataset=*/task=*/variant=*/data.parquet', union_by_name=True, filename=True, hive_partitioning=True)"
+
+    sql=f"""SELECT *
+    FROM {read_parquet}
+    WHERE dataset = 'post_handwritten_plain_text'
+        AND task != 'raw'"""
+    df = conn.execute(
+        sql,
+    ).fetchdf()
+    df_train, df_test = train_test_split(
+        df,
+        test_size=10,
+        random_state=seed,
+    )
+    exporter.export(
+        df=df_train,
+        user_prompt=user_prompt_dict["post_handwritten_plain_text"],
+        jsonl_path=(ROOT / "data/post_handwritten_plain_text_train.jsonl").as_posix(),
+    )
+    exporter.export(
+        df=df_test,
+        user_prompt=user_prompt_dict["post_handwritten_plain_text"],
+        jsonl_path=(ROOT / "data/post_handwritten_plain_text_test.jsonl").as_posix(),
+    )
+
+
+    sql=f"""SELECT *
+    FROM {read_parquet}
+    WHERE dataset = 'postoffice_label'
+        AND task != 'raw'"""
+    df = conn.execute(
+        sql,
+    ).fetchdf()
+    df_train, df_test = train_test_split(
+        df,
+        test_size=200,
+        random_state=seed,
+    )
+    exporter.export(
+        df=df_train,
+        user_prompt=user_prompt_dict["base_kie_bbox"],
+        jsonl_path=(ROOT / "data/postoffice_label_train.jsonl").as_posix(),
+    )
+    exporter.export(
+        df=df_test,
+        user_prompt=user_prompt_dict["base_kie_bbox"],
+        jsonl_path=(ROOT / "data/postoffice_label_test.jsonl").as_posix(),
+    )
