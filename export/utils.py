@@ -228,3 +228,16 @@ user_prompt_dict = {
     "table": "Parse the table in the image.",
     "image": "Read text in the image.",
 }
+
+
+def filter_valid_image_paths(
+    df: pd.DataFrame,
+) -> pd.DataFrame:
+    df_copied = df.copy()
+
+    if "path" in df_copied.columns.tolist():
+        df_copied["exists"] = df_copied["path"].apply(
+            lambda x: Path(x).exists()
+        )
+        df_copied = df_copied[df_copied["exists"]]
+    return df_copied

@@ -9,6 +9,7 @@ from export.utils import (
     save_df_as_jsonl,
     denormalize_bboxes,
     smart_resize,
+    filter_valid_image_paths,
 )
 
 
@@ -141,6 +142,9 @@ class KIEStructExporter(object):
         df_copied["path"] = df_copied["path"].apply(
             lambda x: (Path(self.datalake_dir) / "assets" / x).as_posix(),
         )
+        df_copied = filter_valid_image_paths(
+            df_copied,
+        )
         df_copied["query"] = df_copied.apply(
             lambda x: user_prompt + "\n" + self._make_target_schema(
                 x["label"],
@@ -209,4 +213,28 @@ if __name__ == "__main__":
         df=df_test,
         user_prompt=user_prompt_dict["post_handwritten_plain_text"],
         jsonl_path=(ROOT / "data/post_handwritten_plain_text_test.jsonl").as_posix(),
+    )
+
+
+    sql=f"""SELECT *
+    FROM {read_parquet}
+    WHERE dataset = 'postoffice_label'
+        AND task != 'raw'"""
+    df = conn.execute(
+        sql,
+    ).fetchdf()
+    df_train, df_test = train_test_split(
+        df,
+        test_size=200,
+        random_state=seed,
+    )
+    exporter.export(
+        df=df_train,
+        user_prompt=user_prompt_dict["base_kie_bbox"],
+        jsonl_path=(ROOT / "data/postoffice_label_train.jsonl").as_posix(),
+    )
+    exporter.export(
+        df=df_test,
+        user_prompt=user_prompt_dict["base_kie_bbox"],
+        jsonl_path=(ROOT / "data/postoffice_label_test.jsonl").as_posix(),
     )

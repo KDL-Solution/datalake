@@ -14,12 +14,19 @@ from export.utils import (
     mask_outside_bboxes,
     layout_category_dict,
     user_prompt_dict,
+    filter_valid_image_paths,
 )
 
 tqdm.pandas()
 
 
 class BaseLayoutExporter(object):
+    def __init__(
+        self,
+        datalake_dir: str = DATALAKE_DIR.as_posix(),
+    ):
+        self.datalake_dir = datalake_dir
+
     def _elements_to_label(
         self,
         elements: List[Dict[str, str]],
@@ -73,7 +80,6 @@ class BaseLayoutExporter(object):
         df: pd.DataFrame,
         jsonl_path: str,
         images_dir: str,
-        datalake_dir: str = DATALAKE_DIR.as_posix(),
         user_prompt_reading_order: str = user_prompt_dict["base_layout_reading_order"],
         user_prompt_no_reading_order: str = user_prompt_dict["base_layout_no_reading_order"],
         indent: int = None,
@@ -101,18 +107,21 @@ class BaseLayoutExporter(object):
             lambda x: json.loads(x),
         )  # String to Dict.
 
-        df_copied["image_path"] = df_copied["image_path"].apply(
-            lambda x: (Path(datalake_dir) / x).as_posix(),
+        df_copied["path"] = df_copied["path"].apply(
+            lambda x: (Path(self.datalake_dir) / "assets" / x).as_posix(),
         )  # Relative path to absolute path.
-        df_copied["image_path"] = df_copied.progress_apply(
+        df_copied = filter_valid_image_paths(
+            df_copied,
+        )
+        df_copied["path"] = df_copied.progress_apply(
             lambda x: self.save_masked_image(
-                image_path=x["image_path"],
+                image_path=x["path"],
                 bboxes=[i["bbox"] for i in x["label"]["elements"]],
                 images_dir=images_dir,
             ),
             axis=1,
         )
-        df_copied = df_copied[df_copied["image_path"].notna()]
+        df_copied = df_copied[df_copied["path"].notna()]
 
         df_copied["query"] = df_copied.apply(
             lambda x: user_prompt_reading_order if x["label"]["reading_order"] else user_prompt_no_reading_order,
