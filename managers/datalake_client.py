@@ -19,6 +19,7 @@ from .data_schema import SchemaManager
 from .logging_setup import setup_logging
 from client.src.core.duckdb_client import DuckDBClient
 
+
 class DatalakeClient:
     def __init__(
         self, 
@@ -52,7 +53,7 @@ class DatalakeClient:
             base_path=self.base_path, 
             create_default=True
         )
-          
+
     def upload_raw_data(
         self,
         data_file: str,
@@ -542,7 +543,7 @@ class DatalakeClient:
                 lambda x: str(self.assets_path / x) if isinstance(x, str) and x else x
             )
             self.logger.debug("📁 경로를 절대경로로 변환")
-        
+
         return df_copy
 
     def to_pandas(
@@ -552,9 +553,9 @@ class DatalakeClient:
     ) -> pd.DataFrame:
         """검색 결과를 Pandas DataFrame으로 변환"""
         self.logger.info("📊 Pandas DataFrame 변환 시작...")
-        
+
         df_copy = self._prepare_dataframe(search_results, absolute_paths)
-        
+
         self.logger.info(f"✅ DataFrame 변환 완료: {len(df_copy):,}개 항목")
         return df_copy
 
@@ -566,13 +567,13 @@ class DatalakeClient:
     ):
         """검색 결과를 HuggingFace Dataset 객체로 변환"""
         self.logger.info("📥 Dataset 객체 생성 시작...")
-        
+
         df_copy = self._prepare_dataframe(search_results, absolute_paths)
         dataset = Dataset.from_pandas(df_copy)
         
         if include_images:
             dataset = self._add_images_to_dataset(dataset)
-            
+
         self.logger.info(f"✅ Dataset 객체 생성 완료: {len(dataset):,}개 항목") 
         return dataset
 
@@ -584,17 +585,17 @@ class DatalakeClient:
     ) -> Path:
         """검색 결과를 Parquet으로 저장"""
         self.logger.info("💾 Parquet 저장 시작...")
-        
+
         df_copy = self._prepare_dataframe(search_results, absolute_paths)
-        
+
         output_path = Path(output_path).with_suffix('.parquet')
         output_path.parent.mkdir(parents=True, exist_ok=True)
         df_copy.to_parquet(output_path, index=False)
-        
+
         file_size = output_path.stat().st_size / 1024 / 1024
         self.logger.info(f"✅ Parquet 저장 완료: {output_path}")
         self.logger.info(f"📊 {len(df_copy):,}개 항목, {file_size:.1f}MB")
-        
+
         return output_path
 
     def download_as_dataset(
@@ -606,22 +607,22 @@ class DatalakeClient:
     ) -> Path:
         """검색 결과를 HuggingFace Dataset으로 저장"""
         self.logger.info("📥 Dataset 저장 시작...")
-        
+
         # Dataset 객체 생성 (기존 로직 재사용)
         dataset = self.to_dataset(search_results, include_images, absolute_paths)
-        
+
         # 저장
         output_path = Path(output_path)
         output_path.mkdir(parents=True, exist_ok=True)
         dataset.save_to_disk(str(output_path))
-        
+
         total_size = sum(f.stat().st_size for f in output_path.rglob('*') if f.is_file()) / 1024 / 1024
-        
+
         self.logger.info(f"✅ Dataset 저장 완료: {output_path}")
         self.logger.info(f"📊 {len(dataset):,}개 항목, {total_size:.1f}MB")
-        
+
         return output_path
-    
+
     def validate_data_integrity(
         self, 
         search_results: pd.DataFrame,
@@ -629,7 +630,7 @@ class DatalakeClient:
     ) -> Dict:
         """
         데이터 무결성 검사
-        
+
         Args:
             search_results: 검사할 데이터 (None이면 전체 catalog 검사)
             sample_percent: 샘플링 비율 (0.1 = 10%)
@@ -638,7 +639,7 @@ class DatalakeClient:
             검사 결과 딕셔너리
         """
         self.logger.info("🔍 데이터 무결성 검사 시작...")
-        
+
         try:
             if search_results.empty:
                 self.logger.warning("⚠️ 검색 결과가 비어 있습니다. 무결성 검사를 건너뜁니다.")
@@ -649,19 +650,19 @@ class DatalakeClient:
                 }
             else:
                 self.logger.info(f"📊 검사 대상 항목: {len(search_results):,}개")
-            
+
             # 샘플링
             if sample_percent:
                 sample_size = int(len(search_results) * sample_percent)
                 search_results = search_results.sample(n=sample_size, random_state=42)
                 self.logger.info(f"📊 샘플 검사: {len(search_results):,}개 항목 ({sample_percent*100:.1f}%)")
-            
+
             dataset = Dataset.from_pandas(search_results)
             dataset = dataset.filter(
                 lambda x: x.get('hash') and x.get('path'), 
                 desc="필수 필드 필터링"
             )
-            
+
             # 파일 존재 여부 검사
             def check_file_exists(example):
                 path_val = example.get('path')
@@ -672,9 +673,8 @@ class DatalakeClient:
                 file_path = self.assets_path / path_val
                 exists = file_path.exists()
                 example['file_exists'] = exists
-                
                 return example
-            
+
             # 병렬 검사
             dataset_with_check = dataset.map(
                 check_file_exists,
@@ -682,15 +682,15 @@ class DatalakeClient:
                 num_proc=min(self.num_proc, 8),
                 load_from_cache_file=False
             )
-            
+
             # 누락된 파일 찾기
             missing_files_data = dataset_with_check.filter(
                 lambda x: not x['file_exists'],
                 desc="누락 파일 필터링"
             )
-            
+
             missing_files = missing_files_data.to_list()
-            
+
             result = {
                 'total_items': len(search_results),
                 'checked_items': len(dataset),
@@ -698,15 +698,14 @@ class DatalakeClient:
                 'missing_count': len(missing_files),
                 'integrity_rate': (len(dataset) - len(missing_files)) / len(dataset) * 100 if len(dataset) > 0 else 0
             }
-            
+
             self.logger.info(f"📊 무결성 검사 완료:")
             self.logger.info(f"  총 항목: {result['total_items']:,}개")
             self.logger.info(f"  검사 항목: {result['checked_items']:,}개")
             self.logger.info(f"  누락 파일: {result['missing_count']:,}개")
             self.logger.info(f"  무결성 비율: {result['integrity_rate']:.1f}%")
-            
             return result
-            
+
         except Exception as e:
             self.logger.error(f"❌ 무결성 검사 실패: {e}")
             return {
@@ -714,17 +713,17 @@ class DatalakeClient:
                 'missing_files': [],
                 'errors': [str(e)]
             }
-            
+
     def check_db_processes(self):
         """DB 사용 중인 프로세스 확인 (개선된 버전)"""
         print("\n🔍 DB 사용 중인 프로세스 확인")
         print("="*50)
         
         db_path = Path(self.duckdb_path).resolve()  # 절대경로로 변환
-        
+
         try:
             using_processes = []
-            
+
             for proc in psutil.process_iter(['pid', 'name', 'cmdline']):
                 try:
                     # 1. cmdline 검사 (기존 방식)
@@ -733,7 +732,7 @@ class DatalakeClient:
                         cmdline = ' '.join(proc.info['cmdline'])
                         if str(db_path) in cmdline or 'catalog.duckdb' in cmdline:
                             cmdline_match = True
-                    
+
                     # 2. 열린 파일 디스크립터 검사 (새로운 방식)
                     file_match = False
                     try:
@@ -752,7 +751,7 @@ class DatalakeClient:
                     except (psutil.AccessDenied, psutil.NoSuchProcess):
                         # 권한이 없거나 프로세스가 사라진 경우
                         pass
-                    
+
                     # 3. 메모리 매핑 검사 (추가)
                     memory_match = False
                     try:
@@ -765,7 +764,7 @@ class DatalakeClient:
                     except (psutil.AccessDenied, psutil.NoSuchProcess, AttributeError):
                         # 일부 시스템에서는 memory_maps()가 없을 수 있음
                         pass
-                    
+
                     # 하나라도 매치되면 DB 사용 중인 프로세스
                     if cmdline_match or file_match or memory_match:
                         match_type = []
@@ -782,49 +781,49 @@ class DatalakeClient:
                         
                 except (psutil.NoSuchProcess, psutil.AccessDenied):
                     continue
-            
+
             # DB 파일 상태 정보도 포함
             db_info = {
                 'path': str(db_path),
                 'exists': db_path.exists()
             }
-            
+
             if db_path.exists():
                 stat = db_path.stat()
                 db_info.update({
                     'size': stat.st_size,
                     'modified_time': datetime.fromtimestamp(stat.st_mtime).isoformat()
                 })
-                
+
                 # WAL 파일 확인
                 wal_file = db_path.with_suffix('.duckdb.wal')
                 db_info['has_wal'] = wal_file.exists()
-            
+
             result = {
                 'processes': using_processes,
                 'db_info': db_info
             }
-            
+
             self.logger.info(f"📊 DB 프로세스 확인 완료: {len(using_processes)}개 프로세스 발견")
             return result
-            
+
         except Exception as e:
             self.logger.error(f"❌ 프로세스 확인 실패: {e}")
             return {'error': str(e)}
-        
+
     def _validate_catalog_db(self, duck_client):
         """Catalog DB 유효성 검사"""
         tables = duck_client.list_tables()
         if tables.empty or 'catalog' not in tables['name'].values:
             raise ValueError("catalog 테이블이 존재하지 않습니다. build_catalog_db()로 생성하세요.")
-    
+
     def _is_db_outdated(self) -> bool:
         """DB가 최신 상태인지 확인"""
         if not self.duckdb_path.exists():
             return True
-            
+
         db_mtime = self.duckdb_path.stat().st_mtime
-        
+
         # 가장 최근 Parquet 파일 확인
         latest_parquet_mtime = 0
         for parquet_file in self.catalog_path.rglob("*.parquet"):
@@ -833,7 +832,7 @@ class DatalakeClient:
                 latest_parquet_mtime = file_mtime
         
         return latest_parquet_mtime > db_mtime
-    
+
     def _cleanup_db_files(self):
         """DB 관련 파일들 정리"""
         files_to_remove = [
@@ -844,7 +843,7 @@ class DatalakeClient:
             self.duckdb_path.with_suffix('.duckdb.tmp'),
             self.duckdb_path.with_suffix('.duckdb.lock')
         ]
-        
+
         for file_path in files_to_remove:
             if file_path.exists():
                 try:
@@ -852,7 +851,7 @@ class DatalakeClient:
                     self.logger.debug(f"🗑️ 삭제: {file_path}")
                 except Exception as e:
                     self.logger.warning(f"⚠️ 삭제 실패: {file_path} - {e}")
-    
+
     def _perform_partition_search(
         self, 
         duck_client, 
@@ -877,7 +876,7 @@ class DatalakeClient:
         column = text_search.get("column")
         text = text_search.get("text")
         json_path = text_search.get("json_path")
-        
+
         if json_path:
             # JSON 검색
             sql = duck_client.json_queries.search_text_in_column(
@@ -897,12 +896,12 @@ class DatalakeClient:
                 search_type="simple",
                 engine="duckdb"
             )
-        
+
         if limit is not None:
             sql += f" LIMIT {limit}"
             
         return duck_client.execute_query(sql)
-    
+
     def _add_images_to_dataset(self, dataset):
         def load_image(example):
             try:
@@ -916,11 +915,11 @@ class DatalakeClient:
                         return example
             except Exception as e:
                 self.logger.warning(f"이미지 로드 실패: {example.get('path', 'unknown')} - {e}")
-            
+
             example['image'] = None
             example['has_valid_image'] = False
             return example
-        
+
         # 이미지 로드
         self.logger.info("🖼️ 이미지 로딩 중...")
         dataset_with_images = dataset.map(
@@ -928,7 +927,7 @@ class DatalakeClient:
             desc="이미지 로딩",
             num_proc=self.num_proc
         )
-        
+
         # 유효한 이미지만 필터링
         valid_dataset = dataset_with_images.filter(
             lambda x: x,
@@ -936,17 +935,17 @@ class DatalakeClient:
             input_columns=['has_valid_image'],
             num_proc=self.num_proc
         )
-        
+
         # 임시 컬럼 제거
         valid_dataset = valid_dataset.remove_columns(['has_valid_image'])
-        
+
         total_items = len(dataset)
         valid_items = len(valid_dataset)
-        
+
         self.logger.info(f"📊 이미지 로딩 결과: {valid_items:,}/{total_items:,} 성공")
-        
+
         return valid_dataset
-    
+
     def _check_raw_data_exists(self, provider: str, dataset: str) -> bool:
         """해당 provider/dataset의 raw 데이터 존재 여부 확인"""
         raw_task_path = self.catalog_path / f"provider={provider}" / f"dataset={dataset}" / "task=raw"
@@ -959,7 +958,7 @@ class DatalakeClient:
         variant_dirs = [d for d in raw_task_path.iterdir() 
                     if d.is_dir() and d.name.startswith("variant=")]
         return len(variant_dirs) > 0     
-    
+
     def _check_nas_api_connection(self):
         """NAS API 서버 연결 확인"""
         try:
@@ -971,7 +970,7 @@ class DatalakeClient:
         except requests.exceptions.RequestException as e:
             self.logger.warning(f"⚠️ NAS API 서버 연결 실패: {e}")
             raise ConnectionError(f"NAS API 서버 연결 실패: {e}")
-    
+
     def _create_metadata(
         self,
         provider: str,

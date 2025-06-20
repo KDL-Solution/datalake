@@ -14,13 +14,15 @@ class VQAExporter(object):
     ) -> None:
         df_copied = df.copy()
 
-        df_copied["image_path"] = df_copied["image_path"].apply(
+        df_copied["path"] = df_copied["path"].apply(
             lambda x: (Path(datalake_dir) / x).as_posix(),
         )
+
         if multiturn:
             df_copied = df_copied.groupby(
-                by=["image_path"],
+                by=["path"],
             ).agg(list).reset_index()
+
         save_df_as_jsonl(
             df=df_copied,
             jsonl_path=save_path,
