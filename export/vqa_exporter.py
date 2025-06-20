@@ -27,3 +27,12 @@ class VQAExporter(object):
             df=df_copied,
             jsonl_path=save_path,
         )
+
+
+if __name__ == "__main__":
+    # import sys
+    # sys.path.insert(0, '/home/eric/workspace/datalake/')
+    from managers.datalake_client import DatalakeClient
+
+    exporter = VQAExporter()
+    manager = DatalakeClient()

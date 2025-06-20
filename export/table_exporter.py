@@ -1,7 +1,7 @@
 import pandas as pd
 from sklearn.model_selection import train_test_split
 
-from export.utils import save_df_as_jsonl
+from export.utils import save_df_as_jsonl, user_prompt_dict
 
 
 class TableImageExporter(object):
@@ -9,9 +9,14 @@ class TableImageExporter(object):
         self,
         df: pd.DataFrame,
         save_path: str,
+        user_prompt: str = user_prompt_dict["table"],
         multiturn: bool = True,
     ) -> None:
         df_copied = df.copy()
+
+        df_copied = df_copied[df_copied["label"].str.contains("<otsl>")]
+
+        df_copied["query"] = user_prompt
 
         if multiturn:
             df_copied = df_copied.groupby(
@@ -25,8 +30,8 @@ class TableImageExporter(object):
 
 
 if __name__ == "__main__":
-    import sys
-    sys.path.insert(0, '/home/eric/workspace/datalake/')
+    # import sys
+    # sys.path.insert(0, '/home/eric/workspace/datalake/')
     from managers.datalake_client import DatalakeClient
 
     exporter = TableImageExporter()
