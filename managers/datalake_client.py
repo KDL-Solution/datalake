@@ -7,7 +7,7 @@ import pandas as pd
 import requests 
 import time 
 import subprocess
-
+import psutil
 from pathlib import Path
 from datetime import datetime
 from datasets import Dataset, load_from_disk
@@ -17,6 +17,7 @@ from PIL import Image
 
 from .data_schema import SchemaManager
 from .logging_setup import setup_logging
+from client.src.core.duckdb_client import DuckDBClient
 
 class DatalakeClient:
     def __init__(
@@ -36,7 +37,7 @@ class DatalakeClient:
         self.staging_failed_path = self.staging_path / "failed"
         self.catalog_path = self.base_path / "catalog"
         self.assets_path  = self.base_path / "assets"
-        
+        self.duckdb_path = self.base_path / "db" / "catalog.duckdb"
         
         self.num_proc = num_proc
         self.image_data_candidates = ['image', 'image_bytes']
@@ -45,14 +46,13 @@ class DatalakeClient:
         self.file_path_key = 'file_path'  # 기본 파일 경로 컬럼 키
         
         self._check_path_and_setup_logging(log_level)
-        
         self._check_nas_api_connection()
 
         self.schema_manager = SchemaManager(
             base_path=self.base_path, 
             create_default=True
         )
-      
+          
     def upload_raw_data(
         self,
         data_file: str,
@@ -158,6 +158,14 @@ class DatalakeClient:
         
         # 데이터 로드 및 컬럼 변환 (이미지 제외)
         dataset_obj, file_info = self._load_data(data_file)
+        
+
+        columns_to_remove = [key for key in meta.keys()
+                            if key in dataset_obj.column_names]
+        
+        if columns_to_remove:
+            dataset_obj = dataset_obj.remove_columns(columns_to_remove)
+            self.logger.info(f"🗑️ 기존 메타데이터 컬럼 제거: {columns_to_remove}")
         
         # 메타데이터 생성
         metadata = self._create_metadata(
@@ -335,6 +343,610 @@ class DatalakeClient:
         
         raise TimeoutError(f"작업 완료 대기 시간 초과: {job_id}")    
 
+    def get_catalog_info(self) -> Dict:
+        """Catalog DB 정보 조회"""
+        self.logger.info("📊 Catalog DB 정보 조회 중...")
+        
+        try:
+            if not self.duckdb_path.exists():
+                return {
+                    'exists': False,
+                    'message': 'Catalog DB 파일이 없습니다. build_catalog_db()로 생성하세요.'
+                }
+            
+            # DB 기본 정보
+            db_size = self.duckdb_path.stat().st_size / 1024 / 1024
+            db_mtime = datetime.fromtimestamp(self.duckdb_path.stat().st_mtime)
+            
+            info = {
+                'exists': True,
+                'path': str(self.duckdb_path),
+                'size_mb': round(db_size, 1),
+                'modified_time': db_mtime.strftime('%Y-%m-%d %H:%M:%S'),
+                'is_outdated': self._is_db_outdated()
+            }
+            
+            with DuckDBClient(str(self.duckdb_path), read_only=True) as duck_client:
+                # 테이블 정보
+                tables = duck_client.list_tables()
+                info['tables'] = tables['name'].tolist()
+                
+                if 'catalog' in info['tables']:
+                    # Catalog 테이블 상세 정보
+                    count_result = duck_client.execute_query("SELECT COUNT(*) as total FROM catalog")
+                    total_rows = count_result['total'].iloc[0]
+                    info['total_rows'] = total_rows
+                    
+                    # 파티션 정보
+                    try:
+                        partitions_df = duck_client.retrieve_partitions("catalog")
+                        info['partitions'] = len(partitions_df)
+                        
+                        # Provider별 통계
+                        if not partitions_df.empty:
+                            provider_stats = partitions_df.groupby('provider').size().to_dict()
+                            info['provider_stats'] = provider_stats
+                    except Exception as e:
+                        self.logger.warning(f"파티션 정보 조회 실패: {e}")
+                        info['partitions'] = 0
+                        info['provider_stats'] = {}
+                
+            return info
+            
+        except Exception as e:
+            self.logger.error(f"❌ Catalog DB 정보 조회 실패: {e}")
+            return {
+                'exists': False,
+                'error': str(e)
+            }
+    
+    def build_catalog_db(self, force_rebuild: bool = False) -> bool:
+        """Catalog DB 구축 또는 재구축"""
+        self.logger.info("🔨 Catalog DB 구축 시작...")
+        
+        try:
+            if not self.catalog_path.exists():
+                raise FileNotFoundError(f"Catalog 디렉토리가 존재하지 않습니다: {self.catalog_path}")
+            
+            # 기존 DB 파일 처리
+            if self.duckdb_path.exists():
+                if force_rebuild:
+                    self.logger.info("🗑️ 기존 DB 파일 삭제 중...")
+                    self._cleanup_db_files()
+                else:
+                    self.logger.info("⚠️ 기존 DB 파일이 존재합니다. force_rebuild=True로 재구축하세요.")
+                    return False
+            
+            # 디렉토리 생성
+            self.duckdb_path.parent.mkdir(mode=0o777, parents=True, exist_ok=True)
+            
+            # Parquet 파일들 확인
+            parquet_files = list(self.catalog_path.rglob("*.parquet"))
+            if not parquet_files:
+                raise FileNotFoundError("Parquet 파일을 찾을 수 없습니다.")
+            
+            self.logger.info(f"📂 발견된 Parquet 파일: {len(parquet_files)}개")
+            
+            # 새 DB 생성
+            with DuckDBClient(str(self.duckdb_path), read_only=False) as duck_client:
+                parquet_pattern = str(self.catalog_path / "**" / "*.parquet")
+                
+                self.logger.info("📊 Catalog 테이블 생성 중...")
+                duck_client.create_table_from_parquet(
+                    "catalog",
+                    parquet_pattern,
+                    hive_partitioning=True,
+                    union_by_name=True
+                )
+                
+                # 결과 검증
+                count_result = duck_client.execute_query("SELECT COUNT(*) as total FROM catalog")
+                total_rows = count_result['total'].iloc[0]
+                
+                self.logger.info(f"✅ Catalog DB 구축 완료!")
+                self.logger.info(f"📊 총 {total_rows:,}개 행")
+                self.logger.info(f"💾 DB 파일: {self.duckdb_path}")
+                self.logger.info(f"📁 파일 크기: {self.duckdb_path.stat().st_size / 1024 / 1024:.1f}MB")
+                
+            # 권한 설정
+            self.duckdb_path.chmod(0o666)
+            return True
+            
+        except Exception as e:
+            self.logger.error(f"❌ Catalog DB 구축 실패: {e}")
+            # 실패 시 정리
+            if self.duckdb_path.exists():
+                try:
+                    self.duckdb_path.unlink()
+                except:
+                    pass
+            return False
+    
+    def get_catalog_partitions(self) -> pd.DataFrame:
+        """사용 가능한 파티션 목록 조회"""
+        self.logger.info("🔍 Catalog 파티션 조회 중...")
+        
+        try:
+            if not self.duckdb_path.exists():
+                raise FileNotFoundError("Catalog DB가 없습니다. build_catalog_db()로 먼저 생성하세요.")
+                
+            with DuckDBClient(str(self.duckdb_path), read_only=True) as duck_client:
+                self._validate_catalog_db(duck_client)
+                partitions_df = duck_client.retrieve_partitions("catalog")
+                
+                self.logger.info(f"📊 총 {len(partitions_df)}개 파티션 조회됨")
+                return partitions_df
+                
+        except Exception as e:
+            self.logger.error(f"❌ 파티션 조회 실패: {e}")
+            raise
+    
+    def search_catalog(
+        self,
+        providers: Optional[List[str]] = None,
+        datasets: Optional[List[str]] = None,
+        tasks: Optional[List[str]] = None,
+        variants: Optional[List[str]] = None,
+        text_search: Optional[Dict] = None,
+        limit: Optional[int] = None
+    ) -> pd.DataFrame:
+        """
+        Catalog에서 데이터 검색
+        
+        Args:
+            providers: Provider 목록 (None이면 전체)
+            datasets: Dataset 목록 (None이면 전체)
+            tasks: Task 목록 (None이면 전체)
+            variants: Variant 목록 (None이면 전체)
+            text_search: 텍스트 검색 설정 {"column": str, "text": str, "json_path": str}
+            limit: 결과 제한 수
+            
+        Returns:
+            검색 결과 DataFrame
+        """
+        self.logger.info("🔍 Catalog 검색 시작")
+        
+        try:
+            if not self.duckdb_path.exists():
+                raise FileNotFoundError("Catalog DB가 없습니다. build_catalog_db()로 먼저 생성하세요.")
+            
+            with DuckDBClient(str(self.duckdb_path), read_only=True) as duck_client:
+                self._validate_catalog_db(duck_client)
+                
+                if text_search:
+                    # 텍스트 검색
+                    results = self._perform_text_search(duck_client, text_search, limit)
+                else:
+                    # 파티션 기반 검색
+                    results = self._perform_partition_search(
+                        duck_client, providers, datasets, tasks, variants, limit
+                    )
+                
+                self.logger.info(f"📊 검색 결과: {len(results):,}개 항목")
+                return results
+                
+        except Exception as e:
+            self.logger.error(f"❌ 검색 실패: {e}")
+            raise
+    
+    def _prepare_dataframe(
+        self, 
+        search_results: pd.DataFrame, 
+        absolute_paths: bool = True,
+    ) -> pd.DataFrame:
+        """검색 결과를 처리용 DataFrame으로 준비"""
+        df_copy = search_results.copy()
+        
+        if absolute_paths and 'path' in df_copy.columns:
+            df_copy['path'] = df_copy['path'].apply(
+                lambda x: str(self.assets_path / x) if isinstance(x, str) and x else x
+            )
+            self.logger.debug("📁 경로를 절대경로로 변환")
+        
+        return df_copy
+
+    def to_pandas(
+        self, 
+        search_results: pd.DataFrame, 
+        absolute_paths: bool = True,
+    ) -> pd.DataFrame:
+        """검색 결과를 Pandas DataFrame으로 변환"""
+        self.logger.info("📊 Pandas DataFrame 변환 시작...")
+        
+        df_copy = self._prepare_dataframe(search_results, absolute_paths)
+        
+        self.logger.info(f"✅ DataFrame 변환 완료: {len(df_copy):,}개 항목")
+        return df_copy
+
+    def to_dataset(
+        self,
+        search_results: pd.DataFrame,
+        include_images: bool = False,
+        absolute_paths: bool = True,
+    ):
+        """검색 결과를 HuggingFace Dataset 객체로 변환"""
+        self.logger.info("📥 Dataset 객체 생성 시작...")
+        
+        df_copy = self._prepare_dataframe(search_results, absolute_paths)
+        dataset = Dataset.from_pandas(df_copy)
+        
+        if include_images:
+            dataset = self._add_images_to_dataset(dataset)
+            
+        self.logger.info(f"✅ Dataset 객체 생성 완료: {len(dataset):,}개 항목") 
+        return dataset
+
+    def download_as_parquet(
+        self, 
+        search_results: pd.DataFrame, 
+        output_path: Union[str, Path],
+        absolute_paths: bool = True,
+    ) -> Path:
+        """검색 결과를 Parquet으로 저장"""
+        self.logger.info("💾 Parquet 저장 시작...")
+        
+        df_copy = self._prepare_dataframe(search_results, absolute_paths)
+        
+        output_path = Path(output_path).with_suffix('.parquet')
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        df_copy.to_parquet(output_path, index=False)
+        
+        file_size = output_path.stat().st_size / 1024 / 1024
+        self.logger.info(f"✅ Parquet 저장 완료: {output_path}")
+        self.logger.info(f"📊 {len(df_copy):,}개 항목, {file_size:.1f}MB")
+        
+        return output_path
+
+    def download_as_dataset(
+        self,
+        search_results: pd.DataFrame,
+        output_path: Union[str, Path], 
+        include_images: bool = False,
+        absolute_paths: bool = True,
+    ) -> Path:
+        """검색 결과를 HuggingFace Dataset으로 저장"""
+        self.logger.info("📥 Dataset 저장 시작...")
+        
+        # Dataset 객체 생성 (기존 로직 재사용)
+        dataset = self.to_dataset(search_results, include_images, absolute_paths)
+        
+        # 저장
+        output_path = Path(output_path)
+        output_path.mkdir(parents=True, exist_ok=True)
+        dataset.save_to_disk(str(output_path))
+        
+        total_size = sum(f.stat().st_size for f in output_path.rglob('*') if f.is_file()) / 1024 / 1024
+        
+        self.logger.info(f"✅ Dataset 저장 완료: {output_path}")
+        self.logger.info(f"📊 {len(dataset):,}개 항목, {total_size:.1f}MB")
+        
+        return output_path
+    
+    def validate_data_integrity(
+        self, 
+        search_results: pd.DataFrame,
+        sample_percent: Optional[float] = None
+    ) -> Dict:
+        """
+        데이터 무결성 검사
+        
+        Args:
+            search_results: 검사할 데이터 (None이면 전체 catalog 검사)
+            sample_percent: 샘플링 비율 (0.1 = 10%)
+            
+        Returns:
+            검사 결과 딕셔너리
+        """
+        self.logger.info("🔍 데이터 무결성 검사 시작...")
+        
+        try:
+            if search_results.empty:
+                self.logger.warning("⚠️ 검색 결과가 비어 있습니다. 무결성 검사를 건너뜁니다.")
+                return {
+                    'total_items': 0,
+                    'missing_files': [],
+                    'errors': ["검색 결과가 비어 있습니다."]
+                }
+            else:
+                self.logger.info(f"📊 검사 대상 항목: {len(search_results):,}개")
+            
+            # 샘플링
+            if sample_percent:
+                sample_size = int(len(search_results) * sample_percent)
+                search_results = search_results.sample(n=sample_size, random_state=42)
+                self.logger.info(f"📊 샘플 검사: {len(search_results):,}개 항목 ({sample_percent*100:.1f}%)")
+            
+            dataset = Dataset.from_pandas(search_results)
+            dataset = dataset.filter(
+                lambda x: x.get('hash') and x.get('path'), 
+                desc="필수 필드 필터링"
+            )
+            
+            # 파일 존재 여부 검사
+            def check_file_exists(example):
+                path_val = example.get('path')
+                if not path_val:
+                    example['file_exists'] = None
+                    return example
+                
+                file_path = self.assets_path / path_val
+                exists = file_path.exists()
+                example['file_exists'] = exists
+                
+                return example
+            
+            # 병렬 검사
+            dataset_with_check = dataset.map(
+                check_file_exists,
+                desc="파일 존재 확인",
+                num_proc=min(self.num_proc, 8),
+                load_from_cache_file=False
+            )
+            
+            # 누락된 파일 찾기
+            missing_files_data = dataset_with_check.filter(
+                lambda x: not x['file_exists'],
+                desc="누락 파일 필터링"
+            )
+            
+            missing_files = missing_files_data.to_list()
+            
+            result = {
+                'total_items': len(search_results),
+                'checked_items': len(dataset),
+                'missing_files': missing_files,
+                'missing_count': len(missing_files),
+                'integrity_rate': (len(dataset) - len(missing_files)) / len(dataset) * 100 if len(dataset) > 0 else 0
+            }
+            
+            self.logger.info(f"📊 무결성 검사 완료:")
+            self.logger.info(f"  총 항목: {result['total_items']:,}개")
+            self.logger.info(f"  검사 항목: {result['checked_items']:,}개")
+            self.logger.info(f"  누락 파일: {result['missing_count']:,}개")
+            self.logger.info(f"  무결성 비율: {result['integrity_rate']:.1f}%")
+            
+            return result
+            
+        except Exception as e:
+            self.logger.error(f"❌ 무결성 검사 실패: {e}")
+            return {
+                'total_items': 0,
+                'missing_files': [],
+                'errors': [str(e)]
+            }
+            
+    def check_db_processes(self):
+        """DB 사용 중인 프로세스 확인 (개선된 버전)"""
+        print("\n🔍 DB 사용 중인 프로세스 확인")
+        print("="*50)
+        
+        db_path = Path(self.duckdb_path).resolve()  # 절대경로로 변환
+        
+        try:
+            using_processes = []
+            
+            for proc in psutil.process_iter(['pid', 'name', 'cmdline']):
+                try:
+                    # 1. cmdline 검사 (기존 방식)
+                    cmdline_match = False
+                    if proc.info['cmdline']:
+                        cmdline = ' '.join(proc.info['cmdline'])
+                        if str(db_path) in cmdline or 'catalog.duckdb' in cmdline:
+                            cmdline_match = True
+                    
+                    # 2. 열린 파일 디스크립터 검사 (새로운 방식)
+                    file_match = False
+                    try:
+                        process = psutil.Process(proc.info['pid'])
+                        open_files = process.open_files()
+                        for f in open_files:
+                            file_path = Path(f.path).resolve()
+                            # DB 파일이나 관련 파일들 확인
+                            if (file_path == db_path or 
+                                file_path.name == db_path.name or
+                                str(file_path).endswith('.duckdb') or
+                                str(file_path).endswith('.duckdb.wal') or
+                                str(file_path).endswith('.duckdb.tmp')):
+                                file_match = True
+                                break
+                    except (psutil.AccessDenied, psutil.NoSuchProcess):
+                        # 권한이 없거나 프로세스가 사라진 경우
+                        pass
+                    
+                    # 3. 메모리 매핑 검사 (추가)
+                    memory_match = False
+                    try:
+                        process = psutil.Process(proc.info['pid'])
+                        memory_maps = process.memory_maps()
+                        for m in memory_maps:
+                            if str(db_path) in m.path:
+                                memory_match = True
+                                break
+                    except (psutil.AccessDenied, psutil.NoSuchProcess, AttributeError):
+                        # 일부 시스템에서는 memory_maps()가 없을 수 있음
+                        pass
+                    
+                    # 하나라도 매치되면 DB 사용 중인 프로세스
+                    if cmdline_match or file_match or memory_match:
+                        match_type = []
+                        if cmdline_match: match_type.append("cmdline")
+                        if file_match: match_type.append("open_files")
+                        if memory_match: match_type.append("memory_map")
+                        
+                        using_processes.append({
+                            'pid': proc.info['pid'],
+                            'name': proc.info['name'],
+                            'cmdline': cmdline[:100] + '...' if len(cmdline) > 100 else cmdline,
+                            'match_type': ', '.join(match_type)
+                        })
+                        
+                except (psutil.NoSuchProcess, psutil.AccessDenied):
+                    continue
+            
+            # DB 파일 상태 정보도 포함
+            db_info = {
+                'path': str(db_path),
+                'exists': db_path.exists()
+            }
+            
+            if db_path.exists():
+                stat = db_path.stat()
+                db_info.update({
+                    'size': stat.st_size,
+                    'modified_time': datetime.fromtimestamp(stat.st_mtime).isoformat()
+                })
+                
+                # WAL 파일 확인
+                wal_file = db_path.with_suffix('.duckdb.wal')
+                db_info['has_wal'] = wal_file.exists()
+            
+            result = {
+                'processes': using_processes,
+                'db_info': db_info
+            }
+            
+            self.logger.info(f"📊 DB 프로세스 확인 완료: {len(using_processes)}개 프로세스 발견")
+            return result
+            
+        except Exception as e:
+            self.logger.error(f"❌ 프로세스 확인 실패: {e}")
+            return {'error': str(e)}
+        
+    def _validate_catalog_db(self, duck_client):
+        """Catalog DB 유효성 검사"""
+        tables = duck_client.list_tables()
+        if tables.empty or 'catalog' not in tables['name'].values:
+            raise ValueError("catalog 테이블이 존재하지 않습니다. build_catalog_db()로 생성하세요.")
+    
+    def _is_db_outdated(self) -> bool:
+        """DB가 최신 상태인지 확인"""
+        if not self.duckdb_path.exists():
+            return True
+            
+        db_mtime = self.duckdb_path.stat().st_mtime
+        
+        # 가장 최근 Parquet 파일 확인
+        latest_parquet_mtime = 0
+        for parquet_file in self.catalog_path.rglob("*.parquet"):
+            file_mtime = parquet_file.stat().st_mtime
+            if file_mtime > latest_parquet_mtime:
+                latest_parquet_mtime = file_mtime
+        
+        return latest_parquet_mtime > db_mtime
+    
+    def _cleanup_db_files(self):
+        """DB 관련 파일들 정리"""
+        files_to_remove = [
+            self.duckdb_path,
+            self.duckdb_path.with_suffix('.duckdb-wal'),
+            self.duckdb_path.with_suffix('.duckdb-shm'),
+            self.duckdb_path.with_suffix('.duckdb.wal'),
+            self.duckdb_path.with_suffix('.duckdb.tmp'),
+            self.duckdb_path.with_suffix('.duckdb.lock')
+        ]
+        
+        for file_path in files_to_remove:
+            if file_path.exists():
+                try:
+                    file_path.unlink()
+                    self.logger.debug(f"🗑️ 삭제: {file_path}")
+                except Exception as e:
+                    self.logger.warning(f"⚠️ 삭제 실패: {file_path} - {e}")
+    
+    def _perform_partition_search(
+        self, 
+        duck_client, 
+        providers, 
+        datasets, 
+        tasks, 
+        variants, 
+        limit
+    ):
+        """파티션 기반 검색 실행"""
+        return duck_client.retrieve_with_existing_cols(
+            providers=providers,
+            datasets=datasets, 
+            tasks=tasks,
+            variants=variants,
+            table="catalog",
+            limit=limit
+        )
+
+    def _perform_text_search(self, duck_client, text_search, limit):
+        """텍스트 기반 검색 실행"""
+        column = text_search.get("column")
+        text = text_search.get("text")
+        json_path = text_search.get("json_path")
+        
+        if json_path:
+            # JSON 검색
+            sql = duck_client.json_queries.search_text_in_column(
+                table="catalog",
+                column=column,
+                search_text=text,
+                search_type="json",
+                json_loc=json_path,
+                engine="duckdb"
+            )
+        else:
+            # 단순 텍스트 검색
+            sql = duck_client.json_queries.search_text_in_column(
+                table="catalog", 
+                column=column,
+                search_text=text,
+                search_type="simple",
+                engine="duckdb"
+            )
+        
+        if limit is not None:
+            sql += f" LIMIT {limit}"
+            
+        return duck_client.execute_query(sql)
+    
+    def _add_images_to_dataset(self, dataset):
+        def load_image(example):
+            try:
+                if example.get('path'):
+                    image_path = Path(example['path'])
+                
+                    if image_path.exists():
+                        pil_image = Image.open(image_path)
+                        example['image'] = pil_image
+                        example['has_valid_image'] = True
+                        return example
+            except Exception as e:
+                self.logger.warning(f"이미지 로드 실패: {example.get('path', 'unknown')} - {e}")
+            
+            example['image'] = None
+            example['has_valid_image'] = False
+            return example
+        
+        # 이미지 로드
+        self.logger.info("🖼️ 이미지 로딩 중...")
+        dataset_with_images = dataset.map(
+            load_image,
+            desc="이미지 로딩",
+            num_proc=self.num_proc
+        )
+        
+        # 유효한 이미지만 필터링
+        valid_dataset = dataset_with_images.filter(
+            lambda x: x,
+            desc="유효 이미지 필터링",
+            input_columns=['has_valid_image'],
+            num_proc=self.num_proc
+        )
+        
+        # 임시 컬럼 제거
+        valid_dataset = valid_dataset.remove_columns(['has_valid_image'])
+        
+        total_items = len(dataset)
+        valid_items = len(valid_dataset)
+        
+        self.logger.info(f"📊 이미지 로딩 결과: {valid_items:,}/{total_items:,} 성공")
+        
+        return valid_dataset
+    
     def _check_raw_data_exists(self, provider: str, dataset: str) -> bool:
         """해당 provider/dataset의 raw 데이터 존재 여부 확인"""
         raw_task_path = self.catalog_path / f"provider={provider}" / f"dataset={dataset}" / "task=raw"
