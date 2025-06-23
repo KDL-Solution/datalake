@@ -190,7 +190,7 @@ class NASDataProcessor:
         self.logger.info(f"🖼️ 이미지 처리 시작: {self.image_data_key} ({total_images}개)")
 
         shard_config = self._get_shard_config(total_images)
-        self.logger.info(f"🔧 샤딩 설정: {shard_config['info']}")
+        self.logger.info(f"🔧 샤딩 설정: {shard_config}")
         
         dataset_obj = dataset_obj.cast_column(self.image_data_key, ImageFeature())
         assets_base.mkdir(mode=0o775, parents=True, exist_ok=True)
