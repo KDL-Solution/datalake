@@ -189,13 +189,18 @@ pyrightconfig.json
 *.json
 *.csv
 *.zip
+*.txt
 
 # 특정 디렉토리 전체 무시
-*/images/
-*/images_train/
-*/images_val/
-*/images_test/
-*/data/
+**/images/
+**/images_train/
+**/images_val/
+**/images_test/
+**/pdfs/
+**/data/
+**/images_char/
+**/images_word/
+
 *.sh
 *.arrow
 *.db

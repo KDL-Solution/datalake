@@ -8,7 +8,7 @@ import numpy as np
 import cv2
 from natsort import natsorted
 
-from utils import DATALAKE_DIR, get_safe_image_hash_from_pil
+from prep.utils import DATALAKE_DIR, get_safe_image_hash_from_pil
 
 
 def unzip_all_zips_in_dir(
@@ -79,7 +79,7 @@ def process_image(
 
     # Crop original image (PIL, so convert back to array):
     full_img_np = np.array(image)
-    cropped_np = full_img_np[y:y2, x:x2]
+    cropped_np = full_img_np[y: y2, x: x2]
     image = Image.fromarray(cropped_np)
     image = image.convert("L")  # 흑백으로 변환.
 
@@ -141,7 +141,7 @@ def main(
         if text:
             rows.append(
                 {
-                    "image_path": image_path.as_posix(),
+                    "image_path": Path(*image_path.parts[-2:]).as_posix(),
                     "width": width,
                     "height": height,
                     "label": text,

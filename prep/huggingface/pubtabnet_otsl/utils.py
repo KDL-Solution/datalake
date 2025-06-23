@@ -6,7 +6,7 @@ from typing import Dict, Any, List
 from functools import partial
 from PIL import Image
 
-from utils import DATALAKE_DIR, get_safe_image_hash_from_pil
+from prep.utils import DATALAKE_DIR, get_safe_image_hash_from_pil
 
 SYMBOLS_TO_FILTER = [
     "<b>",
@@ -85,9 +85,13 @@ def save_images_and_generate_labels(
                 exist_ok=True,
             )
             image.save(
-                image_path, format="JPEG")
+                image_path,
+                format="JPEG",
+            )
 
-        image_paths.append(str(image_path))
+        image_paths.append(
+            Path(*image_path.parts[-2:]).as_posix()
+        )
         widths.append(width)
         heights.append(height)
 
@@ -123,18 +127,9 @@ def export_to_parquet(
         ),
         batched=True,
         batch_size=batch_size,
+        remove_columns=dataset.column_names,
     )
-    dataset = dataset.remove_columns(
-        [
-            col for col in dataset.column_names
-            if col not in [
-                "image_path",
-                "width",
-                "height",
-                "label",
-            ]
-        ]
-    )
+
     parquet_path.parent.mkdir(
         parents=True,
         exist_ok=True,

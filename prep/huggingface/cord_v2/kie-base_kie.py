@@ -8,7 +8,7 @@ from functools import partial
 from PIL import Image
 from rapidfuzz.distance import Levenshtein
 
-from utils import DATALAKE_DIR, get_safe_image_hash_from_pil
+from prep.utils import DATALAKE_DIR, get_safe_image_hash_from_pil
 
 
 def quad_to_ltrb(
@@ -254,7 +254,7 @@ def save_image_and_generate_label(
             label,
         )
     return {
-        "image_path": str(image_path),
+        "image_path": Path(*image_path.parts[-2:]).as_posix(),
         "width": width,
         "height": height,
         "label": label
@@ -335,7 +335,7 @@ def main(
 
 
 if __name__ == "__main__":
-    # datalake/datalake-prep에서 실행하시오: e.g., `python -m huggingface.cord_v2.kie-kie_struct`.
+    # Run, e.g., `python -m prep.huggingface.cord_v2.kie-base_kie`.
     main(
         save_dir=Path(__file__).resolve().parent.as_posix(),
     )
