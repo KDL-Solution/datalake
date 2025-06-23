@@ -1,6 +1,4 @@
 import yaml
-import fcntl
-
 from pathlib import Path
 
 class SchemaManager:
@@ -148,13 +146,11 @@ class SchemaManager:
     def _read_config(self):
         """파일락으로 안전하게 설정 읽기"""
         with open(self.config_path, 'r', encoding='utf-8') as f:
-            fcntl.flock(f.fileno(), fcntl.LOCK_SH)  # 공유락
             return yaml.safe_load(f)
     
     def _write_config(self, config):
         """파일락으로 안전하게 설정 쓰기"""
         with open(self.config_path, 'w', encoding='utf-8') as f:
-            fcntl.flock(f.fileno(), fcntl.LOCK_EX)  # 배타적 락
             yaml.dump(config, f, default_flow_style=False, allow_unicode=True, indent=2)
             
     def _get_default_schema(self) -> dict:
