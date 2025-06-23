@@ -11,13 +11,12 @@ import psutil
 from pathlib import Path
 from datetime import datetime
 from datasets import Dataset, load_from_disk
-from datasets.features import Image as ImageFeature
 from typing import Dict, Optional, List, Union
 from PIL import Image
 
-from .data_schema import SchemaManager
-from .logging_setup import setup_logging
-from client.src.core.duckdb_client import DuckDBClient
+from core.schema import SchemaManager
+from utils.logging import setup_logging
+from clients.duckdb_client import DuckDBClient
 
 class DatalakeClient:
     def __init__(
@@ -1385,6 +1384,8 @@ class DatalakeClient:
     
             
 if __name__ == "__main__":
+    from utils.config import Config
+    config = Config()
     manager = DatalakeClient(
         log_level="DEBUG",
     )

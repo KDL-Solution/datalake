@@ -3,7 +3,6 @@
 from setuptools import setup, find_packages
 import os
 from pathlib import Path
-
 # Read README for long description
 readme_path = Path(__file__).parent / "README.md"
 long_description = readme_path.read_text(encoding="utf-8") if readme_path.exists() else ""
@@ -49,7 +48,7 @@ extras_require["all"] = list(set(sum(extras_require.values(), [])))
 
 # Console scripts
 console_scripts = [
-    "datalake-cli=cli:main",
+    "datalake=main:main",
     "datalake-server=managers.processing_server:main",
 ]
 

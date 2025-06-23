@@ -11,8 +11,8 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI, HTTPException, BackgroundTasks
 from pydantic import BaseModel
 
-from .nas_processor import NASDataProcessor
-from .logging_setup import setup_logging
+from server.processor import NASDataProcessor
+from utils.logging import setup_logging
 # Request/Response 모델들
 class ProcessRequest(BaseModel):
     """처리 요청 모델"""

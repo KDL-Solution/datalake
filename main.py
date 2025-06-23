@@ -10,7 +10,7 @@ from PIL import Image
 from pathlib import Path
 from datetime import datetime
 
-from managers.datalake_client import DatalakeClient  
+from core.datalake import DatalakeClient  
 
 class CatalogError(Exception):
     """Catalog 관련 오류"""
@@ -57,7 +57,7 @@ class DataManagerCLI:
             
             if not catalog_info['exists']:
                 print("❌ Catalog DB 파일이 없습니다.")
-                print("💡 'python cli.py catalog update' 명령으로 생성할 수 있습니다.")
+                print("💡 'python main.py catalog update' 명령으로 생성할 수 있습니다.")
                 return False
             
             # 기본 정보 출력
@@ -447,7 +447,7 @@ class DataManagerCLI:
                         original_source=source
                     )
                     print(f"✅ 업로드 완료: {staging_dir}")
-                    print("💡 'python cli.py process start' 명령으로 처리를 시작할 수 있습니다.")
+                    print("💡 'python main.py process start' 명령으로 처리를 시작할 수 있습니다.")
                     return True
                     
             elif data_type == "task":
@@ -563,7 +563,7 @@ class DataManagerCLI:
                         meta=meta
                     )
                     print(f"✅ 업로드 완료: {staging_dir}")
-                    print("💡 'python cli.py process start' 명령으로 처리를 시작할 수 있습니다.")
+                    print("💡 'python main.py process start' 명령으로 처리를 시작할 수 있습니다.")
                     return True
                 
         except KeyboardInterrupt:
@@ -586,7 +586,7 @@ class DataManagerCLI:
             
             if partitions_df.empty:
                 print("❌ 사용 가능한 데이터가 없습니다.")
-                print("💡 'python cli.py catalog update' 명령으로 Catalog를 먼저 구축해주세요.")
+                print("💡 'python main.py catalog update' 명령으로 Catalog를 먼저 구축해주세요.")
                 return False
                 
             print(f"📊 {len(partitions_df)}개 파티션 사용 가능")
@@ -607,7 +607,7 @@ class DataManagerCLI:
             
         except FileNotFoundError as e:
             print(f"❌ {e}")
-            print("💡 'python cli.py catalog update' 명령으로 Catalog DB를 생성해주세요.")
+            print("💡 'python main.py catalog update' 명령으로 Catalog DB를 생성해주세요.")
             return False
         except Exception as e:
             print(f"❌ 다운로드 중 오류: {e}")
@@ -661,14 +661,14 @@ class DataManagerCLI:
                         return True
                     except KeyboardInterrupt:
                         print("\n⏸️ 대기 중단됨. 백그라운드에서 처리는 계속됩니다.")
-                        print(f"💡 'python cli.py process status {job_id}' 명령으로 상태를 확인할 수 있습니다.")
+                        print(f"💡 'python main.py process status {job_id}' 명령으로 상태를 확인할 수 있습니다.")
                         return True
                     except Exception as e:
                         print(f"❌ 처리 대기 중 오류: {e}")
                         return False
                 else:
                     print(f"🔄 백그라운드에서 처리 중입니다. Job ID: {job_id}")
-                    print(f"💡 'python cli.py process status {job_id}' 명령으로 상태를 확인할 수 있습니다.")
+                    print(f"💡 'python main.py process status {job_id}' 명령으로 상태를 확인할 수 있습니다.")
                     return True
             else:
                 print("❌ 처리 시작에 실패했습니다.")
@@ -845,10 +845,10 @@ class DataManagerCLI:
             # 요약 및 안내
             if total_items == 0:
                 print("\n📭 데이터가 없습니다.")
-                print("💡 'python cli.py upload' 명령으로 데이터를 업로드해보세요.")
+                print("💡 'python main.py upload' 명령으로 데이터를 업로드해보세요.")
             else:
                 if pending_items:
-                    print(f"\n💡 'python cli.py process' 명령으로 업로드된 데이터를 처리할 수 있습니다.")
+                    print(f"\n💡 'python main.py process' 명령으로 업로드된 데이터를 처리할 수 있습니다.")
                 
             return True
             
@@ -1292,6 +1292,9 @@ class DataManagerCLI:
         print(f"```")
         
 def main():
+    from utils.config import Config
+
+    config = Config.load()
     parser = argparse.ArgumentParser(
         description="📊 Data Manager CLI - 데이터 업로드/처리/다운로드 관리",
         formatter_class=argparse.RawDescriptionHelpFormatter,
@@ -1299,14 +1302,14 @@ def main():
 📋 사용 가능한 명령어:
 
 🔧 설정 관리:
-python cli.py config                         # 설정 도움말
-python cli.py config list                    # 전체 설정 확인
-python cli.py config provider               # Provider 관리 도움말
-python cli.py config task                   # Task 관리 도움말
+python main.py config                         # 설정 도움말
+python main.py config list                    # 전체 설정 확인
+python main.py config provider               # Provider 관리 도움말
+python main.py config task                   # Task 관리 도움말
 
 📥 데이터 관리:
-python cli.py upload                         # 데이터 업로드
-python cli.py download                       # 데이터 다운로드
+python main.py upload                         # 데이터 업로드
+python main.py download                       # 데이터 다운로드
 
 다운로드 포맷:
     1. Parquet (메타데이터만)
@@ -1314,33 +1317,33 @@ python cli.py download                       # 데이터 다운로드
     3. Dataset + 이미지 (HuggingFace datasets 형태)
     
 🔄 처리 관리:
-python cli.py process                        # 처리 시작 
-python cli.py process start                  # 새 처리 시작
-python cli.py process status JOB_ID          # 작업 상태 확인
-python cli.py process list                   # 내 데이터 현황
+python main.py process                        # 처리 시작 
+python main.py process start                  # 새 처리 시작
+python main.py process status JOB_ID          # 작업 상태 확인
+python main.py process list                   # 내 데이터 현황
 
 📊 Catalog DB 관리:
-python cli.py catalog info                   # Catalog DB 정보 확인
-python cli.py catalog update                 # Catalog DB 업데이트 
-python cli.py catalog check                  # Catalog 빠른 상태 확인
-python cli.py catalog processes              # DB 사용 프로세스 확인
+python main.py catalog info                   # Catalog DB 정보 확인
+python main.py catalog update                 # Catalog DB 업데이트 
+python main.py catalog check                  # Catalog 빠른 상태 확인
+python main.py catalog processes              # DB 사용 프로세스 확인
 
 🔍 데이터 무결성 검사:
-python cli.py validate                       # 데이터 무결성 검사
-python cli.py validate --report              # 검사 보고서 생성
+python main.py validate                       # 데이터 무결성 검사
+python main.py validate --report              # 검사 보고서 생성
 
 💡 팁: Dataset 형태로 저장하면 datasets 라이브러리로 쉽게 로드할 수 있습니다.
     from datasets import load_from_disk
     dataset = load_from_disk('./downloads/my_dataset')
         """
     )
-    parser.add_argument("--base-path", default="/mnt/AI_NAS/datalake",
+    parser.add_argument("--base-path", default=config.base_path,
                        help="데이터 저장 기본 경로")
-    parser.add_argument("--nas-url", default="http://192.168.20.62:8091", 
+    parser.add_argument("--nas-url", default=config.nas_url,
                        help="NAS API 서버 URL")
-    parser.add_argument("--log-level", default="INFO",
+    parser.add_argument("--log-level", default=config.log_level.upper(),
                        help="로깅 레벨 (DEBUG, INFO, WARNING, ERROR, CRITICAL)")
-    parser.add_argument("--num-proc", type=int, default=8,
+    parser.add_argument("--num-proc", type=int, default=config.num_proc,
                        help="병렬 처리 프로세스 수")
     
     subparsers = parser.add_subparsers(dest='command', help='명령어')
@@ -1399,33 +1402,33 @@ python cli.py validate --report              # 검사 보고서 생성
         print("\n🚀 Data Manager CLI에 오신 것을 환영합니다!")
         print("="*60)
         print("\n사용 가능한 주요 명령어:")
-        print("  🔧 python cli.py config     - 설정 관리 (Provider, Task)")
-        print("  📥 python cli.py upload     - 데이터 업로드")
-        print("  📤 python cli.py download   - 데이터 다운로드")
-        print("  🔄 python cli.py process    - 데이터 처리")
-        print("  📊 python cli.py catalog    - Catalog DB 관리")
-        print("  🔍 python cli.py validate   - 데이터 무결성 검사")
+        print("  🔧 python main.py config     - 설정 관리 (Provider, Task)")
+        print("  📥 python main.py upload     - 데이터 업로드")
+        print("  📤 python main.py download   - 데이터 다운로드")
+        print("  🔄 python main.py process    - 데이터 처리")
+        print("  📊 python main.py catalog    - Catalog DB 관리")
+        print("  🔍 python main.py validate   - 데이터 무결성 검사")
         
         print("\n🌟 처음 사용하시나요? 다음 순서로 시작해보세요:")
-        print(" 1️⃣  python cli.py config provider create  # 데이터 제공자 생성")
-        print(" 2️⃣  python cli.py config task create      # 작업 유형 정의")
-        print(" 3️⃣  python cli.py upload                  # 데이터 업로드")
-        print(" 4️⃣  python cli.py process                 # 데이터 처리 시작")
+        print(" 1️⃣  python main.py config provider create  # 데이터 제공자 생성")
+        print(" 2️⃣  python main.py config task create      # 작업 유형 정의")
+        print(" 3️⃣  python main.py upload                  # 데이터 업로드")
+        print(" 4️⃣  python main.py process                 # 데이터 처리 시작")
         
-        print("\n 💡 데이터 다운로드는 'python cli.py download' 명령으로 가능합니다.")
-        print(" 1️⃣  python cli.py catalog update         # Catalog DB 구축")
-        print(" 2️⃣  python cli.py download                # 데이터 다운로드")
+        print("\n 💡 데이터 다운로드는 'python main.py download' 명령으로 가능합니다.")
+        print(" 1️⃣  python main.py catalog update         # Catalog DB 구축")
+        print(" 2️⃣  python main.py download                # 데이터 다운로드")
         print("      → 옵션 1: Parquet (메타데이터만)")
         print("      → 옵션 2: Arrow Dataset (메타데이터만)")  
         print("      → 옵션 3: Dataset + 이미지 (HuggingFace 형태)")
 
         print("\n🔍 데이터 관리 및 문제 해결:")
-        print("  📊 python cli.py catalog check            # 빠른 상태 확인")
-        print("  🔍 python cli.py validate                 # 데이터 무결성 검사")
+        print("  📊 python main.py catalog check            # 빠른 상태 확인")
+        print("  🔍 python main.py validate                 # 데이터 무결성 검사")
         
 
         print("\n💡 각 명령어 뒤에 -h 또는 --help를 붙이면 상세 도움말을 볼 수 있습니다.")
-        print("   예: python cli.py config -h")
+        print("   예: python main.py config -h")
         print("\n🔥 Dataset 형태로 저장하면 ML 작업에 바로 사용할 수 있어요!")
         print("   from datasets import load_from_disk")
         print("   dataset = load_from_disk('./downloads/my_dataset')")
@@ -1434,33 +1437,32 @@ python cli.py validate --report              # 검사 보고서 생성
 
     
     # CLI 인스턴스 생성
-    cli = DataManagerCLI(
-        base_path=args.base_path,
-        nas_api_url=args.nas_url,
-        log_level=args.log_level,
-        num_proc=args.num_proc
-    )
+    try:
+        cli = DataManagerCLI(
+            base_path=args.base_path,
+            nas_api_url=args.nas_url,
+            log_level=args.log_level,
+            num_proc=args.num_proc
+        )
+    except Exception as e:
+        print(f"❌ CLI 초기화 실패: {e}")
+        return 1
     
     try:
         if args.command == 'config':
             if not args.config_type:
                 print("\n❓ config 하위 명령어를 선택해주세요:")
-                print("  📋 python cli.py config list      - 전체 설정 확인")
-                print("  🏢 python cli.py config provider  - Provider 관리")
-                print("  📝 python cli.py config task      - Task 관리")
-                print("\n💡 처음 사용하시나요? 다음 순서로 시작해보세요:")
-                print(" 1️⃣  python cli.py config provider create  # Provider 생성")
-                print(" 2️⃣  python cli.py config task create      # Task 생성")
-                print(" 3️⃣  python cli.py upload                  # 데이터 업로드")
-                print(" 4️⃣  python cli.py process                 # 처리 시작")
+                print("  📋 python main.py config list      - 전체 설정 확인")
+                print("  🏢 python main.py config provider  - Provider 관리")
+                print("  📝 python main.py config task      - Task 관리")
                 return
                 
             if args.config_type == 'provider':
                 if not args.provider_action:
                     print("\n❓ provider 하위 명령어를 선택해주세요:")
-                    print("  📋 python cli.py config provider list    - Provider 목록")
-                    print("  ➕ python cli.py config provider create  - Provider 생성")
-                    print("  🗑️  python cli.py config provider remove  - Provider 제거")
+                    print("  📋 python main.py config provider list    - Provider 목록")
+                    print("  ➕ python main.py config provider create  - Provider 생성")
+                    print("  🗑️  python main.py config provider remove  - Provider 제거")
                     return
                     
                 if args.provider_action == 'create':
@@ -1475,14 +1477,14 @@ python cli.py validate --report              # 검사 보고서 생성
                             print(f"  • {provider}")
                     else:
                         print("  📭 등록된 Provider가 없습니다.")
-                        print("  💡 'python cli.py config provider create' 명령으로 Provider를 생성해주세요.")
+                        print("  💡 'python main.py config provider create' 명령으로 Provider를 생성해주세요.")
             
             elif args.config_type == 'task':
                 if not args.task_action:
                     print("\n❓ task 하위 명령어를 선택해주세요:")
-                    print("  📋 python cli.py config task list    - Task 목록")
-                    print("  ➕ python cli.py config task create  - Task 생성")
-                    print("  🗑️  python cli.py config task remove  - Task 제거")
+                    print("  📋 python main.py config task list    - Task 목록")
+                    print("  ➕ python main.py config task create  - Task 생성")
+                    print("  🗑️  python main.py config task remove  - Task 제거")
                     return
                     
                 if args.task_action == 'create':
@@ -1505,7 +1507,7 @@ python cli.py validate --report              # 검사 보고서 생성
                                     print(f"      - {field}: {', '.join(values)}")
                     else:
                         print("  📭 등록된 Task가 없습니다.")
-                        print("  💡 'python cli.py config task create' 명령으로 Task를 생성해주세요.")
+                        print("  💡 'python main.py config task create' 명령으로 Task를 생성해주세요.")
             
             elif args.config_type == 'list':
                 cli.schema_manager.show_schema_info()
@@ -1517,9 +1519,9 @@ python cli.py validate --report              # 검사 보고서 생성
         elif args.command == 'process':
             if not args.process_action:
                 print("\n❓ process 하위 명령어를 선택해주세요:")
-                print("  🚀 python cli.py process start           - 새 처리 시작")
-                print("  🔍 python cli.py process status JOB_ID   - 작업 상태 확인")
-                print("  📋 python cli.py process list            - 내 데이터 현황")
+                print("  🚀 python main.py process start           - 새 처리 시작")
+                print("  🔍 python main.py process status JOB_ID   - 작업 상태 확인")
+                print("  📋 python main.py process list            - 내 데이터 현황")
                 return
                 
             if args.process_action == 'start':
@@ -1532,10 +1534,10 @@ python cli.py validate --report              # 검사 보고서 생성
         elif args.command == 'catalog':
             if not args.catalog_action:
                 print("\n❓ catalog 하위 명령어를 선택해주세요:")
-                print("  📊 python cli.py catalog info     - Catalog DB 상세 정보")
-                print("  🔍 python cli.py catalog check    - Catalog 빠른 상태 확인")
-                print("  🔄 python cli.py catalog update   - Catalog DB 안전 업데이트")
-                print("  🔍 python cli.py catalog processes - DB 사용 프로세스 확인")
+                print("  📊 python main.py catalog info     - Catalog DB 상세 정보")
+                print("  🔍 python main.py catalog check    - Catalog 빠른 상태 확인")
+                print("  🔄 python main.py catalog update   - Catalog DB 안전 업데이트")
+                print("  🔍 python main.py catalog processes - DB 사용 프로세스 확인")
                 return
                 
             if args.catalog_action == 'info':
