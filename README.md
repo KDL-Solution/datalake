@@ -26,18 +26,19 @@
 
 ```
 datalake/
-├── managers/                    # 핵심 관리 모듈
-│   ├── datalake_client.py      # 메인 클라이언트
-│   ├── nas_processor.py        # 데이터 처리 엔진
-│   ├── processing_server.py    # FastAPI 처리 서버
-│   ├── data_schema.py          # 스키마 관리
-│   └── logging_setup.py        # 로깅 설정
-├── client/                      # 쿼리 클라이언트
-│   └── src/core/
-│       ├── duckdb_client.py    # DuckDB 클라이언트
-│       └── athena_client.py    # AWS Athena 클라이언트
-├── cli.py                       # CLI 인터페이스
-└── config/schema.yaml          # 스키마 설정
+├── core/                   
+│   ├── datalake.py  
+│   └── schema.py        
+├── server/          
+│   ├── app.py          # FastAPI 처리 서버
+│   └── processor.py    # 데이터 처리 엔진
+├── clients/                      # 쿼리 클라이언트
+│   ├── duckdb_client.py    # DuckDB 클라이언트
+│   ├── athena_client.py    # AWS Athena 클라이언트
+│   └── queries/
+│       └── json_queries.py
+├── main.py             # CLI 인터페이스
+└── config.yaml         # CLI config 설정
 ```
 
 ## 🛠️ 설치
@@ -54,9 +55,9 @@ pip install -e .
 mkdir -p /mnt/AI_NAS/datalake/{staging/{pending,processing,failed},catalog,assets,config,logs}
 ```
 
-### 3. NAS 처리 서버 실행
+### 3. NAS 처리 서버 실행 ( 서버 전용 )
 ```bash
-python managers/processing_server.py \
+python server/app.py \
     --host 0.0.0.0 \
     --port 8091 \
     --base-path /mnt/AI_NAS/datalake \
@@ -71,10 +72,10 @@ python managers/processing_server.py \
 #### 1. 초기 설정
 ```bash
 # Provider 생성
-python cli.py config provider create
+python main.py config provider create
 
 # Task 생성 (OCR 예시)
-python cli.py config task create
+python main.py config task create
 # Task 이름: ocr
 # 필수 필드: lang, src
 # 허용 값: lang=ko,en,ja,multi / src=real,synthetic
@@ -83,14 +84,14 @@ python cli.py config task create
 #### 2. 데이터 업로드
 ```bash
 # Raw 데이터 업로드
-python cli.py upload
+python main.py upload
 # 데이터 타입: raw
 # 파일 경로: /path/to/dataset
 # Provider: huggingface
 # Dataset: coco_2017
 
 # Task 데이터 업로드
-python cli.py upload  
+python main.py upload  
 # 데이터 타입: task
 # Provider: huggingface
 # Dataset: coco_2017 (기존)
@@ -102,22 +103,22 @@ python cli.py upload
 #### 3. 데이터 처리
 ```bash
 # 처리 시작
-python cli.py process start
+python main.py process start
 
 # 처리 상태 확인
-python cli.py process status <JOB_ID>
+python main.py process status <JOB_ID>
 
 # 내 데이터 현황
-python cli.py process list
+python main.py process list
 ```
 
 #### 4. 데이터 다운로드
 ```bash
 # Catalog DB 구축 (최초 1회)
-python cli.py catalog rebuild
+python main.py catalog rebuild
 
 # 데이터 다운로드
-python cli.py download
+python main.py download
 # 검색 방법: 1 (파티션 기반) 또는 2 (텍스트 검색)
 # 다운로드 형태: 1 (Parquet), 2 (Arrow), 3 (Dataset+이미지)
 ```
@@ -126,7 +127,7 @@ python cli.py download
 
 #### 1. 기본 사용법
 ```python
-from managers.datalake_client import DatalakeClient
+from core.datalake import DatalakeClient
 
 # 클라이언트 초기화
 client = DatalakeClient(
@@ -155,7 +156,7 @@ staging_dir, job_id = client.upload_task_data(
 
 #### 2. 데이터 조회
 ```python
-from client.src.core.duckdb_client import DuckDBClient
+from clients.duckdb_client import DuckDBClient
 
 # DuckDB 클라이언트
 with DuckDBClient("/mnt/AI_NAS/datalake/catalog.duckdb") as duck:
@@ -169,38 +170,6 @@ with DuckDBClient("/mnt/AI_NAS/datalake/catalog.duckdb") as duck:
         tasks=["ocr"],
         variants=["base_ocr"]
     )
-```
-
-## 🔧 설정
-
-### 스키마 설정 (config/schema.yaml)
-```yaml
-providers:
-  - huggingface
-  - aihub
-  - inhouse
-
-tasks:
-  ocr:
-    required_fields: [lang, src]
-    allowed_values:
-      lang: [ko, en, ja, multi]
-      src: [real, synthetic]
-  
-  vqa:
-    required_fields: [lang, src]
-    allowed_values:
-      lang: [ko, en, ja, multi] 
-      src: [real, synthetic]
-```
-
-### 환경 변수
-```bash
-export BASE_PATH="/mnt/AI_NAS/datalake"
-export NAS_API_URL="http://localhost:8091"
-export LOG_LEVEL="INFO"
-export NUM_PROC="16"
-export BATCH_SIZE="1000"
 ```
 
 ## 📊 데이터 구조
@@ -234,39 +203,6 @@ assets/
 │       └── gh/
 ```
 
-## 🛡️ 보안 및 성능
-
-### 성능 최적화
-- **병렬 처리**: 멀티프로세싱으로 CPU 집약적 작업 분산
-- **메모리 관리**: 배치 단위 처리로 메모리 사용량 제어
-- **해시 캐싱**: 중복 제거를 위한 인메모리 해시 캐시
-- **샤딩**: 대용량 파일을 위한 디렉토리 샤딩
-
-### 데이터 무결성
-- **해시 검증**: SHA256 기반 파일 무결성 검증
-- **트랜잭션**: 처리 실패 시 자동 롤백
-- **스키마 검증**: 업로드 전 메타데이터 검증
-- **중복 제거**: 해시 기반 자동 중복 제거
-
-## 🔗 통합 시스템
-
-### AWS Athena 연동
-```python
-from client.src.core.athena_client import AthenaClient
-
-athena = AthenaClient(
-    database="my_catalog_db",
-    s3_output="s3://my-bucket/athena-results/"
-)
-
-# JSON 내 텍스트 검색
-results = athena.search_text_in_content(
-    table="catalog",
-    column="ocr_result", 
-    search_text="invoice",
-    variants="word"
-)
-```
 
 ### HuggingFace Datasets 연동
 ```python
@@ -292,7 +228,7 @@ df = dataset.to_pandas()
 curl http://localhost:8091/health
 
 # 서버 재시작
-python managers/processing_server.py --port 8091
+python server/app.py --port 8091
 ```
 
 **2. 메모리 부족**
