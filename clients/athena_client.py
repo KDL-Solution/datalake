@@ -9,7 +9,7 @@ import pandas as pd
 import boto3
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..')))
-from src.config.queries.json_queries import JSONQueries
+from clients.queries.json_queries import JSONQueries
 from src.core import DEFAULT_DATABASE, DEFAULT_S3_OUTPUT
 
 

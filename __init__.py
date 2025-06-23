@@ -1,7 +1,7 @@
 __version__ = "1.0.0"
 
-from .managers.datalake_client import DatalakeClient
-from .managers.data_schema import SchemaManager
+from .core.datalake import DatalakeClient
+from .core.schema import SchemaManager
 
 __all__ = [
     "DatalakeClient",

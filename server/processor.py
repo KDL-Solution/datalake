@@ -16,7 +16,7 @@ from datasets import Dataset, load_from_disk
 from datasets.features import Image as ImageFeature
 from functools import partial
 
-from .logging_setup import setup_logging
+from ..utils.logging import setup_logging
 
 class NASDataProcessor:
     
