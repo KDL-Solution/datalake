@@ -1,7 +1,7 @@
 # utils/config.py
 from dataclasses import dataclass
 from pathlib import Path
-import json
+import yaml
 
 @dataclass  
 class Config:
@@ -12,10 +12,13 @@ class Config:
 
     @classmethod
     def load(cls):
-        config_file = Path("config.json")
+        config_file = Path("config.yaml")
         if config_file.exists():
-            with open(config_file) as f:
-                data = json.load(f)
+            with open(config_file, encoding='utf-8') as f:
+                data = yaml.safe_load(f)
                 return cls(**data)
-    
+        
+        # 없으면 기본값
         return cls()
+
+config = Config.load()
