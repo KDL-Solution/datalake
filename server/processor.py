@@ -16,7 +16,7 @@ from datasets import Dataset, load_from_disk
 from datasets.features import Image as ImageFeature
 from functools import partial
 
-from .logging_setup import setup_logging
+from utils.logging import setup_logging
 
 class NASDataProcessor:
     
@@ -161,21 +161,19 @@ class NASDataProcessor:
         self.logger.info(f"{processing_dir.name} 데이터셋 로드 완료: {len(dataset_obj)}개 행")
         self.logger.debug(f"데이터셋 컬럼: {dataset_obj.column_names}")
         
-        # 이미지 처리 (Raw 데이터인 경우)
-        if metadata.get('data_type') == 'raw':
-            provider = metadata['provider']
-            dataset_name = metadata['dataset']
-            assets_base = self.assets_path / f"provider={provider}" / f"dataset={dataset_name}"
-            # 해시 캐시 구축 (공통)
-            self._build_hash_cache(assets_base)
+        provider = metadata['provider']
+        dataset_name = metadata['dataset']
+        assets_base = self.assets_path / f"provider={provider}" / f"dataset={dataset_name}"
+        # 해시 캐시 구축 (공통)
+        self._build_hash_cache(assets_base)
 
-            # 이미지 처리
-            if metadata.get('has_images', False) and self.image_data_key in dataset_obj.column_names:
-                dataset_obj = self._process_images_with_map(dataset_obj, metadata, assets_base)
-            
-            # 파일 처리
-            if metadata.get('has_files', False) and self.file_path_key in dataset_obj.column_names:
-                dataset_obj = self._process_files_with_map(dataset_obj, metadata, assets_base)
+        # 이미지 처리
+        if metadata.get('has_images', False) and self.image_data_key in dataset_obj.column_names:
+            dataset_obj = self._process_images_with_map(dataset_obj, metadata, assets_base)
+        
+        # 파일 처리
+        if metadata.get('has_files', False) and self.file_path_key in dataset_obj.column_names:
+            dataset_obj = self._process_files_with_map(dataset_obj, metadata, assets_base)
         
         # Catalog에 저장
         self._save_to_catalog(dataset_obj, metadata)
@@ -190,7 +188,7 @@ class NASDataProcessor:
         self.logger.info(f"🖼️ 이미지 처리 시작: {self.image_data_key} ({total_images}개)")
 
         shard_config = self._get_shard_config(total_images)
-        self.logger.info(f"🔧 샤딩 설정: {shard_config['info']}")
+        self.logger.info(f"🔧 샤딩 설정: {shard_config}")
         
         dataset_obj = dataset_obj.cast_column(self.image_data_key, ImageFeature())
         assets_base.mkdir(mode=0o775, parents=True, exist_ok=True)
@@ -205,7 +203,7 @@ class NASDataProcessor:
                 process_batch_func,
                 batched=True,
                 batch_size=self.batch_size,
-                num_proc=self.num_proc,
+                num_proc=min(self.num_proc, total_images // self.batch_size + 1),  # 최소 1개 프로세스
                 remove_columns=[self.image_data_key],  # 원본 이미지 컬럼 제거
                 desc="🖼️ 이미지 처리",
                 load_from_cache_file=False,  # 캐시 비활성화로 메모리 절약
@@ -244,7 +242,7 @@ class NASDataProcessor:
                 process_batch_func,
                 batched=True,
                 batch_size=self.batch_size,
-                num_proc=self.num_proc,
+                num_proc=min(self.num_proc, total_files // self.batch_size + 1),  # 최소 1개 프로세스
                 remove_columns=[self.file_path_key],  # 원본 파일 경로 컬럼 제거
                 desc="📄 파일 이동",
                 load_from_cache_file=False,

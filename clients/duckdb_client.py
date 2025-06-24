@@ -6,7 +6,7 @@ import duckdb
 from pathlib import Path
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..')))
-from src.config.queries.json_queries import JSONQueries
+from clients.queries.json_queries import JSONQueries
 
 
 class DuckDBClient:

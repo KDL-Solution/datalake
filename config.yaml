@@ -1,0 +1,11 @@
+# 기본 경로 설정
+base_path: "/mnt/AI_NAS/datalake"
+
+# NAS 서버 URL
+nas_url: "http://192.168.20.62:8091"
+
+# 로그 레벨 (DEBUG, INFO, WARNING, ERROR)
+log_level: "DEBUG"
+
+# 병렬 처리 프로세스 수
+num_proc: 16
