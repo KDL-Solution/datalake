@@ -309,7 +309,7 @@ class DatalakeClient:
             self.logger.error(f"❌ NAS API 연결 실패: {e}")
             return None
         
-    def wait_for_job_completion(self, job_id: str, polling_interval: int = 60, timeout: int = 3600) -> dict:
+    def wait_for_job_completion(self, job_id: str, polling_interval: int = 10, timeout: int = 3600) -> dict:
         """작업 완료까지 대기 (폴링)"""
         self.logger.info(f"⏳ 작업 완료 대기 중: {job_id}")
         
@@ -1273,6 +1273,7 @@ class DatalakeClient:
             has_file = metadata.get('has_files', False)
             if has_file:
                 staging_assets_dir = staging_dir / "assets"
+                staging_assets_dir.mkdir(mode=0o775, parents=True, exist_ok=True)
                 dataset_obj  = self._copy_file_path_to_staging(
                     dataset_obj, staging_assets_dir
                 )

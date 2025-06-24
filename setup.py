@@ -53,7 +53,7 @@ console_scripts = [
 ]
 
 setup(
-    name="datalake-management",
+    name="datalake_management",
     version=version,
     description="Enterprise-grade data lake management system for multimodal data",
     long_description=long_description,

@@ -4,3 +4,4 @@ tqdm
 datasets
 pillow
 duckdb
+fcntl
