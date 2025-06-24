@@ -161,21 +161,19 @@ class NASDataProcessor:
         self.logger.info(f"{processing_dir.name} 데이터셋 로드 완료: {len(dataset_obj)}개 행")
         self.logger.debug(f"데이터셋 컬럼: {dataset_obj.column_names}")
         
-        # 이미지 처리 (Raw 데이터인 경우)
-        if metadata.get('data_type') == 'raw':
-            provider = metadata['provider']
-            dataset_name = metadata['dataset']
-            assets_base = self.assets_path / f"provider={provider}" / f"dataset={dataset_name}"
-            # 해시 캐시 구축 (공통)
-            self._build_hash_cache(assets_base)
+        provider = metadata['provider']
+        dataset_name = metadata['dataset']
+        assets_base = self.assets_path / f"provider={provider}" / f"dataset={dataset_name}"
+        # 해시 캐시 구축 (공통)
+        self._build_hash_cache(assets_base)
 
-            # 이미지 처리
-            if metadata.get('has_images', False) and self.image_data_key in dataset_obj.column_names:
-                dataset_obj = self._process_images_with_map(dataset_obj, metadata, assets_base)
-            
-            # 파일 처리
-            if metadata.get('has_files', False) and self.file_path_key in dataset_obj.column_names:
-                dataset_obj = self._process_files_with_map(dataset_obj, metadata, assets_base)
+        # 이미지 처리
+        if metadata.get('has_images', False) and self.image_data_key in dataset_obj.column_names:
+            dataset_obj = self._process_images_with_map(dataset_obj, metadata, assets_base)
+        
+        # 파일 처리
+        if metadata.get('has_files', False) and self.file_path_key in dataset_obj.column_names:
+            dataset_obj = self._process_files_with_map(dataset_obj, metadata, assets_base)
         
         # Catalog에 저장
         self._save_to_catalog(dataset_obj, metadata)

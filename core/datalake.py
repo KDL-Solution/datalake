@@ -99,7 +99,7 @@ class DatalakeClient:
             original_source=original_source,
         )
         
-        staging_dir = self._save_to_staging(dataset_obj, metadata, has_file=file_info['has_file_paths'])
+        staging_dir = self._save_to_staging(dataset_obj, metadata)
         self.logger.info(f"✅ Task 데이터 업로드 완료: {staging_dir}")
         
         job_id = None
@@ -155,7 +155,6 @@ class DatalakeClient:
                 except Exception as e:
                     self.logger.error(f"❌ 삭제 실패: {existing_dir.name} - {e}")
         
-        # 데이터 로드 및 컬럼 변환 (이미지 제외)
         dataset_obj, file_info = self._load_data(data_file)
         
 
@@ -1059,7 +1058,7 @@ class DatalakeClient:
         if isinstance(data_file, pd.DataFrame):
             self.logger.info(f"📊 pandas DataFrame 로드 중: {len(data_file)} 행")
             try:
-                dataset_obj = Dataset.from_pandas(data_file)
+                dataset_obj = Dataset.from_pandas(data_file, preserve_index=False)
                 self.logger.info(f"✅ pandas DataFrame 로드 완료: {len(data_file)} 행")
             except Exception as e:
                 raise ValueError(f"❌ pandas DataFrame 변환 실패: {e}")
@@ -1245,7 +1244,7 @@ class DatalakeClient:
             self.logger.error(f"❌ JSON 변환 실패: {e}")
             raise ValueError(f"❌ JSON 변환 중 오류 발생: {e}")
 
-    def _save_to_staging(self, dataset_obj: Dataset, metadata: dict, has_file: bool = False) -> str:
+    def _save_to_staging(self, dataset_obj: Dataset, metadata: dict) -> str:
         """데이터셋을 staging 폴더에 저장하고 메타데이터 파일 생성"""
         """데이터를 staging 폴더에 저장"""
         timestamp = datetime.now().strftime("%Y%m%d%H%M%S")
@@ -1258,6 +1257,7 @@ class DatalakeClient:
         staging_dirname = f"{dataset_name}_{task}_{variant}_{file_id}_{timestamp}_{user}"
         staging_dir= self.staging_path / "pending" / staging_dirname
         try:
+            has_file = has_file or metadata.get('has_files', False)
             if has_file:
                 staging_assets_dir = staging_dir / "assets"
                 dataset_obj  = self._copy_file_path_to_staging(
@@ -1266,7 +1266,6 @@ class DatalakeClient:
                 
             if metadata.get('data_type') == 'task':
                 dataset_obj = self._add_metadata_columns(dataset_obj, metadata)
-                
             dataset_obj.save_to_disk(str(staging_dir))
             
             metadata_file = staging_dir / "upload_metadata.json"

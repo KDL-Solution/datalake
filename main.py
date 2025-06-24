@@ -1047,8 +1047,9 @@ class DataManagerCLI:
         """파티션 기반 대화형 검색"""
         # Provider 선택
         providers = self._select_items_interactive(
-            partitions_df['provider'].unique().tolist(),
-            "Provider"
+            df=partitions_df,
+            column="provider",
+            level='task'
         )
         if not providers:
             return None
@@ -1056,8 +1057,9 @@ class DataManagerCLI:
         # Dataset 선택
         filtered_df = partitions_df[partitions_df['provider'].isin(providers)]
         datasets = self._select_items_interactive(
-            filtered_df['dataset'].unique().tolist(),
-            "Dataset"
+            df=filtered_df,
+            column="dataset",
+            level='task'
         )
         if not datasets:
             return None
@@ -1065,8 +1067,9 @@ class DataManagerCLI:
         # Task 선택
         filtered_df = filtered_df[filtered_df['dataset'].isin(datasets)]
         tasks = self._select_items_interactive(
-            filtered_df['task'].unique().tolist(),
-            "Task"
+            df=filtered_df,
+            column="task",
+            level='variant'
         )
         if not tasks:
             return None
@@ -1074,8 +1077,9 @@ class DataManagerCLI:
         # Variant 선택
         filtered_df = filtered_df[filtered_df['task'].isin(tasks)]
         variants = self._select_items_interactive(
-            filtered_df['variant'].unique().tolist(),
-            "Variant"
+            df=filtered_df,
+            column="variant",
+            level="dataset",
         )
         if not variants:
             return None
@@ -1089,21 +1093,23 @@ class DataManagerCLI:
             variants=variants
         )
 
-    def _select_items_interactive(self, items, name):
+    def _select_items_interactive(self, df=None, column=None, level=None):
         """아이템 대화형 선택"""
+        items = df[column].unique().tolist()
         if not items:
-            print(f"❌ 사용 가능한 {name}가 없습니다.")
+            print(f"❌ 사용 가능한 {column}가 없습니다.")
             return None
         
+        self._show_matrix(df, column, level)  # 🔥 파티션 매트릭스 표시
         items = sorted(items)
-        print(f"\n{name} 선택 ({len(items)}개):")
+        print(f"\n{column} 선택 ({len(items)}개):")
         for i, item in enumerate(items, 1):
             print(f"  {i:2d}. {item}")
         
         print("\n선택: 번호(1,2,3), 범위(1-5), 전체(Enter)")
         while True:  # 🔥 올바른 입력까지 반복
             
-            user_input = input(f"{name}: ").strip()
+            user_input = input(f"{column}: ").strip()
             
             if not user_input: 
                 return items
@@ -1170,14 +1176,14 @@ class DataManagerCLI:
         items2 = sorted(partitions_df[level2].unique())
         
         # 헤더 (첫 번째 컬럼 너비 조정)
-        col_width = max(len(level1.title()), 15)
+        col_width = max(len(level1.title()), 20)
         print(level1.title().ljust(col_width), end=" | ")
         for item2 in items2:
-            print(item2[:8].ljust(8), end=" | ")
+            print(item2[:15].ljust(15), end=" | ")
         print()
         
         # 구분선
-        print("-" * (col_width + len(items2) * 11))
+        print("-" * (col_width + len(items2) * 20))
         
         # 데이터 행
         for idx, item1 in enumerate(items1):
@@ -1191,9 +1197,9 @@ class DataManagerCLI:
                 count = len(data12) if not data12.empty else 0
                 
                 if count > 0:
-                    print(f"{count:>3}".ljust(8), end=" | ")
+                    print(f"{count:>3}".ljust(15), end=" | ")
                 else:
-                    print(" - ".ljust(8), end=" | ")
+                    print(" - ".ljust(15), end=" | ")
             print()
         
         print(f"💡 숫자: 파티션 수, '-': 조합 없음")
@@ -1209,9 +1215,7 @@ class DataManagerCLI:
         print("\n주요 검색 컬럼:")
         print("  1. labels (라벨 정보)")
         print("  2. metadata (메타데이터)")
-        
-        # col_choice = input("컬럼 선택 (1-2) [1]: ").strip() or "1"
-        # column = "labels" if col_choice == "1" else "metadata"
+
         while True:
             col_choice = input("컬럼 선택 (1-2) [1]: ").strip() or "1"
             if col_choice in ["1", "2"]:
