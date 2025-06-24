@@ -203,7 +203,7 @@ class NASDataProcessor:
                 process_batch_func,
                 batched=True,
                 batch_size=self.batch_size,
-                num_proc=self.num_proc,
+                num_proc=min(self.num_proc, total_images // self.batch_size + 1),  # 최소 1개 프로세스
                 remove_columns=[self.image_data_key],  # 원본 이미지 컬럼 제거
                 desc="🖼️ 이미지 처리",
                 load_from_cache_file=False,  # 캐시 비활성화로 메모리 절약
@@ -242,7 +242,7 @@ class NASDataProcessor:
                 process_batch_func,
                 batched=True,
                 batch_size=self.batch_size,
-                num_proc=self.num_proc,
+                num_proc=min(self.num_proc, total_files // self.batch_size + 1),  # 최소 1개 프로세스
                 remove_columns=[self.file_path_key],  # 원본 파일 경로 컬럼 제거
                 desc="📄 파일 이동",
                 load_from_cache_file=False,

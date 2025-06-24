@@ -11,6 +11,7 @@ import psutil
 from pathlib import Path
 from datetime import datetime
 from datasets import Dataset, load_from_disk
+from datasets import Image as DatasetImage
 from typing import Dict, Optional, List, Union
 from PIL import Image
 
@@ -54,7 +55,7 @@ class DatalakeClient:
           
     def upload_raw_data(
         self,
-        data_file: str,
+        data_file: Union[str, Path, pd.DataFrame, Dataset],
         provider: str,
         dataset: str,
         dataset_description: str = "", # 데이터셋 설명
@@ -112,7 +113,7 @@ class DatalakeClient:
 
     def upload_task_data(
         self,
-        data_file: Union[str, Path, pd.DataFrame],
+        data_file: Union[str, Path, pd.DataFrame, Dataset],
         provider: str,
         dataset: str,
         task: str,
@@ -1055,7 +1056,21 @@ class DatalakeClient:
     
     def _load_data(self, data_file) -> tuple[Dataset, dict]:
         
-        if isinstance(data_file, pd.DataFrame):
+        if isinstance(data_file, Dataset):
+            self.logger.info(f"🤗 Hugging Face Dataset 로드 중: {len(data_file)} 행")
+            try:
+                dataset_obj = data_file  # 이미 Dataset 객체이므로 그대로 사용
+                self.logger.info(f"✅ Hugging Face Dataset 로드 완료: {len(dataset_obj)} 행")
+                
+                # Dataset 정보 로깅
+                if hasattr(dataset_obj, 'features'):
+                    features = list(dataset_obj.features.keys())
+                    self.logger.info(f"📋 Dataset features: {features}")
+                    
+            except Exception as e:
+                raise ValueError(f"❌ Hugging Face Dataset 처리 실패: {e}")
+        
+        elif isinstance(data_file, pd.DataFrame):
             self.logger.info(f"📊 pandas DataFrame 로드 중: {len(data_file)} 행")
             try:
                 dataset_obj = Dataset.from_pandas(data_file, preserve_index=False)
@@ -1109,8 +1124,9 @@ class DatalakeClient:
             self.logger.info(f"🗑️ 기존 메타데이터 컬럼 제거: {columns_to_remove}")
             
        # 통합된 컬럼 타입 변환 처리 (JSON dumps + 이미지)
-        dataset_obj = self._process_cast_columns(dataset_obj)
+        
         file_info = self._detect_file_columns_and_type(dataset_obj)
+        self.logger.debug(f"📂 파일 정보: {file_info}")
         if file_info['process_assets']:
             dataset_obj = self._normalize_column_names(dataset_obj, file_info)
 
@@ -1120,7 +1136,8 @@ class DatalakeClient:
                            f"확장자={file_info['extensions']}")
         else:
             self.logger.debug("📄 Assets 컬럼 처리 생략")
-        
+            
+        dataset_obj = self._process_cast_columns(dataset_obj)
         return dataset_obj, file_info
     
     def _detect_file_columns_and_type(self, dataset_obj: Dataset) -> Dict:
@@ -1136,16 +1153,14 @@ class DatalakeClient:
             
             # PIL Image나 bytes 데이터인 경우
             if key in self.image_data_candidates:
-                if hasattr(sample_value, 'save') or isinstance(sample_value, bytes):
-                    result['image_columns'].append(key)
-                    continue
-            
+                result['image_columns'].append(key)
             # 경로 기반 파일인 경우
-            if key in self.file_path_candidates:
+            elif key in self.file_path_candidates:
                 if isinstance(sample_value, str) and Path(sample_value).exists():
                     ext = Path(sample_value).suffix.lower()
                     result['extensions'].add(ext)
                     result['file_columns'].append(key)
+                    
         if len(result['image_columns']) > 1:
             raise ValueError(f"❌ 이미지 컬럼이 2개 이상입니다: {result['image_columns']}. "
                              f"하나의 컬럼만 사용해주세요.")
@@ -1185,11 +1200,10 @@ class DatalakeClient:
             image_col = file_info['image_columns'][0]
             self.logger.info(f"🔄 이미지 컬럼 표준화: {image_col} → {self.image_data_key}")
             
-            # 첫 번째 이미지 컬럼을 표준 컬럼으로 사용
-            
             if image_col != self.image_data_key:
-                # 컬럼명 변경
                 dataset_obj = dataset_obj.rename_column(image_col, self.image_data_key)
+                
+            dataset_obj = dataset_obj.cast_column(self.image_data_key, DatasetImage())
         
         # 파일 컬럼 표준화
         if len(file_info['file_columns']):
@@ -1205,7 +1219,6 @@ class DatalakeClient:
     def _process_cast_columns(self, dataset_obj: Dataset):
         
         self.logger.info("🔍 JSON 변환 대상 컬럼 검사 시작")
-        
         json_cast_columns = []
         
         for key in dataset_obj.column_names:
