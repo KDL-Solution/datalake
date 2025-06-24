@@ -1257,7 +1257,7 @@ class DatalakeClient:
         staging_dirname = f"{dataset_name}_{task}_{variant}_{file_id}_{timestamp}_{user}"
         staging_dir= self.staging_path / "pending" / staging_dirname
         try:
-            has_file = has_file or metadata.get('has_files', False)
+            has_file = metadata.get('has_files', False)
             if has_file:
                 staging_assets_dir = staging_dir / "assets"
                 dataset_obj  = self._copy_file_path_to_staging(
