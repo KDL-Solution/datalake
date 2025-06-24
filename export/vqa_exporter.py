@@ -10,7 +10,7 @@ class VQAExporter(object):
         df: pd.DataFrame,
         datalake_dir: str,
         save_path: str,
-        multiturn: bool = True,
+        multiturn: bool = False,
     ) -> None:
         df_copied = df.copy()
 

@@ -1,7 +1,13 @@
 import pandas as pd
 from sklearn.model_selection import train_test_split
 
-from export.utils import save_df_as_jsonl, user_prompt_dict
+# import sys
+# sys.path.insert(0, "/home/eric/workspace/datalake/")
+from export.utils import (
+    save_df_as_jsonl,
+    user_prompt_dict,
+    extract_otsl,
+)
 
 
 class TableImageExporter(object):
@@ -10,11 +16,15 @@ class TableImageExporter(object):
         df: pd.DataFrame,
         save_path: str,
         user_prompt: str = user_prompt_dict["table"],
-        multiturn: bool = True,
+        multiturn: bool = False,
     ) -> None:
         df_copied = df.copy()
 
-        df_copied = df_copied[df_copied["label"].str.contains("<otsl>")]
+        # `"<otsl>"`로 시작해서 `"</otsl>"`로 끝나는 행만 필터:
+        df_copied["label"] = df_copied["label"].apply(
+            lambda x: extract_otsl(x),
+        )
+        df_copied = df_copied[df_copied["label"].notna()]
 
         df_copied["query"] = user_prompt
 
@@ -30,20 +40,20 @@ class TableImageExporter(object):
 
 
 if __name__ == "__main__":
-    # import sys
-    # sys.path.insert(0, '/home/eric/workspace/datalake/')
     from managers.datalake_client import DatalakeClient
 
     exporter = TableImageExporter()
     manager = DatalakeClient()
 
-    search_result = manager.search_catalog(
+    search_results = manager.search_catalog(
         variants=[
             "table_image_otsl",
         ]
     )
+    print(search_results.groupby(["provider", "dataset"]).size())
+
     df = manager.to_pandas(
-        search_result,
+        search_results,
     )
     condition = df["dataset"].str.contains("_train")
     df_train = df[condition]
