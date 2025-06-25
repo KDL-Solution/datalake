@@ -196,8 +196,16 @@ class NASDataProcessor:
                         move_error_msg = str(move_error)
                         error_info["move_error"] = move_error_msg
                         self.logger.error(f"Failed 디렉토리 이동 실패: {move_error_msg}")
-                        if processing_dir.exists():
-                            shutil.rmtree(processing_dir)
+        remain_processing_dirs = [
+            d for d in self.staging_processing_path.iterdir()
+            if d.is_dir() and not (d / "upload_metadata.json").exists()
+        ]
+        for remain_dir in remain_processing_dirs:
+            try:
+                shutil.rmtree(remain_dir)
+                self.logger.info(f"✅ 처리 중 디렉토리 정리: {remain_dir.name}")
+            except Exception as e:
+                self.logger.error(f"❌ 처리 중 디렉토리 정리 실패: {remain_dir.name} - {str(e)}")
         most_common_errors = []
         if failed_details:
             error_types = [detail.get("error_type", "Unknown") for detail in failed_details]
