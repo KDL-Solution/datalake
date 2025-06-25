@@ -157,6 +157,18 @@ class DataManagerCLI:
             
             if catalog_info.get('is_outdated'):
                 print("⚠️ DB 업데이트 필요")
+                choice = self._ask_yes_no(
+                    question="DB를 업데이트하시겠습니까?",
+                    default=True,
+                )
+                if choice:
+                    print("🔄 DB 업데이트 중...")
+                    success = self.data_manager.build_catalog_db()
+                    if success:
+                        print("✅ DB 업데이트 완료")
+                    else:
+                        print("❌ DB 업데이트 실패")
+                        return False
             else:
                 print("✅ DB 최신 상태")
             
