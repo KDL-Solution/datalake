@@ -332,7 +332,7 @@ class NASDataProcessor:
         self.logger.info(f"📄 파일 처리 시작: {self.file_path_key} ({total_files}개)")
         
         shard_config = self._get_shard_config(total_files)
-        self.logger.info(f"🔧 샤딩 설정: {shard_config['info']}")
+        self.logger.info(f"🔧 샤딩 설정: {shard_config}")
         assets_base.mkdir(mode=0o775, parents=True, exist_ok=True)
         process_batch_func = partial(
             self._process_file_batch,
