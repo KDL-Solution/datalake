@@ -508,14 +508,14 @@ class DatalakeClient:
             검색 결과 DataFrame
         """
         self.logger.info("🔍 Catalog 검색 시작")
-        
+
         try:
             if not self.duckdb_path.exists():
                 raise FileNotFoundError("Catalog DB가 없습니다. build_catalog_db()로 먼저 생성하세요.")
-            
+
             with DuckDBClient(str(self.duckdb_path), read_only=True) as duck_client:
                 self._validate_catalog_db(duck_client)
-                
+
                 if text_search:
                     # 텍스트 검색
                     results = self._perform_text_search(duck_client, text_search, limit)
@@ -524,14 +524,14 @@ class DatalakeClient:
                     results = self._perform_partition_search(
                         duck_client, providers, datasets, tasks, variants, limit
                     )
-                
+
                 self.logger.info(f"📊 검색 결과: {len(results):,}개 항목")
                 return results
-                
+
         except Exception as e:
             self.logger.error(f"❌ 검색 실패: {e}")
             raise
-    
+
     def _prepare_dataframe(
         self, 
         search_results: pd.DataFrame, 
@@ -881,7 +881,12 @@ class DatalakeClient:
             limit=limit
         )
 
-    def _perform_text_search(self, duck_client, text_search, limit):
+    def _perform_text_search(
+        self,
+        duck_client,
+        text_search,
+        limit,
+    ):
         """텍스트 기반 검색 실행"""
         column = text_search.get("column")
         text = text_search.get("text")
@@ -1366,7 +1371,6 @@ class DatalakeClient:
             raise ValueError(f"파일 경로 컬럼 '{self.file_path_key}'가 유효하지 않거나 존재하지 않습니다.")
     
     def _check_path_and_setup_logging(self, log_level: str):
-        
         required_paths = {
             'base': self.base_path,
             'staging': self.staging_path,

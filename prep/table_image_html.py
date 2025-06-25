@@ -14,7 +14,7 @@ def main(
     search_results = manager.search_catalog(
         variants=[
             "table_image_html",
-        ]
+        ],
     )
     print(search_results.groupby(["provider", "dataset"]).size())
 
@@ -22,6 +22,9 @@ def main(
         search_results,
         absolute_paths=False,
     )
+    # dataset = dataset.shuffle()
+    # dataset = dataset.select(range(64))
+
     dataset = dataset.map(
         lambda batch: {
             "label": [

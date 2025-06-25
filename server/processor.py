@@ -5,12 +5,9 @@ import hashlib
 import io
 import threading
 import time
-import os
 import gc
-from datetime import datetime
-from tqdm import tqdm
 from pathlib import Path
-from typing import Dict, Optional, List
+from typing import Dict
 from PIL import Image
 from datasets import Dataset, load_from_disk
 from datasets.features import Image as ImageFeature
@@ -56,7 +53,7 @@ class NASDataProcessor:
         self.error_messages = []
         
         self.logger.info(f"🚀 NASDataProcessor 초기화 (병렬: {self.num_proc}, 배치: {batch_size})")
- 
+
     def get_status(self) -> Dict:
         """간단한 상태 조회"""
         return {

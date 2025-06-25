@@ -24,6 +24,14 @@ class TableImageExporter(object):
         df_copied["label"] = df_copied["label"].apply(
             lambda x: extract_otsl(x),
         )
+        # 수식 등을 제외:
+        df_copied = df_copied[~
+            df_copied["label"].str.contains(
+                r"\\",
+                regex=True,
+                na=False,
+            )
+        ]
         df_copied = df_copied[df_copied["label"].notna()]
 
         df_copied["query"] = user_prompt
@@ -40,7 +48,7 @@ class TableImageExporter(object):
 
 
 if __name__ == "__main__":
-    from managers.datalake_client import DatalakeClient
+    from core.datalake import DatalakeClient
 
     exporter = TableImageExporter()
     manager = DatalakeClient()
