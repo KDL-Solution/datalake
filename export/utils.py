@@ -6,6 +6,9 @@ from pathlib import Path
 from typing import List, Dict, Any
 from PIL import Image, ImageDraw
 from io import BytesIO
+from docling.backend.html_backend import HTMLDocumentBackend
+from docling.datamodel.base_models import InputFormat
+from docling.datamodel.document import InputDocument
 
 
 def to_chat_format(
@@ -255,28 +258,31 @@ def extract_otsl(
         return None
 
 
-def html_to_doctags(
-    html: str,
-) -> str:
-    from docling.backend.html_backend import HTMLDocumentBackend
-    from docling.datamodel.base_models import InputFormat
-    from docling.datamodel.document import InputDocument
+class HTMLToDogTags:
+    def __init__(
+        self,
+    ):
+        self.backend_class = HTMLDocumentBackend
+        self.format = InputFormat.HTML
 
-    html_bytes = html.encode("utf-8")
-    in_doc = InputDocument(
-        path_or_stream=BytesIO(html_bytes),
-        format=InputFormat.HTML,
-        backend=HTMLDocumentBackend,
-        filename="temp.html",
-    )
-    # Instantiate backend
-    backend = HTMLDocumentBackend(
-        in_doc=in_doc,
-        path_or_stream=BytesIO(html_bytes),
-    )
-    # Convert to DoclingDocument
-    dl_document = backend.convert()
-    doctags = dl_document.export_to_doctags()
-    return extract_otsl(
-        doctags,
-    )
+    def convert(
+        self,
+        html: str,
+    ) -> str:
+        html_bytes = html.encode("utf-8")
+        bytes_io = BytesIO(html_bytes)
+        in_doc = InputDocument(
+            path_or_stream=bytes_io,
+            format=self.format,
+            backend=self.backend_class,
+            filename="temp.html",
+        )
+        backend = self.backend_class(
+            in_doc=in_doc,
+            path_or_stream=bytes_io,
+        )
+        dl_document = backend.convert()
+        doctags = dl_document.export_to_doctags()
+        return extract_otsl(
+            doctags,
+        )

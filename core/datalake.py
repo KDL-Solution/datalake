@@ -435,14 +435,12 @@ class DatalakeClient:
                 parquet_pattern = (self.catalog_path / "**" / "*.parquet").as_posix()
 
                 self.logger.info("📊 Catalog 테이블 생성 중...")
-                print(parquet_pattern)
                 duck_client.create_table_from_parquet(
                     "catalog",
                     parquet_pattern,
                     hive_partitioning=True,
                     union_by_name=True
                 )
-                print("AAAAAAAAAAAAAAAAAAAAAAAAAAAA")
 
                 # 결과 검증
                 count_result = duck_client.execute_query("SELECT COUNT(*) as total FROM catalog")
@@ -1137,15 +1135,9 @@ class DatalakeClient:
         if columns_to_remove:
             dataset_obj = dataset_obj.remove_columns(columns_to_remove)
             self.logger.info(f"🗑️ 기존 메타데이터 컬럼 제거: {columns_to_remove}")
-<<<<<<< HEAD:managers/datalake_client.py
-
-        # 통합된 컬럼 타입 변환 처리 (JSON dumps + 이미지)
-        dataset_obj = self._process_cast_columns(dataset_obj)
-=======
             
        # 통합된 컬럼 타입 변환 처리 (JSON dumps + 이미지)
         
->>>>>>> origin/main:core/datalake.py
         file_info = self._detect_file_columns_and_type(dataset_obj)
         self.logger.debug(f"📂 파일 정보: {file_info}")
         if file_info['process_assets']:
@@ -1157,12 +1149,8 @@ class DatalakeClient:
                            f"확장자={file_info['extensions']}")
         else:
             self.logger.debug("📄 Assets 컬럼 처리 생략")
-<<<<<<< HEAD:managers/datalake_client.py
-
-=======
             
         dataset_obj = self._process_cast_columns(dataset_obj)
->>>>>>> origin/main:core/datalake.py
         return dataset_obj, file_info
 
     def _detect_file_columns_and_type(
@@ -1181,14 +1169,7 @@ class DatalakeClient:
             
             # PIL Image나 bytes 데이터인 경우
             if key in self.image_data_candidates:
-<<<<<<< HEAD:managers/datalake_client.py
-                if hasattr(sample_value, 'save') or isinstance(sample_value, bytes):
-                    result['image_columns'].append(key)
-                    continue
-
-=======
                 result['image_columns'].append(key)
->>>>>>> origin/main:core/datalake.py
             # 경로 기반 파일인 경우
             elif key in self.file_path_candidates:
                 if isinstance(sample_value, str) and Path(sample_value).exists():
@@ -1254,7 +1235,7 @@ class DatalakeClient:
             if file_col != self.file_path_key:
                 dataset_obj = dataset_obj.rename_column(file_col, self.file_path_key)
         return dataset_obj
-    
+
     def _process_cast_columns(self, dataset_obj: Dataset):
         
         self.logger.info("🔍 JSON 변환 대상 컬럼 검사 시작")
@@ -1274,7 +1255,7 @@ class DatalakeClient:
             self.logger.info("📄 JSON 변환 대상 컬럼 없음")
         
         return dataset_obj
-    
+
     def _apply_json_transform(self, dataset_obj: Dataset, json_cast_columns: list) -> Dataset:
         """JSON 변환 적용"""
         self.logger.info(f"🔄 {len(json_cast_columns)}개 컬럼을 JSON으로 변환 중: {json_cast_columns}")
@@ -1296,7 +1277,11 @@ class DatalakeClient:
             self.logger.error(f"❌ JSON 변환 실패: {e}")
             raise ValueError(f"❌ JSON 변환 중 오류 발생: {e}")
 
-    def _save_to_staging(self, dataset_obj: Dataset, metadata: dict) -> str:
+    def _save_to_staging(
+        self,
+        dataset_obj: Dataset,
+        metadata: dict,
+    ) -> str:
         """데이터셋을 staging 폴더에 저장하고 메타데이터 파일 생성"""
         """데이터를 staging 폴더에 저장"""
         timestamp = datetime.now().strftime("%Y%m%d%H%M%S")

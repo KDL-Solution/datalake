@@ -1,14 +1,15 @@
 # import sys
 # sys.path.insert(0, '/home/eric/workspace/datalake/')
-from export.utils import html_to_doctags
-from managers.datalake_client import DatalakeClient
+from export.utils import HTMLToDogTags
+from core.datalake import DatalakeClient
 
 
 def main(
-    batch_size: int = 32,
+    batch_size: int = 8,  # 16: 5:35:32
     mod: str = "table",
 ) -> None:
     manager = DatalakeClient()
+    converter = HTMLToDogTags()
 
     search_results = manager.search_catalog(
         variants=[
@@ -24,7 +25,7 @@ def main(
     dataset = dataset.map(
         lambda batch: {
             "label": [
-                html_to_doctags(
+                converter.convert(
                     i,
                 ) for i in batch["label"]
             ],
@@ -33,23 +34,28 @@ def main(
         batch_size=batch_size,
     )
 
-    df = dataset.to_pandas()
-    for dataset_name, df_group in df.groupby("dataset"):
+    for dataset_name in dataset.unique("dataset"):
+        dataset_filter = dataset.filter(
+            lambda x: x["dataset"] == dataset_name,
+        )
         _, _ = manager.upload_task_data(
-            data_file=df_group ,
-            provider=df_group["provider"].unique()[0],
+            data_file=dataset_filter,
+            provider=dataset_filter.unique("provider")[0],
             dataset=dataset_name,
             task="document_conversion",
             variant="table_image_otsl",
             meta={
-                "lang": df_group["lang"].unique()[0],
-                "src": df_group["src"].unique()[0],
-                "mod": "table",
+                "lang": dataset_filter.unique("lang")[0],
+                "src": dataset_filter.unique("src")[0],
+                "mod": mod,
             },
             overwrite=True,
         )
 
-    manager.trigger_nas_processing()
+    job_id = manager.trigger_nas_processing()
+    manager.wait_for_job_completion(
+        job_id,
+    )
     manager.build_catalog_db(
         force_rebuild=True,
     )
