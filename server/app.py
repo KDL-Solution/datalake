@@ -67,7 +67,10 @@ async def lifespan(app: FastAPI):
             num_proc=NUM_PROC,
             batch_size=BATCH_SIZE,
         )
-        setup_logging(log_level=LOG_LEVEL, base_path=BASE_PATH)
+        setup_logging(
+            user_id="server",
+            log_level=LOG_LEVEL, 
+            base_path=BASE_PATH)
         logger = logging.getLogger(__name__)
         logger.info("✅ NASDataProcessor 초기화 완료")
     except Exception as e:

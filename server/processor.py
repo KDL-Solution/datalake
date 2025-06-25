@@ -253,7 +253,11 @@ class NASDataProcessor:
         if missing_paths:
             missing_list = '\n'.join(missing_paths)
             raise FileNotFoundError(f"❌ 필수 디렉토리가 없습니다:\n{missing_list}")
-        setup_logging(log_level=log_level, base_path=str(self.base_path))
+        setup_logging(
+            user_id="processor",
+            log_level=log_level, 
+            base_path=str(self.base_path)
+        )
         self.logger = logging.getLogger(__name__)
         self.logger.debug("✅ 모든 필수 디렉토리 확인 완료")
    

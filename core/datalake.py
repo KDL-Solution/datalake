@@ -22,11 +22,16 @@ from clients.duckdb_client import DuckDBClient
 class DatalakeClient:
     def __init__(
         self, 
+        user_id: str = None, # 사용자 ID (필수)
         base_path: str = "/mnt/AI_NAS/datalake/",
         nas_api_url: str = "http://192.168.20.62:8091",
         log_level: str = "INFO",
         num_proc: int = 8, # 병렬 처리 프로세스 수
     ):
+        if not user_id:
+            raise ValueError("user_id는 필수 입니다. 예: DatalakeClient(user_id='user_123')")
+        
+        self.user_id = user_id
         self.base_path = Path(base_path)
         self.nas_api_url = nas_api_url.rstrip('/')
         
@@ -37,7 +42,8 @@ class DatalakeClient:
         self.staging_failed_path = self.staging_path / "failed"
         self.catalog_path = self.base_path / "catalog"
         self.assets_path  = self.base_path / "assets"
-        self.duckdb_path = self.base_path / "db" / "catalog.duckdb"
+
+        self.duckdb_path = self.base_path / "users" / f"{user_id}_catalog.duckdb"
         
         self.num_proc = num_proc
         self.image_data_candidates = ['image', 'image_bytes']
@@ -997,7 +1003,7 @@ class DatalakeClient:
             'has_images': has_images,
             'has_files': has_files,
             'total_rows': total_rows,
-            'uploaded_by': os.getenv('USER', 'unknown'),
+            'uploaded_by': self.user_id,
             'uploaded_at': datetime.now().isoformat(),
             'file_id': str(uuid.uuid4())[:8],
             
@@ -1362,7 +1368,11 @@ class DatalakeClient:
         if missing_paths:
             missing_list = '\n'.join(missing_paths)
             raise FileNotFoundError(f"❌ 필수 디렉토리가 없습니다:\n{missing_list}")
-        setup_logging(log_level=log_level, base_path=str(self.base_path))
+        setup_logging(
+            user_id=self.user_id,
+            log_level=log_level, 
+            base_path=str(self.base_path)
+        )
         self.logger = logging.getLogger(__name__)
         self.logger.debug("✅ 모든 필수 디렉토리 확인 완료")
         
