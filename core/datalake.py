@@ -486,7 +486,7 @@ class DatalakeClient:
             self.logger.error(f"❌ 파티션 조회 실패: {e}")
             raise
     
-    def search_catalog(
+    def search(
         self,
         providers: Optional[List[str]] = None,
         datasets: Optional[List[str]] = None,
