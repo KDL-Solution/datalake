@@ -221,7 +221,8 @@ class HTMLRenderer(object):
 
 
 def main(
-    batch_size: int = 32,
+    batch_size: int = 16,
+    num_procs: int = 64,
     mod: str = "table",
 ) -> None:
     manager = DatalakeClient()
@@ -249,28 +250,30 @@ def main(
 
     renderer = HTMLRenderer()
     dataset = dataset.map(
-        lambda batch: {
+        lambda x: {
             "image_bytes": [
                 renderer.render(
                     i,
-                ) for i in batch["label"]
+                ) for i in x["label"]
             ],
         },
         batched=True,
         batch_size=batch_size,
+        num_proc=num_procs,
     )
 
     converter = HTMLToDogTags()
     dataset = dataset.map(
-        lambda batch: {
+        lambda x: {
             "label": [
                 converter.convert(
                     i,
-                ) for i in batch["label"]
+                ) for i in x["label"]
             ],
         },
         batched=True,
         batch_size=batch_size,
+        num_proc=num_procs,
     )
 
     for dataset_name in dataset.unique("dataset"):

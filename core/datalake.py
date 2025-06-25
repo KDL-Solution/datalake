@@ -66,9 +66,9 @@ class DatalakeClient:
         overwrite: bool = False, # 기존 pending 데이터 제거 여부
     ):
         task = "raw"
-        
+
         self.logger.info(f"📥 Raw data 업로드 시작: {provider}/{dataset}")
-        
+
         if not self.schema_manager.validate_provider(provider):
             raise ValueError(f"❌ 지원하지 않는 provider입니다: {provider}")
         

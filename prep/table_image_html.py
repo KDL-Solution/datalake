@@ -5,7 +5,8 @@ from core.datalake import DatalakeClient
 
 
 def main(
-    batch_size: int = 8,  # 16: 5:35:32
+    batch_size: int = 8,
+    num_procs: int = 32,
     mod: str = "table",
 ) -> None:
     manager = DatalakeClient()
@@ -26,15 +27,16 @@ def main(
     # dataset = dataset.select(range(64))
 
     dataset = dataset.map(
-        lambda batch: {
+        lambda x: {
             "label": [
                 converter.convert(
                     i,
-                ) for i in batch["label"]
+                ) for i in x["label"]
             ],
         },
         batched=True,
         batch_size=batch_size,
+        num_proc=num_procs,
     )
 
     for dataset_name in dataset.unique("dataset"):
