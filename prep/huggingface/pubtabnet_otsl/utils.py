@@ -1,12 +1,8 @@
-import datasets
 from datasets import load_dataset
-from io import BytesIO
 from pathlib import Path
-from typing import Dict, Any, List
-from functools import partial
-from PIL import Image
+from typing import Dict, Any
 
-from prep.utils import DATALAKE_DIR, get_safe_image_hash_from_pil
+from prep.utils import DATALAKE_DIR
 from core.datalake import DatalakeClient
 
 SYMBOLS_TO_FILTER = [
@@ -49,83 +45,15 @@ def generate_doctags(
     return doctags
 
 
-# def save_images_and_generate_labels(
-#     examples: Dict[str, List[Any]],
-#     images_dir: str,
-# ) -> Dict[str, List[str]]:
-#     images_dir = Path(images_dir)
-
-#     image_paths = []
-#     widths = []
-#     heights = []
-#     labels = []
-
-#     for image in examples["image"]:
-#         try:
-#             if isinstance(image, dict):
-#                 image = Image.open(BytesIO(image["bytes"])).convert("RGB")
-#             assert isinstance(image, Image.Image)
-
-#         except OSError:
-#             print(f"[Warning] Corrupt image.")
-#             # Create white canvas instead (default size 256x256)
-#             image = Image.new(
-#                 "RGB",
-#                 (256, 256),
-#                 color="white",
-#             )
-
-#         width, height = image.size
-#         image_hash = get_safe_image_hash_from_pil(
-#             image,
-#         )
-#         image_path = Path(f"{images_dir / image_hash[: 2] / image_hash}.jpg")
-#         if not image_path.exists():
-#             image_path.parent.mkdir(
-#                 parents=True,
-#                 exist_ok=True,
-#             )
-#             image.save(
-#                 image_path,
-#                 format="JPEG",
-#             )
-
-#         image_paths.append(
-#             Path(*image_path.parts[-2:]).as_posix()
-#         )
-#         widths.append(width)
-#         heights.append(height)
-
-#     for example in zip(*examples.values()):
-#         example_dict = dict(zip(examples.keys(), example))
-#         labels.append(generate_doctags(example_dict))
-#     return {
-#         "image_path": image_paths,
-#         "width": widths,
-#         "height": heights,
-#         "label": labels,
-#     }
-# def generate_labels(
-#     examples: Dict[str, List[Any]],
-# ) -> Dict[str, List[str]]:
-    # new_labels = [generate_doctags(i) for i in examples["label"]]
-    # examples["label"] = new_labels
-    # examples["label"] = [generate_doctags(i) for i in examples["label"]]
-    # return examples
-
-
 def upload(
     dataset: Dict[str, Any],
     dataset_name: str,
-    # images_dir: str,
-    # parquet_path: str,
     batch_size: int = 32,
     num_procs: int = 16,
 ) -> None:
     manager = DatalakeClient()
 
     # task=raw가 업로드되어 있지 않다면 업로드.
-    # dataset_name = "pubtables_otsl_v1_1_val"
     search_results = manager.search_catalog(
         datasets=[
             dataset_name,
@@ -149,14 +77,6 @@ def upload(
             force_rebuild=True,
         )
 
-    # parquet_path = Path(parquet_path)
-
-    # dataset = dataset.cast_column(
-    #     "image",
-    #     datasets.Image(
-    #         decode=False,
-    #     ),
-    # )  # Lazy decoding으로 .map() 전에 PIL로 이미지가 로드되지 않도록 함.
     dataset = dataset.map(
         lambda batch: {
             **batch,
@@ -200,10 +120,8 @@ def upload(
 
 def main(
     dataset_name: str,
-    # save_dir: str,
     datalake_dir: str = DATALAKE_DIR,
 ) -> None:
-    # dataset = "pubtables_otsl_v1_1"
     data_dir = Path(datalake_dir) / f"archive/source/provider=huggingface/dataset={dataset_name}"
     train_dataset, val_dataset = load_dataset(
         "parquet",
@@ -217,17 +135,11 @@ def main(
         ],
     )
 
-
-    # save_dir = Path(save_dir)
-    # upload(
-    #     dataset=train_dataset,
-    #     dataset_name=f"{dataset_name}_train",
-    #     # images_dir=save_dir / "images_train",
-    #     # parquet_path=(save_dir / "train.parquet").as_posix(),
-    # )
+    upload(
+        dataset=train_dataset,
+        dataset_name=f"{dataset_name}_train",
+    )
     upload(
         dataset=val_dataset,
         dataset_name=f"{dataset_name}_val",
-        # images_dir=save_dir / "images_val",
-        # parquet_path=(save_dir / "val.parquet").as_posix(),
     )
