@@ -10,7 +10,7 @@ from collections import Counter
 from datetime import datetime
 from tqdm import tqdm
 from pathlib import Path
-from typing import Dict, Optional, List
+from typing import Dict
 from PIL import Image
 from datasets import Dataset, load_from_disk
 from datasets.features import Image as ImageFeature
@@ -18,8 +18,8 @@ from functools import partial
 
 from utils.logging import setup_logging
 
+
 class NASDataProcessor:
-    
     def __init__(
         self,
         base_path: str = "/mnt/AI_NAS/datalake/",
@@ -56,7 +56,7 @@ class NASDataProcessor:
         self.error_messages = []
         
         self.logger.info(f"🚀 NASDataProcessor 초기화 (병렬: {self.num_proc}, 배치: {batch_size})")
- 
+
     def get_status(self) -> Dict:
         """간단한 상태 조회"""
         return {
@@ -260,7 +260,7 @@ class NASDataProcessor:
         )
         self.logger = logging.getLogger(__name__)
         self.logger.debug("✅ 모든 필수 디렉토리 확인 완료")
-   
+
     def _process_single_directory(self, processing_dir: Path):
         """단일 디렉토리 처리 - datasets 라이브러리 활용"""
         # 메타데이터 읽기

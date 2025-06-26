@@ -5,6 +5,10 @@ import pandas as pd
 from pathlib import Path
 from typing import List, Dict, Any
 from PIL import Image, ImageDraw
+from io import BytesIO
+from docling.backend.html_backend import HTMLDocumentBackend
+from docling.datamodel.base_models import InputFormat
+from docling.datamodel.document import InputDocument
 
 
 def to_chat_format(
@@ -241,3 +245,44 @@ def filter_valid_image_paths(
         )
         df_copied = df_copied[df_copied["exists"]]
     return df_copied
+
+
+def extract_otsl(
+    text: str,
+) -> str:
+    # Find the content inside <otsl>...</otsl>:
+    match = re.search(r"<otsl>.*?</otsl>", text, re.DOTALL)
+    if match:
+        return match.group(0).strip()
+    else:
+        return None
+
+
+class HTMLToDogTags:
+    def __init__(
+        self,
+    ):
+        self.backend_class = HTMLDocumentBackend
+        self.format = InputFormat.HTML
+
+    def convert(
+        self,
+        html: str,
+    ) -> str:
+        html_bytes = html.encode("utf-8")
+        bytes_io = BytesIO(html_bytes)
+        in_doc = InputDocument(
+            path_or_stream=bytes_io,
+            format=self.format,
+            backend=self.backend_class,
+            filename="temp.html",
+        )
+        backend = self.backend_class(
+            in_doc=in_doc,
+            path_or_stream=bytes_io,
+        )
+        dl_document = backend.convert()
+        doctags = dl_document.export_to_doctags()
+        return extract_otsl(
+            doctags,
+        )
