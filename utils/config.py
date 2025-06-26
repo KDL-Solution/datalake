@@ -5,8 +5,9 @@ import yaml
 
 @dataclass  
 class Config:
+    user_id: str = "user"
     base_path: str = "/mnt/AI_NAS/datalake"
-    nas_url: str = "http://192.168.20.62:8091" 
+    server_url: str = "http://192.168.20.62:8091" 
     log_level: str = "INFO"
     num_proc: int = 8
 

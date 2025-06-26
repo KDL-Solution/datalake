@@ -24,16 +24,17 @@ class DatalakeClient:
         self, 
         user_id: str = None, # 사용자 ID (필수)
         base_path: str = "/mnt/AI_NAS/datalake/",
-        nas_api_url: str = "http://192.168.20.62:8091",
+        server_url: str = "http://192.168.20.62:8091",
         log_level: str = "INFO",
         num_proc: int = 8, # 병렬 처리 프로세스 수
+        table_name: str = "catalog",
     ):
         if not user_id:
             raise ValueError("user_id는 필수 입니다. 예: DatalakeClient(user_id='user_123')")
         
         self.user_id = user_id
         self.base_path = Path(base_path)
-        self.nas_api_url = nas_api_url.rstrip('/')
+        self.server_url = server_url.rstrip('/')
         
         # 필수 디렉토리 설정
         self.staging_path = self.base_path / "staging"
@@ -43,23 +44,24 @@ class DatalakeClient:
         self.catalog_path = self.base_path / "catalog"
         self.assets_path  = self.base_path / "assets"
 
-        self.duckdb_path = self.base_path / "users" / f"{user_id}_catalog.duckdb"
+        self.duckdb_path = self.base_path / "users" / f"{self.user_id}.duckdb"
         
         self.num_proc = num_proc
+        self.table_name = table_name
         self.image_data_candidates = ['image', 'image_bytes']
         self.image_data_key = 'image'  # 기본 이미지 컬럼 키
         self.file_path_candidates = ['image_path', 'file', 'file_path']
         self.file_path_key = 'file_path'  # 기본 파일 경로 컬럼 키
         
         self._check_path_and_setup_logging(log_level)
-        self._check_nas_api_connection()
+        self._check_server_connection()
 
         self.schema_manager = SchemaManager(
             base_path=self.base_path, 
             create_default=True
         )
           
-    def upload_raw_data(
+    def upload_raw(
         self,
         data_file: Union[str, Path, pd.DataFrame, Dataset],
         provider: str,
@@ -75,21 +77,9 @@ class DatalakeClient:
         
         if not self.schema_manager.validate_provider(provider):
             raise ValueError(f"❌ 지원하지 않는 provider입니다: {provider}")
-        
-        existing_dirs =  self._cleanup_existing_pending(provider, dataset, task, is_raw=True)
-                # 기존 데이터 삭제
-        if existing_dirs:
-            if not overwrite:
-                self.logger.warning(f"⚠️ 이미 pending 데이터가 있어 업로드를 건너뜁니다: {len(existing_dirs)}개")
-                self.logger.info("💡 덮어쓰려면 overwrite=True를 사용하세요")
-                return None, None  # 또는 기존 staging_dir 정보 반환
-                
-            for existing_dir in existing_dirs:
-                try:
-                    shutil.rmtree(existing_dir)
-                    self.logger.info(f"🗑️ 삭제 완료: {existing_dir.name}")
-                except Exception as e:
-                    self.logger.error(f"❌ 삭제 실패: {existing_dir.name} - {e}")
+
+        if not self._handle_existing_data(provider, dataset, task, overwrite=overwrite, is_raw=True):
+            return None, None
         
         dataset_obj, file_info = self._load_data(data_file)
 
@@ -111,13 +101,13 @@ class DatalakeClient:
         
         job_id = None
         if auto_process:
-            job_id = self.trigger_nas_processing()
+            job_id = self.trigger_processing()
             if job_id:
                 self.logger.info(f"🔄 자동 처리 시작됨: {job_id}")
         
         return staging_dir, job_id
-
-    def upload_task_data(
+    
+    def upload_task(
         self,
         data_file: Union[str, Path, pd.DataFrame, Dataset],
         provider: str,
@@ -129,12 +119,11 @@ class DatalakeClient:
         overwrite: bool = False,
         meta: Optional[Dict] = None,
     ) -> str:
-        """Task 데이터 업로드 (기존 catalog에서 특정 task 추출, 이미지 참조만)"""
         self.logger.info(f"📥 Task data 업로드 시작: {provider}/{dataset}/{task}/{variant}")
         
         if not self._check_raw_data_exists(provider, dataset):
             self.logger.warning(f"⚠️ Raw 데이터가 없습니다: {provider}/{dataset}")
-            self.logger.info("💡 먼저 upload_raw_data()로 원본 데이터를 업로드하세요")
+            self.logger.info("💡 먼저 upload_raw()로 원본 데이터를 업로드하세요")
             raise FileNotFoundError(
                 f"❌ Raw 데이터가 존재하지 않습니다: {provider}/{dataset}"
             )
@@ -146,21 +135,8 @@ class DatalakeClient:
         if not is_valid:
             raise ValueError(f"❌ Task 메타데이터 검증 실패: {error_msg}")
 
-        # 기존 pending 데이터 정리
-        existing_dirs =  self._cleanup_existing_pending(provider, dataset, task, variant=variant, is_raw=False)
-                # 기존 데이터 삭제
-        if existing_dirs:
-            if not overwrite:
-                self.logger.warning(f"⚠️ 이미 pending 데이터가 있어 업로드를 건너뜁니다: {len(existing_dirs)}개")
-                self.logger.info("💡 덮어쓰려면 overwrite=True를 사용하세요")
-                return None, None  # 또는 기존 staging_dir 정보 반환
-                
-            for existing_dir in existing_dirs:
-                try:
-                    shutil.rmtree(existing_dir)
-                    self.logger.info(f"🗑️ 삭제 완료: {existing_dir.name}")
-                except Exception as e:
-                    self.logger.error(f"❌ 삭제 실패: {existing_dir.name} - {e}")
+        if not self._handle_existing_data(provider, dataset, task, variant, overwrite=overwrite, is_raw=False):
+            return None, None
         
         dataset_obj, file_info = self._load_data(data_file)
         
@@ -192,46 +168,46 @@ class DatalakeClient:
         
         job_id = None
         if auto_process:
-            job_id = self.trigger_nas_processing()
+            job_id = self.trigger_processing()
             if job_id:
                 self.logger.info(f"🔄 자동 처리 시작됨: {job_id}")
         
         return staging_dir, job_id
     
-    def get_nas_status(self) -> Optional[Dict]:
-        """NAS 서버 상태 조회"""
+    def get_server_status(self) -> Optional[Dict]:
+        """서버 상태 조회"""
         try:
-            response = requests.get(f"{self.nas_api_url}/status", timeout=10)
+            response = requests.get(f"{self.server_url}/status", timeout=10)
             if response.status_code == 200:
                 return response.json()
             else:
                 self.logger.error(f"❌ 상태 조회 실패: {response.status_code}")
                 return None
         except requests.exceptions.RequestException as e:
-            self.logger.error(f"❌ NAS API 연결 실패: {e}")
+            self.logger.error(f"❌ 서버 연결 실패: {e}")
             return None
         
-    def list_nas_jobs(self) -> Optional[List[Dict]]:
+    def list_server_jobs(self) -> Optional[List[Dict]]:
         """모든 작업 목록 조회"""
         try:
-            response = requests.get(f"{self.nas_api_url}/jobs", timeout=10)
+            response = requests.get(f"{self.server_url}/jobs", timeout=10)
             if response.status_code == 200:
                 return response.json().get('jobs', [])
             else:
                 self.logger.error(f"❌ 작업 목록 조회 실패: {response.status_code}")
                 return None
         except requests.exceptions.RequestException as e:
-            self.logger.error(f"❌ NAS API 연결 실패: {e}")
+            self.logger.error(f"❌ 서버 연결 실패: {e}")
             return None
         
-    def show_nas_dashboard(self):
-        """NAS 상태 대시보드 출력"""
+    def show_server_dashboard(self):
+        """서버 상태 대시보드 출력"""
         print("\n" + "="*60)
-        print("📊 NAS Data Processing Dashboard")
+        print("📊 Data Processing Server Dashboard")
         print("="*60)
         
         # 상태 조회
-        status = self.get_nas_status()
+        status = self.get_server_status()
         if status:
             print(f"📦 Pending: {status['pending']}개")
             print(f"🔄 Processing: {status['processing']}개")
@@ -239,10 +215,10 @@ class DatalakeClient:
             print(f"🖥️ Server Status: {status['server_status']}")
             print(f"⏰ Last Updated: {status['last_updated']}")
         else:
-            print("❌ NAS 서버 상태 조회 실패")
+            print("❌ 서버 상태 조회 실패")
         
         # 작업 목록
-        jobs = self.list_nas_jobs()
+        jobs = self.list_server_jobs()
         if jobs:
             print(f"\n📋 Recent Jobs ({len(jobs)}개):")
             for job in jobs[-5:]:  # 최근 5개만
@@ -251,18 +227,18 @@ class DatalakeClient:
         
         print("="*60 + "\n")
         
-    def trigger_nas_processing(self) -> Optional[str]:
-        """NAS에서 처리 시작"""
-        self.logger.info("🔄 NAS 처리 요청 중...")
+    def trigger_processing(self) -> Optional[str]:
+        """서버 처리 요청"""
+        self.logger.info("🔄 서버 처리 요청 중...")
         start_time = time.time()
         try:
             response = requests.post(
-                f"{self.nas_api_url}/process", 
+                f"{self.server_url}/process", 
                 timeout=30,
                 headers={'Content-Type': 'application/json'}
             )
             elapsed = time.time() - start_time
-            self.logger.debug(f"⏱️ NAS 처리 요청 시간: {elapsed:.2f}초")
+            self.logger.debug(f"⏱️ 서버 처리 요청 시간: {elapsed:.2f}초")
             if response.status_code == 200:
                 result = response.json()
                 job_id = result.get('job_id')
@@ -292,17 +268,17 @@ class DatalakeClient:
             self.logger.error(f"❌ API 요청 타임아웃 ({elapsed:.2f}초)")
             return None
         except requests.exceptions.ConnectionError:
-            self.logger.error(f"❌ NAS 서버 연결 실패: {self.nas_api_url}")
+            self.logger.error(f"❌ 서버 연결 실패: {self.server_url}")
             return None
         except requests.exceptions.RequestException as e:
             elapsed = time.time() - start_time
-            self.logger.error(f"❌ API 요청 실패 ({elapsed:.2f}초): {e}")
+            self.logger.error(f"❌ 요청 실패: {e} ({elapsed:.2f}초)")
             return None
     
     def get_job_status(self, job_id: str) -> Optional[dict]:
         """작업 상태 조회"""
         try:
-            response = requests.get(f"{self.nas_api_url}/jobs/{job_id}", timeout=10)
+            response = requests.get(f"{self.server_url}/jobs/{job_id}", timeout=10)
             if response.status_code == 200:
                 return response.json()
             elif response.status_code == 404:
@@ -312,9 +288,9 @@ class DatalakeClient:
                 self.logger.error(f"❌ 작업 상태 조회 실패: {response.status_code}")
                 return None
         except requests.exceptions.RequestException as e:
-            self.logger.error(f"❌ NAS API 연결 실패: {e}")
+            self.logger.error(f"❌ 서버 연결 실패: {e}")
             return None
-        
+    
     def wait_for_job_completion(self, job_id: str, polling_interval: int = 10, timeout: int = 3600) -> dict:
         """작업 완료까지 대기 (폴링)"""
         self.logger.info(f"⏳ 작업 완료 대기 중: {job_id}")
@@ -348,15 +324,15 @@ class DatalakeClient:
         
         raise TimeoutError(f"작업 완료 대기 시간 초과: {job_id}")    
 
-    def get_catalog_info(self) -> Dict:
-        """Catalog DB 정보 조회"""
-        self.logger.info("📊 Catalog DB 정보 조회 중...")
+    def get_db_info(self) -> Dict:
+        """DB 정보 조회"""
+        self.logger.info("📊 DB 정보 조회 중...")
         
         try:
             if not self.duckdb_path.exists():
                 return {
                     'exists': False,
-                    'message': 'Catalog DB 파일이 없습니다. build_catalog_db()로 생성하세요.'
+                    'message': 'DB 파일이 없습니다. build_db()로 생성하세요.'
                 }
             
             # DB 기본 정보
@@ -364,50 +340,58 @@ class DatalakeClient:
             db_mtime = datetime.fromtimestamp(self.duckdb_path.stat().st_mtime)
             
             info = {
+                'user_id': self.user_id,
                 'exists': True,
                 'path': str(self.duckdb_path),
                 'size_mb': round(db_size, 1),
                 'modified_time': db_mtime.strftime('%Y-%m-%d %H:%M:%S'),
-                'is_outdated': self._is_db_outdated()
+                'is_outdated': self._is_db_outdated(),
             }
             
             with DuckDBClient(str(self.duckdb_path), read_only=True) as duck_client:
-                # 테이블 정보
                 tables = duck_client.list_tables()
                 info['tables'] = tables['name'].tolist()
                 
-                if 'catalog' in info['tables']:
-                    # Catalog 테이블 상세 정보
-                    count_result = duck_client.execute_query("SELECT COUNT(*) as total FROM catalog")
+                if self.table_name in info['tables']:
+                    count_result = duck_client.execute_query(f"SELECT COUNT(*) as total FROM {self.table_name}")
                     total_rows = count_result['total'].iloc[0]
                     info['total_rows'] = total_rows
+                    info['partitions'] = 0
+                    info['provider_stats'] = {}
+                    info['dataset_stats'] = {}
+                    info['task_stats'] = {}
+                    info['variant_stats'] = {}
                     
                     # 파티션 정보
                     try:
-                        partitions_df = duck_client.retrieve_partitions("catalog")
+                        partitions_df = duck_client.retrieve_partitions(self.table_name)
                         info['partitions'] = len(partitions_df)
                         
                         # Provider별 통계
                         if not partitions_df.empty:
                             provider_stats = partitions_df.groupby('provider').size().to_dict()
+                            dataset_stats = partitions_df.groupby('dataset').size().to_dict()
+                            task_stats = partitions_df.groupby('task').size().to_dict()
+                            variant_stats = partitions_df.groupby('variant').size().to_dict()
                             info['provider_stats'] = provider_stats
+                            info['dataset_stats'] = dataset_stats
+                            info['task_stats'] = task_stats
+                            info['variant_stats'] = variant_stats
                     except Exception as e:
                         self.logger.warning(f"파티션 정보 조회 실패: {e}")
-                        info['partitions'] = 0
-                        info['provider_stats'] = {}
                 
             return info
             
         except Exception as e:
-            self.logger.error(f"❌ Catalog DB 정보 조회 실패: {e}")
+            self.logger.error(f"❌DB 정보 조회 실패: {e}")
             return {
                 'exists': False,
                 'error': str(e)
             }
     
-    def build_catalog_db(self, force_rebuild: bool = False) -> bool:
-        """Catalog DB 구축 또는 재구축"""
-        self.logger.info("🔨 Catalog DB 구축 시작...")
+    def build_db(self, force_rebuild: bool = False) -> bool:
+        """DB 구축 또는 재구축"""
+        self.logger.info("🔨 DB 구축 시작...")
         
         try:
             if not self.catalog_path.exists():
@@ -436,19 +420,19 @@ class DatalakeClient:
             with DuckDBClient(str(self.duckdb_path), read_only=False) as duck_client:
                 parquet_pattern = str(self.catalog_path / "**" / "*.parquet")
                 
-                self.logger.info("📊 Catalog 테이블 생성 중...")
+                self.logger.info("📊 테이블 생성 중...")
                 duck_client.create_table_from_parquet(
-                    "catalog",
+                    self.table_name,
                     parquet_pattern,
                     hive_partitioning=True,
                     union_by_name=True
                 )
                 
                 # 결과 검증
-                count_result = duck_client.execute_query("SELECT COUNT(*) as total FROM catalog")
+                count_result = duck_client.execute_query(f"SELECT COUNT(*) as total FROM {self.table_name}")
                 total_rows = count_result['total'].iloc[0]
                 
-                self.logger.info(f"✅ Catalog DB 구축 완료!")
+                self.logger.info(f"✅ DB 구축 완료!")
                 self.logger.info(f"📊 총 {total_rows:,}개 행")
                 self.logger.info(f"💾 DB 파일: {self.duckdb_path}")
                 self.logger.info(f"📁 파일 크기: {self.duckdb_path.stat().st_size / 1024 / 1024:.1f}MB")
@@ -458,7 +442,7 @@ class DatalakeClient:
             return True
             
         except Exception as e:
-            self.logger.error(f"❌ Catalog DB 구축 실패: {e}")
+            self.logger.error(f"❌ DB 구축 실패: {e}")
             # 실패 시 정리
             if self.duckdb_path.exists():
                 try:
@@ -467,19 +451,19 @@ class DatalakeClient:
                     pass
             return False
     
-    def get_catalog_partitions(self) -> pd.DataFrame:
+    def get_partitions(self) -> pd.DataFrame:
         """사용 가능한 파티션 목록 조회"""
-        self.logger.info("🔍 Catalog 파티션 조회 중...")
+        self.logger.debug("🔍 파티션 조회 중...")
         
         try:
             if not self.duckdb_path.exists():
-                raise FileNotFoundError("Catalog DB가 없습니다. build_catalog_db()로 먼저 생성하세요.")
+                raise FileNotFoundError("DB가 없습니다. build_db()로 먼저 생성하세요.")
                 
             with DuckDBClient(str(self.duckdb_path), read_only=True) as duck_client:
-                self._validate_catalog_db(duck_client)
-                partitions_df = duck_client.retrieve_partitions("catalog")
+                self._validate_db(duck_client)
+                partitions_df = duck_client.retrieve_partitions(self.table_name)
                 
-                self.logger.info(f"📊 총 {len(partitions_df)}개 파티션 조회됨")
+                self.logger.debug(f"📊 총 {len(partitions_df)}개 파티션 조회됨")
                 return partitions_df
                 
         except Exception as e:
@@ -496,7 +480,7 @@ class DatalakeClient:
         limit: Optional[int] = None
     ) -> pd.DataFrame:
         """
-        Catalog에서 데이터 검색
+        DB에서 데이터 검색
         
         Args:
             providers: Provider 목록 (None이면 전체)
@@ -509,14 +493,14 @@ class DatalakeClient:
         Returns:
             검색 결과 DataFrame
         """
-        self.logger.info("🔍 Catalog 검색 시작")
+        self.logger.info("🔍 검색 시작")
         
         try:
             if not self.duckdb_path.exists():
-                raise FileNotFoundError("Catalog DB가 없습니다. build_catalog_db()로 먼저 생성하세요.")
+                raise FileNotFoundError("DB가 없습니다. build_db()로 먼저 생성하세요.")
             
             with DuckDBClient(str(self.duckdb_path), read_only=True) as duck_client:
-                self._validate_catalog_db(duck_client)
+                self._validate_db(duck_client)
                 
                 if text_search:
                     # 텍스트 검색
@@ -533,13 +517,14 @@ class DatalakeClient:
         except Exception as e:
             self.logger.error(f"❌ 검색 실패: {e}")
             raise
-    
-    def _prepare_dataframe(
+
+    def to_pandas(
         self, 
         search_results: pd.DataFrame, 
         absolute_paths: bool = True,
     ) -> pd.DataFrame:
-        """검색 결과를 처리용 DataFrame으로 준비"""
+        self.logger.info("📊 Pandas DataFrame 변환 시작...")
+        
         df_copy = search_results.copy()
         
         if absolute_paths and 'path' in df_copy.columns:
@@ -547,32 +532,19 @@ class DatalakeClient:
                 lambda x: str(self.assets_path / x) if isinstance(x, str) and x else x
             )
             self.logger.debug("📁 경로를 절대경로로 변환")
-        
-        return df_copy
-
-    def to_pandas(
-        self, 
-        search_results: pd.DataFrame, 
-        absolute_paths: bool = True,
-    ) -> pd.DataFrame:
-        """검색 결과를 Pandas DataFrame으로 변환"""
-        self.logger.info("📊 Pandas DataFrame 변환 시작...")
-        
-        df_copy = self._prepare_dataframe(search_results, absolute_paths)
-        
+            
         self.logger.info(f"✅ DataFrame 변환 완료: {len(df_copy):,}개 항목")
         return df_copy
 
     def to_dataset(
         self,
         search_results: pd.DataFrame,
-        include_images: bool = False,
         absolute_paths: bool = True,
+        include_images: bool = False,
     ):
-        """검색 결과를 HuggingFace Dataset 객체로 변환"""
         self.logger.info("📥 Dataset 객체 생성 시작...")
         
-        df_copy = self._prepare_dataframe(search_results, absolute_paths)
+        df_copy = self.to_pandas(search_results, absolute_paths)
         dataset = Dataset.from_pandas(df_copy)
         
         if include_images:
@@ -580,54 +552,47 @@ class DatalakeClient:
             
         self.logger.info(f"✅ Dataset 객체 생성 완료: {len(dataset):,}개 항목") 
         return dataset
-
-    def download_as_parquet(
-        self, 
-        search_results: pd.DataFrame, 
-        output_path: Union[str, Path],
-        absolute_paths: bool = True,
-    ) -> Path:
-        """검색 결과를 Parquet으로 저장"""
-        self.logger.info("💾 Parquet 저장 시작...")
-        
-        df_copy = self._prepare_dataframe(search_results, absolute_paths)
-        
-        output_path = Path(output_path).with_suffix('.parquet')
-        output_path.parent.mkdir(parents=True, exist_ok=True)
-        df_copy.to_parquet(output_path, index=False)
-        
-        file_size = output_path.stat().st_size / 1024 / 1024
-        self.logger.info(f"✅ Parquet 저장 완료: {output_path}")
-        self.logger.info(f"📊 {len(df_copy):,}개 항목, {file_size:.1f}MB")
-        
-        return output_path
-
-    def download_as_dataset(
+    
+    def export(
         self,
         search_results: pd.DataFrame,
-        output_path: Union[str, Path], 
-        include_images: bool = False,
+        output_path: Union[str, Path],
+        format: str = "auto",
         absolute_paths: bool = True,
+        include_images: bool = False,  # dataset 전용
     ) -> Path:
-        """검색 결과를 HuggingFace Dataset으로 저장"""
-        self.logger.info("📥 Dataset 저장 시작...")
+        """
+        검색 결과를 지정된 형식으로 저장
         
-        # Dataset 객체 생성 (기존 로직 재사용)
-        dataset = self.to_dataset(search_results, include_images, absolute_paths)
-        
-        # 저장
+        Args:
+            search_results: 검색 결과 DataFrame
+            output_path: 출력 경로
+            format: 출력 형식 ("parquet", "dataset", "auto")
+            absolute_paths: 절대 경로 사용 여부
+            include_images: 이미지 포함 여부 (dataset만 해당)
+            
+        Returns:
+            저장된 파일/디렉토리 경로
+        """
         output_path = Path(output_path)
-        output_path.mkdir(parents=True, exist_ok=True)
-        dataset.save_to_disk(str(output_path))
         
-        total_size = sum(f.stat().st_size for f in output_path.rglob('*') if f.is_file()) / 1024 / 1024
+        # auto인 경우 확장자로 형식 결정
+        if format == "auto":
+            if output_path.suffix.lower() == ".parquet":
+                format = "parquet"
+            else:
+                format = "dataset"  # 기본값
         
-        self.logger.info(f"✅ Dataset 저장 완료: {output_path}")
-        self.logger.info(f"📊 {len(dataset):,}개 항목, {total_size:.1f}MB")
+        self.logger.info(f"💾 {format.upper()} 형식으로 저장 시작...")
         
-        return output_path
+        if format == "parquet":
+            return self._save_as_parquet(search_results, output_path, absolute_paths)
+        elif format == "dataset":
+            return self._save_as_dataset(search_results, output_path, absolute_paths, include_images)
+        else:
+            raise ValueError(f"지원하지 않는 형식입니다: {format}")
     
-    def validate_data_integrity(
+    def validate_db_integrity(
         self, 
         search_results: pd.DataFrame,
         sample_percent: Optional[float] = None
@@ -636,7 +601,7 @@ class DatalakeClient:
         데이터 무결성 검사
         
         Args:
-            search_results: 검사할 데이터 (None이면 전체 catalog 검사)
+            search_results: 검사할 데이터 (None이면 전체 db 검사)
             sample_percent: 샘플링 비율 (0.1 = 10%)
             
         Returns:
@@ -736,7 +701,7 @@ class DatalakeClient:
                     cmdline_match = False
                     if proc.info['cmdline']:
                         cmdline = ' '.join(proc.info['cmdline'])
-                        if str(db_path) in cmdline or 'catalog.duckdb' in cmdline:
+                        if str(db_path) in cmdline:
                             cmdline_match = True
                     
                     # 2. 열린 파일 디스크립터 검사 (새로운 방식)
@@ -816,13 +781,75 @@ class DatalakeClient:
         except Exception as e:
             self.logger.error(f"❌ 프로세스 확인 실패: {e}")
             return {'error': str(e)}
+     
+    def _save_as_parquet(
+        self, 
+        search_results: pd.DataFrame, 
+        output_path: Union[str, Path],
+        absolute_paths: bool = True,
+    ) -> Path:
         
-    def _validate_catalog_db(self, duck_client):
-        """Catalog DB 유효성 검사"""
-        tables = duck_client.list_tables()
-        if tables.empty or 'catalog' not in tables['name'].values:
-            raise ValueError("catalog 테이블이 존재하지 않습니다. build_catalog_db()로 생성하세요.")
+        df_copy = self.to_pandas(search_results, absolute_paths)
+        
+        output_path = Path(output_path).with_suffix('.parquet')
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        df_copy.to_parquet(output_path, index=False)
+        
+        file_size = output_path.stat().st_size / 1024 / 1024
+        self.logger.info(f"✅ Parquet 저장 완료: {output_path}")
+        self.logger.info(f"📊 {len(df_copy):,}개 항목, {file_size:.1f}MB")
+        
+        return output_path
+
+    def _save_as_dataset(
+        self,
+        search_results: pd.DataFrame,
+        output_path: Union[str, Path], 
+        include_images: bool = False,
+        absolute_paths: bool = True,
+    ) -> Path:
     
+        dataset = self.to_dataset(search_results, include_images, absolute_paths)
+        
+        output_path = Path(output_path)
+        output_path.mkdir(parents=True, exist_ok=True)
+        dataset.save_to_disk(str(output_path))
+        
+        total_size = sum(f.stat().st_size for f in output_path.rglob('*') if f.is_file()) / 1024 / 1024
+        
+        self.logger.info(f"✅ Dataset 저장 완료: {output_path}")
+        self.logger.info(f"📊 {len(dataset):,}개 항목, {total_size:.1f}MB")
+        
+        return output_path
+    
+    def _handle_existing_data(self, provider: str, dataset_name: str, task: str = None, 
+                            variant: str = None, overwrite: bool = False, is_raw: bool = True):
+        """기존 데이터 처리 로직"""
+        existing_dirs = self._cleanup_existing_pending(
+            provider, dataset_name, task, variant=variant, is_raw=is_raw
+        )
+        
+        if existing_dirs and not overwrite:
+            self.logger.warning(f"⚠️ 이미 pending 데이터가 있어 업로드를 건너뜁니다: {len(existing_dirs)}개")
+            self.logger.info("💡 덮어쓰려면 overwrite=True를 사용하세요")
+            return False
+        
+        # 기존 데이터 삭제
+        for existing_dir in existing_dirs:
+            try:
+                shutil.rmtree(existing_dir)
+                self.logger.info(f"🗑️ 삭제 완료: {existing_dir.name}")
+            except Exception as e:
+                self.logger.error(f"❌ 삭제 실패: {existing_dir.name} - {e}")
+        
+        return True
+
+    def _validate_db(self, duck_client):
+        """DB 유효성 검사"""
+        tables = duck_client.list_tables()
+        if tables.empty or self.table_name not in tables['name'].values:
+            raise ValueError(f"❌ '{self.table_name}' 테이블이 없습니다. DB가 올바르게 구축되었는지 확인하세요.")
+
     def _is_db_outdated(self) -> bool:
         """DB가 최신 상태인지 확인"""
         if not self.duckdb_path.exists():
@@ -873,7 +900,7 @@ class DatalakeClient:
             datasets=datasets, 
             tasks=tasks,
             variants=variants,
-            table="catalog",
+            table=self.table_name,
             limit=limit
         )
 
@@ -886,7 +913,7 @@ class DatalakeClient:
         if json_path:
             # JSON 검색
             sql = duck_client.json_queries.search_text_in_column(
-                table="catalog",
+                table=self.table_name,
                 column=column,
                 search_text=text,
                 search_type="json",
@@ -896,7 +923,7 @@ class DatalakeClient:
         else:
             # 단순 텍스트 검색
             sql = duck_client.json_queries.search_text_in_column(
-                table="catalog", 
+                table=self.table_name,
                 column=column,
                 search_text=text,
                 search_type="simple",
@@ -965,17 +992,17 @@ class DatalakeClient:
                     if d.is_dir() and d.name.startswith("variant=")]
         return len(variant_dirs) > 0     
     
-    def _check_nas_api_connection(self):
-        """NAS API 서버 연결 확인"""
+    def _check_server_connection(self):
+        """서버 연결 확인"""
         try:
-            response = requests.get(f"{self.nas_api_url}/health", timeout=5)
+            response = requests.get(f"{self.server_url}/health", timeout=5)
             if response.status_code == 200:
-                self.logger.info(f"✅ NAS API 서버 연결 확인: {self.nas_api_url}")
+                self.logger.debug(f"✅ 서버 연결 성공: {self.server_url}")
             else:
-                self.logger.warning(f"⚠️ NAS API 서버 응답 이상: {response.status_code}")
+                self.logger.warning(f"⚠️ 서버 응답 이상: {response.status_code}")
         except requests.exceptions.RequestException as e:
-            self.logger.warning(f"⚠️ NAS API 서버 연결 실패: {e}")
-            raise ConnectionError(f"NAS API 서버 연결 실패: {e}")
+            self.logger.warning(f"⚠️ 서버 연결 실패: {e}")
+            raise ConnectionError(f"서버 연결 실패: {e}")
     
     def _create_metadata(
         self,
@@ -1060,9 +1087,31 @@ class DatalakeClient:
                 continue
         return existing_dirs
     
+    def _get_file_type(self, data_file) -> str:
+        if isinstance(data_file, Dataset):
+            return "dataset"
+        elif isinstance(data_file, pd.DataFrame):
+            return "dataframe"
+        elif isinstance(data_file, (str, Path)):
+            data_path = Path(data_file).resolve()
+            if not data_path.exists():
+                raise FileNotFoundError(f"❌ 데이터 파일이 존재하지 않습니다: {data_path}")
+            
+            if data_path.is_dir():
+                return "datasets_folder"
+            elif data_path.suffix == '.parquet':
+                return "parquet"
+            else:
+                raise ValueError(f"❌ 지원하지 않는 파일 형식: {data_path.suffix}")
+        else:
+            raise TypeError(f"❌ 지원하지 않는 데이터 타입: {type(data_file)}. "
+                            "Dataset, pandas DataFrame, str 또는 Path 객체만 지원합니다.")
+            
     def _load_data(self, data_file) -> tuple[Dataset, dict]:
         
-        if isinstance(data_file, Dataset):
+        data_type = self._get_file_type(data_file)
+
+        if data_type == "dataset":
             self.logger.info(f"🤗 Hugging Face Dataset 로드 중: {len(data_file)} 행")
             try:
                 dataset_obj = data_file  # 이미 Dataset 객체이므로 그대로 사용
@@ -1076,7 +1125,7 @@ class DatalakeClient:
             except Exception as e:
                 raise ValueError(f"❌ Hugging Face Dataset 처리 실패: {e}")
         
-        elif isinstance(data_file, pd.DataFrame):
+        elif data_type == "dataframe":
             self.logger.info(f"📊 pandas DataFrame 로드 중: {len(data_file)} 행")
             try:
                 dataset_obj = Dataset.from_pandas(data_file, preserve_index=False)
@@ -1084,36 +1133,26 @@ class DatalakeClient:
             except Exception as e:
                 raise ValueError(f"❌ pandas DataFrame 변환 실패: {e}")
                 
-        # 파일 경로인 경우 (기존 로직)
-        elif isinstance(data_file, (str, Path)):
+        elif data_type == "datasets_folder":
             data_path = Path(data_file).resolve()
-            if not data_path.exists():
-                raise FileNotFoundError(f"❌ 데이터 파일이 존재하지 않습니다: {data_path}")
-            
-            self.logger.info(f"📂 데이터 파일 로드 중: {data_path}")   
-            
-            if data_path.is_dir():
-                try:
-                    dataset_obj = load_from_disk(str(data_path))
-                    self.logger.info(f"✅ datasets 폴더 로드 완료: {len(dataset_obj)} 행")
-                except Exception as e:
-                    raise ValueError(f"❌ datasets 폴더 로드 실패: {e}")   
-            elif data_path.suffix == '.parquet':
-                try:
-                    df = pd.read_parquet(data_path)
-                    dataset_obj = Dataset.from_pandas(df)
-                    self.logger.info(f"✅ Parquet 파일 로드 완료: {len(df)} 행")
-                except Exception as e:
-                    raise ValueError(f"❌ Parquet 파일 로드 실패: {e}")
-            else:
-                raise ValueError(f"❌ 지원하지 않는 파일 형식: {data_path.suffix}")
+            self.logger.info(f"📂 datasets 폴더 로드 중: {data_path}")
+            try:
+                dataset_obj = load_from_disk(str(data_path))
+                self.logger.info(f"✅ datasets 폴더 로드 완료: {len(dataset_obj)} 행")
+            except Exception as e:
+                raise ValueError(f"❌ datasets 폴더 로드 실패: {e}")
                 
-            self.logger.info(f"✅ 데이터 파일 로드 완료: {data_file}")
-            
-        else:
-            raise TypeError(f"❌ 지원하지 않는 데이터 타입: {type(data_file)}. "
-                        f"파일 경로(str/Path) 또는 pandas.DataFrame을 사용하세요.")
-                
+        elif data_type == "parquet_file":
+            data_path = Path(data_file).resolve()
+            self.logger.info(f"📂 Parquet 파일 로드 중: {data_path}")
+            try:
+                df = pd.read_parquet(data_path)
+                dataset_obj = Dataset.from_pandas(df)
+                self.logger.info(f"✅ Parquet 파일 로드 완료: {len(df)} 행")
+            except Exception as e:
+                raise ValueError(f"❌ Parquet 파일 로드 실패: {e}")
+        
+        self.logger.info(f"✅ 데이터 파일 로드 완료: {data_file}")
         column_names = dataset_obj.column_names
         self.logger.info(f"데이터셋 컬럼: {column_names}")
                 
@@ -1410,18 +1449,19 @@ if __name__ == "__main__":
     from utils.config import Config
     config = Config()
     manager = DatalakeClient(
+        user_id="user",
         log_level="DEBUG",
     )
     
-    manager.show_nas_dashboard()
-    manager.show_schema_info()
+    manager.show_server_dashboard()
     
-    manager.add_provider("example_provider")
-    manager.remove_provider("example_provider")
-    manager.add_provider("example_provider")
-    manager.add_task("example_task", required_fields=["field1", "field2"], allowed_values={"field1": ["value1", "value2"]})
-    staging_dir, job_id = manager.upload_raw_data(
-        data_file="/home/kai/workspace/DeepDocs_Project/datalake/managers/sample_data_1",
+    manager.schema_manager.show_schema_info()
+    manager.schema_manager.add_provider("example_provider")
+    manager.schema_manager.remove_provider("example_provider")
+    manager.schema_manager.add_provider("example_provider")
+    manager.schema_manager.add_task("example_task", required_fields=["field1", "field2"], allowed_values={"field1": ["value1", "value2"]})
+    staging_dir, job_id = manager.upload_raw(
+        data_file="test.parquet",
         provider="example_provider",
         dataset="example_dataset",
         dataset_description="This is a sample dataset for testing.",

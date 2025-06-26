@@ -11,7 +11,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI, HTTPException, BackgroundTasks
 from pydantic import BaseModel
 
-from server.processor import NASDataProcessor
+from server.processor import DatalakeProcessor
 from utils.logging import setup_logging
 # Request/Response 모델들
 class ProcessRequest(BaseModel):
@@ -61,7 +61,7 @@ async def lifespan(app: FastAPI):
     BATCH_SIZE = int(os.environ.get("BATCH_SIZE", 1000))
     NUM_PROC = int(os.environ.get("NUM_PROC", 4))    
     try:
-        processor = NASDataProcessor(
+        processor = DatalakeProcessor(
             base_path=BASE_PATH,
             log_level=LOG_LEVEL,
             num_proc=NUM_PROC,
@@ -72,7 +72,7 @@ async def lifespan(app: FastAPI):
             log_level=LOG_LEVEL, 
             base_path=BASE_PATH)
         logger = logging.getLogger(__name__)
-        logger.info("✅ NASDataProcessor 초기화 완료")
+        logger.info("✅ DatalakeProcessor 초기화 완료")
     except Exception as e:
         logger.error(f"❌ Processor 초기화 실패: {e}")
         raise
@@ -85,8 +85,8 @@ async def lifespan(app: FastAPI):
 
 # FastAPI 앱 생성
 app = FastAPI(
-    title="NAS Data Processing API",
-    description="NAS에서 데이터 처리를 담당하는 API 서버",
+    title="Datalake Processing API",
+    description="Datalake 데이터 처리 및 카탈로그 생성을 담당하는 API 서버",
     version="1.0.0",
     lifespan=lifespan
 )
@@ -254,12 +254,12 @@ async def run_processing_job(job_id: str):
 if __name__ == "__main__":
     import argparse
     
-    parser = argparse.ArgumentParser(description="NAS Data Processing API Server")
+    parser = argparse.ArgumentParser(description="Datalake Processing API Server")
     parser.add_argument("--host", default="0.0.0.0", help="Host to bind to")
     parser.add_argument("--port", type=int, default=8000, help="Port to bind to")
     parser.add_argument("--workers", type=int, default=1, help="Number of workers")
     parser.add_argument("--log-level", default="INFO", help="Logging level (DEBUG, INFO, WARNING, ERROR, CRITICAL)")
-    parser.add_argument("--base-path", default="/mnt/AI_NAS/datalake/", help="Base path for NAS data")
+    parser.add_argument("--base-path", default="/mnt/AI_NAS/datalake/", help="Base path for datalake")
     parser.add_argument("--num-proc", type=int, default=16, help="Number of processing threads")
     parser.add_argument("--batch-size", type=int, default=1000, help="Batch size for processing")
     
@@ -267,7 +267,7 @@ if __name__ == "__main__":
     os.environ["BASE_PATH"] = args.base_path
     os.environ["LOG_LEVEL"] = args.log_level
     os.environ["NUM_PROC"] = str(args.num_proc)
-    print(f"🚀 Starting NAS Data Processing API Server on {args.host}:{args.port}")
+    print(f"🚀 Starting Datalake Processing API Server on {args.host}:{args.port}")
 
     uvicorn.run(
         app,

@@ -1,17 +1,10 @@
-import os
-import sys
 import time
-from typing import Optional, Dict, Union, List
-import re
-
 import awswrangler as wr
 import pandas as pd
 import boto3
 
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..')))
-from clients.queries.json_queries import JSONQueries
-from src.core import DEFAULT_DATABASE, DEFAULT_S3_OUTPUT
-
+from typing import Optional, Dict, Union, List
+from clients.queries.sql_queries import SQLQueries
 
 class AthenaClient:
     """Athena 쿼리 실행을 위한 클라이언트
@@ -36,8 +29,8 @@ class AthenaClient:
 
     def __init__(
         self,
-        database: str = None,
-        s3_output: str = None,
+        database: str = 'kdl-data-catalog',
+        s3_output: str = 's3://kdl-data-lake/athena-client-output',
         **kwargs
     ):
         """AthenaClient 초기화
@@ -52,12 +45,9 @@ class AthenaClient:
                 - aws_access_key_id (str): AWS 액세스 키
                 - aws_secret_access_key (str): AWS 시크릿 키
         """
-        self.database = database if database else DEFAULT_DATABASE
-        self.s3_output = s3_output if s3_output else DEFAULT_S3_OUTPUT
+        self.database = database
+        self.s3_output = s3_output
         self.session = boto3.Session(**kwargs) if kwargs else None
-        
-        # 쿼리 템플릿 초기화
-        self.json_queries = JSONQueries()
 
     def execute_query(
         self,
@@ -165,7 +155,7 @@ class AthenaClient:
         """
         def query_func(variant: str, **kwargs) -> pd.DataFrame:
             json_loc = f'$.{variant}.text.content'
-            sql = self.json_queries.extract_valid_content(
+            sql = SQLQueries.extract_valid_content(
                 table=table,
                 column=column,
                 json_loc=json_loc,
@@ -216,7 +206,7 @@ class AthenaClient:
             **kwargs,
         ) -> pd.DataFrame:
             json_loc = f'$.{variant}.text.content'
-            sql = self.json_queries.extract_text_in_content(
+            sql = SQLQueries.extract_text_in_content(
                 table=table,
                 column=column,
                 json_loc=json_loc,

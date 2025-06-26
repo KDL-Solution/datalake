@@ -6,7 +6,7 @@ import duckdb
 from pathlib import Path
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..')))
-from clients.queries.json_queries import JSONQueries
+from clients.queries.sql_queries import SQLQueries
 
 
 class DuckDBClient:
@@ -41,9 +41,6 @@ class DuckDBClient:
         """
         self.database_path = database_path
         self.connection = None
-        # 쿼리 템플릿 초기화
-        self.json_queries = JSONQueries()
-        
         # 연결 초기화
         self.connect(read_only=read_only)
 
@@ -111,7 +108,7 @@ class DuckDBClient:
                 SELECT * FROM read_parquet('{parquet_path}', hive_partitioning=true, union_by_name={str(union_by_name).lower()})
                 """
             else:
-                sql = self.json_queries.create_table_from_parquet_duckdb(table_name, parquet_path)
+                sql = SQLQueries.create_table_from_parquet_duckdb(table_name, parquet_path)
             self.connection.execute(sql)
             print(f"✅ 테이블 '{table_name}' 생성 완료")
             
@@ -158,7 +155,7 @@ class DuckDBClient:
         """
         def query_func(variant: str, **kwargs) -> pd.DataFrame:
             json_loc = f'$.{variant}.text.content'
-            sql = self.json_queries.extract_valid_content(
+            sql = SQLQueries.extract_valid_content(
                 table=table,
                 column=column,
                 json_loc=json_loc,
@@ -193,7 +190,7 @@ class DuckDBClient:
         """
         def query_func(variant: str, **kwargs) -> pd.DataFrame:
             json_loc = f'$.{variant}.text.content'
-            sql = self.json_queries.extract_text_in_content(
+            sql = SQLQueries.extract_text_in_content(
                 table=table,
                 column=column,
                 json_loc=json_loc,
@@ -210,7 +207,7 @@ class DuckDBClient:
 
     def retrieve_partitions(self, table: str = "catalog") -> pd.DataFrame:
         """모든 파티션 조합 조회"""
-        sql = self.json_queries.get_distinct_partitions(table)
+        sql = SQLQueries.get_distinct_partitions(table)
         return self.execute_query(sql)
 
     def retrieve_with_existing_cols(
@@ -301,7 +298,6 @@ class DuckDBClient:
         """연결 종료"""
         if self.connection:
             self.connection.close()
-            print("✅ DuckDB 연결 종료")
 
     def __enter__(self):
         """컨텍스트 매니저 진입"""

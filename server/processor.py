@@ -18,7 +18,7 @@ from functools import partial
 
 from utils.logging import setup_logging
 
-class NASDataProcessor:
+class DatalakeProcessor:
     
     def __init__(
         self,
@@ -55,7 +55,7 @@ class NASDataProcessor:
         self.failure_lock = threading.Lock()
         self.error_messages = []
         
-        self.logger.info(f"🚀 NASDataProcessor 초기화 (병렬: {self.num_proc}, 배치: {batch_size})")
+        self.logger.info(f"🚀 DatalakeProcessor 초기화 (병렬: {self.num_proc}, 배치: {batch_size})")
  
     def get_status(self) -> Dict:
         """간단한 상태 조회"""
@@ -556,28 +556,26 @@ class NASDataProcessor:
             return base_path / image_hash[:2] / image_hash[2:4] / f"{image_hash}.jpg"
     
     def _save_to_catalog(self, dataset_obj: Dataset, metadata: Dict):
-        """Catalog에 저장"""
         provider = metadata['provider']
         dataset_name = metadata['dataset']
         task = metadata['task']
         variant = metadata['variant']
         
-        # Catalog 경로
-        catalog_dir = (
+        output_dir = (
             self.catalog_path /
             f"provider={provider}" /
             f"dataset={dataset_name}" /
             f"task={task}" /
             f"variant={variant}"
         )
-        catalog_dir.mkdir(mode=0o775, parents=True, exist_ok=True)
+        output_dir.mkdir(mode=0o775, parents=True, exist_ok=True)
         
         # Parquet 저장 (datasets 내장 최적화)
-        parquet_file = catalog_dir / "data.parquet"
+        parquet_file = output_dir / "data.parquet"
         dataset_obj.to_parquet(str(parquet_file))
         
         # 메타데이터 저장
-        metadata_file = catalog_dir / "_metadata.json"
+        metadata_file = output_dir / "_metadata.json"
         with open(metadata_file, 'w', encoding='utf-8') as f:
             json.dump(metadata, f, ensure_ascii=False, indent=2)
         
@@ -587,7 +585,7 @@ class NASDataProcessor:
         
 if __name__ == "__main__":
     # datasets.map() 활용 버전
-    processor = NASDataProcessor(
+    processor = DatalakeProcessor(
         batch_size=1000,    # map()의 배치 크기
         num_proc=4         # 병렬 처리 수
     )

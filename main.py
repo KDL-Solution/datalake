@@ -12,82 +12,91 @@ from datetime import datetime
 
 from core.datalake import DatalakeClient  
 
-class CatalogError(Exception):
-    """Catalog 관련 오류"""
-    pass
-
-class CatalogNotFoundError(CatalogError):
-    """Catalog DB 파일이 없음"""
-    pass
-
-class CatalogEmptyError(CatalogError):
-    """Catalog에 데이터가 없음"""
-    pass
-
-class CatalogLockError(CatalogError):
-    """Catalog DB가 잠금 상태"""
-    pass
-
-
 class DataManagerCLI:
     """Data Manager CLI 인터페이스"""
     
     def __init__(
         self, 
+        user_id: str = "user",
         base_path: str = "/mnt/AI_NAS/datalake",
-        nas_api_url: str = "http://192.168.20.62:8091",
+        server_url: str = "http://192.168.20.62:8091",
         log_level: str = "INFO",
         num_proc: int = 8,
     ):
         self.data_manager = DatalakeClient(
+            user_id=user_id,
             base_path=base_path,
-            nas_api_url=nas_api_url,
+            server_url=server_url,
             log_level=log_level,
             num_proc=num_proc
         )
         self.schema_manager = self.data_manager.schema_manager
     
-    def show_catalog_db_info(self):
-        """Catalog DB 정보 표시"""
-        print("\n📊 Catalog DB 정보")
+    def show_db_info(self):
+        """DB 정보 표시 및 상태 확인"""
+        print("\n📊 DB 정보")
         print("="*50)
         
         try:
-            catalog_info = self.data_manager.get_catalog_info()
+            db_info = self.data_manager.get_db_info()
             
-            if not catalog_info['exists']:
-                print("❌ Catalog DB 파일이 없습니다.")
-                print("💡 'python main.py catalog update' 명령으로 생성할 수 있습니다.")
+            if not db_info['exists']:
+                print("❌ DB 파일이 없습니다.")
+                print("💡 'python main.py db update' 명령으로 생성할 수 있습니다.")
                 return False
             
-            # 기본 정보 출력
-            print(f"📁 DB 파일: {catalog_info['path']}")
-            print(f"💾 파일 크기: {catalog_info['size_mb']}MB")
-            print(f"🕒 수정 시간: {catalog_info['modified_time']}")
+            # 기본 정보
+            print(f"📁 DB 파일: {db_info['path']}")
+            print(f"💾 파일 크기: {db_info['size_mb']}MB")
+            print(f"🕒 수정 시간: {db_info['modified_time']}")
             
-            if catalog_info.get('is_outdated'):
+            # 업데이트 상태 확인 및 제안
+            if db_info.get('is_outdated'):
                 print("⚠️ DB가 최신 상태가 아닙니다.")
+                choice = self._ask_yes_no(
+                    question="DB를 업데이트하시겠습니까?",
+                    default=True,
+                )
+                if choice:
+                    print("🔄 DB 업데이트 중...")
+                    success = self.data_manager.build_db()
+                    if success:
+                        print("✅ DB 업데이트 완료")
+                        # 업데이트 후 새 정보 가져오기
+                        db_info = self.data_manager.get_db_info()
+                    else:
+                        print("❌ DB 업데이트 실패")
+                        return False
+            else:
+                print("✅ DB 최신 상태")
             
             # 테이블 정보
-            if 'tables' in catalog_info:
-                print(f"\n📋 테이블: {len(catalog_info['tables'])}개")
-                for table in catalog_info['tables']:
+            if 'tables' in db_info:
+                print(f"\n📋 테이블: {len(db_info['tables'])}개")
+                for table in db_info['tables']:
                     print(f"  • {table}")
             
-            # Catalog 상세 정보
-            if 'total_rows' in catalog_info:
-                print(f"\n📊 Catalog 테이블:")
-                print(f"  📈 총 행 수: {catalog_info['total_rows']:,}개")
-                print(f"  🏷️ 파티션: {catalog_info.get('partitions', 0)}개")
+            # 데이터 통계
+            if 'total_rows' in db_info:
+                print(f"\n📊 데이터 통계:")
+                print(f"  📈 총 행 수: {db_info['total_rows']:,}개")
+                print(f"  🏷️ 파티션: {db_info.get('partitions', 0)}개")
                 
-                # Provider별 통계
-                if 'provider_stats' in catalog_info:
-                    print(f"\n🏢 Provider별 파티션 수:")
-                    for provider, count in list(catalog_info['provider_stats'].items())[:5]:
+                # Provider별 통계 (상위 5개)
+                if 'provider_stats' in db_info and db_info['provider_stats']:
+                    print(f"\n🏢 Provider별 파티션:")
+                    provider_items = list(db_info['provider_stats'].items())
+                    for provider, count in provider_items[:5]:
                         print(f"  • {provider}: {count}개")
                     
-                    if len(catalog_info['provider_stats']) > 5:
-                        print(f"  ... 외 {len(catalog_info['provider_stats']) - 5}개")
+                    if len(provider_items) > 5:
+                        print(f"  ... 외 {len(provider_items) - 5}개")
+                
+                # Task별 통계
+                if 'task_stats' in db_info and db_info['task_stats']:
+                    print(f"\n📝 Task별 파티션:")
+                    for task, count in db_info['task_stats'].items():
+                        print(f"  • {task}: {count}개")
             
             return True
             
@@ -95,22 +104,22 @@ class DataManagerCLI:
             print(f"❌ DB 정보 조회 실패: {e}")
             return False
         
-    def build_catalog_db_interactive(self):
-        """대화형 Catalog DB 구축"""
+    def build_db_interactive(self):
+        """대화형 DB 구축"""
         print("\n" + "="*50)
-        print("🔨 Catalog DB 구축")
+        print("🔨 DB 구축")
         print("="*50)
         
         try:
     
-            catalog_info = self.data_manager.get_catalog_info()
+            db_info = self.data_manager.get_db_info()
             force_rebuild = False
             
-            if catalog_info['exists']:
-                print("⚠️ 기존 Catalog DB가 있습니다.")
-                print(f"  📁 파일: {catalog_info['path']}")
-                print(f"  💾 크기: {catalog_info['size_mb']}MB")
-                print(f"  📊 행 수: {catalog_info.get('total_rows', 'N/A'):,}개")
+            if db_info['exists']:
+                print("⚠️ 기존 DB가 있습니다.")
+                print(f"  📁 파일: {db_info['path']}")
+                print(f"  💾 크기: {db_info['size_mb']}MB")
+                print(f"  📊 행 수: {db_info.get('total_rows', 'N/A'):,}개")
 
                 choice = self._ask_yes_no(
                     question="\n기존 DB를 삭제하고 재구축하시겠습니까?",
@@ -123,125 +132,119 @@ class DataManagerCLI:
                     return False
             
             # DB 구축 실행
-            print("\n🔄 Catalog DB 구축 중...")
-            success = self.data_manager.build_catalog_db(force_rebuild=force_rebuild)
+            print("\n🔄 DB 구축 중...")
+            success = self.data_manager.build_db(force_rebuild=force_rebuild)
             
             if success:
-                print("✅ Catalog DB 구축 완료!")
+                print("✅ DB 구축 완료!")
                 # 결과 확인
-                new_info = self.data_manager.get_catalog_info()
+                new_info = self.data_manager.get_db_info()
                 if new_info['exists']:
                     print(f"📊 총 {new_info.get('total_rows', 0):,}개 행 생성됨")
                 return True
             else:
-                print("❌ Catalog DB 구축 실패")
+                print("❌ DB 구축 실패")
                 return False
                 
         except Exception as e:
             print(f"❌ 구축 중 오류: {e}")
             return False
-        
-    def quick_catalog_check(self):
-        """빠른 카탈로그 상태 확인"""
-        print("\n📊 Catalog 빠른 상태 확인")
-        print("="*40)
-        
+    
+    def create_provider(self, name: str=None):
+        if name is None:
+            while True:
+                name = input("🏢 Provider 이름을 입력하세요: ").strip()
+                if name:
+                    break
+                print("❌ Provider 이름은 필수입니다. 다시 입력해주세요.")
         try:
-            catalog_info = self.data_manager.get_catalog_info()
-            
-            if not catalog_info['exists']:
-                print("❌ DB 파일 없음")
+            if name in self.schema_manager.get_all_providers():
+                print(f"Provider '{name}'가 이미 존재합니다.")
                 return False
             
-            print(f"📁 DB: {catalog_info['size_mb']}MB ({catalog_info['modified_time']})")
-            
-            if catalog_info.get('is_outdated'):
-                print("⚠️ DB 업데이트 필요")
-                choice = self._ask_yes_no(
-                    question="DB를 업데이트하시겠습니까?",
-                    default=True,
-                )
-                if choice:
-                    print("🔄 DB 업데이트 중...")
-                    success = self.data_manager.build_catalog_db()
-                    if success:
-                        print("✅ DB 업데이트 완료")
-                    else:
-                        print("❌ DB 업데이트 실패")
-                        return False
-            else:
-                print("✅ DB 최신 상태")
-            
-            if 'total_rows' in catalog_info:
-                print(f"📊 총 {catalog_info['total_rows']:,}개 행")
-            
-            return True
-            
-        except Exception as e:
-            print(f"❌ 상태 확인 실패: {e}")
-            return False
-
-    def create_provider_interactive(self):
-        """대화형 Provider 생성"""
-        print("\n" + "="*50)
-        print("🏢 새 Provider 생성")
-        print("="*50)
-        
-        try:
-            # Provider 이름 입력
-            provider_name = input("🏢 Provider 이름을 입력하세요: ").strip()
-            if not provider_name:
-                print("❌ Provider 이름이 필요합니다.")
-                return False
-            
-            # 기존 Provider 확인
-            if provider_name in self.schema_manager.get_all_providers():
-                print(f"⚠️ Provider '{provider_name}'가 이미 존재합니다.")
-                return False
-            
-            # 확인 및 생성
-            confirm = input(f"\nProvider '{provider_name}'를 생성하시겠습니까? (y/N): ").strip().lower()
-            if confirm in ['y', 'yes']:
-                result = self.schema_manager.add_provider(provider_name)
-                if result:
-                    print(f"✅ Provider '{provider_name}' 생성 완료!")
-                    return True
-                else:
-                    print(f"❌ Provider 생성 실패")
-                    return False
-            else:
+            description = input("📜 Provider 설명 (선택): ").strip()
+                
+            choice = self._ask_yes_no(
+                question=f"Provider '{name}'를 생성하시겠습니까?",
+                default=True,
+            )
+            if not choice:
                 print("❌ 생성이 취소되었습니다.")
                 return False
-                
+            
+            result = self.schema_manager.add_provider(name, description)
+            if result:
+                print(f"✅ Provider '{name}' 생성 완료")
+                return True
+            else:
+                print(f"❌ Provider 생성 실패")
+                return False
         except KeyboardInterrupt:
             print("\n❌ 생성이 취소되었습니다.")
             return False
         except Exception as e:
             print(f"❌ Provider 생성 중 오류: {e}")
             return False
-    
-    def create_task_interactive(self):
-        """대화형 Task 생성"""
-        print("\n" + "="*50)
-        print("🔧 새 Task 생성")
-        print("="*50)
-        
+
+    def remove_provider(self, name: str):
         try:
-            # Task 이름 입력
-            task_name = input("📝 Task 이름을 입력하세요: ").strip()
-            if not task_name:
-                print("❌ Task 이름이 필요합니다.")
+            providers = self.schema_manager.get_all_providers()
+            
+            if name not in providers:
+                print(f"❌ Provider '{name}'이 존재하지 않습니다.")
+                if providers:
+                    print(f"등록된 Provider: {', '.join(providers)}")
+                return False
+            choice = self._ask_yes_no(
+                question=f"Provider '{name}'를 정말로 제거하시겠습니까?",
+                default=False,
+            )
+            if not choice:
+                print("❌ 제거가 취소되었습니다.")
                 return False
             
-            # 기존 Task 확인
-            existing_tasks = self.schema_manager.get_all_tasks()
-            if task_name in existing_tasks:
-                print(f"⚠️ Task '{task_name}'가 이미 존재합니다.")
-                update = input("업데이트하시겠습니까? (y/N): ").strip().lower()
-                if update not in ['y', 'yes']:
-                    return False
+            result = self.schema_manager.remove_provider(name)
+            if result:
+                print(f"✅ Provider '{name}' 제거 완료")
+                return True
+            else:
+                print(f"❌ Provider '{name}' 제거 실패")
+                return False
+        except KeyboardInterrupt:
+            print("\n❌ 제거가 취소되었습니다.")
+            return False
+        except Exception as e:
+            print(f"❌ Provider 제거 중 오류: {e}")
+            return False
+       
+    def list_providers(self):
+        try:
+            providers = self.schema_manager.get_all_providers()
+            print(f"\n🏢 등록된 Provider ({len(providers)}개):")
             
-            # 필수 필드 입력
+            if providers:
+                for provider in providers:
+                    print(f"  • {provider}")
+            else:
+                print("  📭 등록된 Provider가 없습니다.")
+                print("  💡 'python main.py config provider create' 명령으로 Provider를 생성해주세요.")
+            
+            return True
+            
+        except Exception as e:
+            print(f"❌ Provider 목록 조회 중 오류: {e}")
+            return False
+         
+    def create_task(self, name: str):
+        try:
+            if name in self.schema_manager.get_all_tasks():
+                print(f"Task '{name}'가 이미 존재합니다.")
+                return False
+            
+            description = input("📜 Task 설명 (선택): ").strip()
+            
+            print(f"\n🔧 Task '{name}' 설정")
+            print("="*50)   
             print("\n📝 필수 필드 설정 (Enter로 완료)")
             required_fields = []
             while True:
@@ -251,7 +254,6 @@ class DataManagerCLI:
                 required_fields.append(field)
                 print(f"  ✅ 추가됨: {field}")
             
-            # 허용 값 설정
             print("\n🔧 허용 값 설정")
             allowed_values = {}
             for field in required_fields:
@@ -264,25 +266,30 @@ class DataManagerCLI:
             
             # 확인 및 생성
             print(f"\n📋 Task 설정 확인:")
-            print(f"  이름: {task_name}")
+            print(f"  이름: {name}")
+            print(f"  설명: {description}")
             print(f"  필수 필드: {required_fields}")
             print(f"  허용 값: {allowed_values}")
             
-            confirm = input("\n생성하시겠습니까? (y/N): ").strip().lower()
-            if confirm in ['y', 'yes']:
-                if task_name in existing_tasks:
-                    result = self.schema_manager.update_task(task_name, required_fields, allowed_values)
-                else:
-                    result = self.schema_manager.add_task(task_name, required_fields, allowed_values)
-                
-                if result:
-                    print(f"✅ Task '{task_name}' 생성/업데이트 완료!")
-                    return True
-                else:
-                    print(f"❌ Task 생성/업데이트 실패")
-                    return False
-            else:
+            choice = self._ask_yes_no(
+                question=f"Task '{name}'를 생성하시겠습니까?",
+                default=True,
+            )
+            if not choice:
                 print("❌ 생성이 취소되었습니다.")
+                return False
+            
+            result = self.schema_manager.add_task(
+                name=name, 
+                description=description,
+                required_fields=required_fields, 
+                allowed_values=allowed_values
+            )
+            if result:
+                print(f"✅ Task '{name}' 생성/업데이트 완료!")
+                return True
+            else:
+                print(f"❌ Task 생성/업데이트 실패")
                 return False
                 
         except KeyboardInterrupt:
@@ -292,90 +299,28 @@ class DataManagerCLI:
             print(f"❌ Task 생성 중 오류: {e}")
             return False
 
-    def remove_provider_interactive(self):
-        """대화형 Provider 제거"""
-        providers = self.schema_manager.get_all_providers()
-        if not providers:
-            print("❌ 제거할 Provider가 없습니다.")
-            return False
-        
-        print("\n🏢 등록된 Provider:")
-        for i, provider in enumerate(providers, 1):
-            print(f"  {i}. {provider}")
-        
-        try:
-            choice = input("\n제거할 Provider 번호 또는 이름: ").strip()
-            if choice.isdigit():
-                idx = int(choice) - 1
-                if 0 <= idx < len(providers):
-                    provider = providers[idx]
-                else:
-                    print("❌ 잘못된 번호입니다.")
-                    return False
-            else:
-                provider = choice
-                if provider not in providers:
-                    print(f"❌ Provider '{provider}'가 존재하지 않습니다.")
-                    return False
-            
-            confirm = input(f"\nProvider '{provider}'를 제거하시겠습니까? (y/N): ").strip().lower()
-            if confirm in ['y', 'yes']:
-                result = self.schema_manager.remove_provider(provider)
-                if result:
-                    print(f"✅ Provider '{provider}' 제거 완료!")
-                    return True
-                else:
-                    print(f"❌ Provider 제거 실패")
-                    return False
-            else:
+    def remove_task(self, name: str):
+        try: 
+            tasks = self.schema_manager.get_all_tasks()
+            if name not in tasks:
+                print(f"❌ Task '{name}'이 존재하지 않습니다.")
+                if tasks:
+                    print(f"등록된 Task: {', '.join(tasks.keys())}")
+                return False
+
+            choice = self._ask_yes_no(
+                question=f"Task '{name}'를 정말로 제거하시겠습니까?",
+                default=False,
+            )
+            if not choice:
                 print("❌ 제거가 취소되었습니다.")
                 return False
-                
-        except KeyboardInterrupt:
-            print("\n❌ 제거가 취소되었습니다.")
-            return False
-        except Exception as e:
-            print(f"❌ Provider 제거 중 오류: {e}")
-            return False
-
-    def remove_task_interactive(self):
-        """대화형 Task 제거"""
-        tasks = self.schema_manager.get_all_tasks()
-        if not tasks:
-            print("❌ 제거할 Task가 없습니다.")
-            return False
-        
-        print("\n📝 등록된 Task:")
-        task_names = list(tasks.keys())
-        for i, task_name in enumerate(task_names, 1):
-            print(f"  {i}. {task_name}")
-        
-        try:
-            choice = input("\n제거할 Task 번호 또는 이름: ").strip()
-            if choice.isdigit():
-                idx = int(choice) - 1
-                if 0 <= idx < len(task_names):
-                    task = task_names[idx]
-                else:
-                    print("❌ 잘못된 번호입니다.")
-                    return False
-            else:
-                task = choice
-                if task not in tasks:
-                    print(f"❌ Task '{task}'가 존재하지 않습니다.")
-                    return False
             
-            confirm = input(f"\nTask '{task}'를 제거하시겠습니까? (y/N): ").strip().lower()
-            if confirm in ['y', 'yes']:
-                result = self.schema_manager.remove_task(task)
-                if result:
-                    print(f"✅ Task '{task}' 제거 완료!")
-                    return True
-                else:
-                    print(f"❌ Task 제거 실패")
-                    return False
+            if self.schema_manager.remove_task(name):
+                print(f"✅ Task '{name}' 제거 완료")
+                return True
             else:
-                print("❌ 제거가 취소되었습니다.")
+                print(f"❌ Task '{name}' 제거 실패")
                 return False
                 
         except KeyboardInterrupt:
@@ -384,199 +329,49 @@ class DataManagerCLI:
         except Exception as e:
             print(f"❌ Task 제거 중 오류: {e}")
             return False
-    
-    def upload_data_interactive(self):
-        """대화형 데이터 업로드"""
-        print("\n" + "="*50)
-        print("📥 데이터 업로드")
-        print("="*50)
         
+    def list_tasks(self):
         try:
-            # 1. 데이터 파일 경로 입력
-            data_file = input("📁 데이터 파일 경로: ").strip()
-            if not data_file or not Path(data_file).exists():
-                print("❌ 유효한 파일 경로를 입력해주세요.")
-                return False
+            tasks = self.schema_manager.get_all_tasks()
+            print(f"\n📝 등록된 Task ({len(tasks)}개):")
             
-            # 2. 데이터 타입 선택 (가장 중요한 분기점)
-            data_type = input("\n📝 데이터 타입 (raw/task) [raw]: ").strip().lower() or "raw"
-            if data_type not in ["raw", "task"]:
-                print("❌ 잘못된 데이터 타입입니다. (raw 또는 task)")
-                return False
-            
-            # 3. Provider 선택
-            providers = self.schema_manager.get_all_providers()
-            if not providers:
-                print("❌ 등록된 Provider가 없습니다. 먼저 Provider를 생성해주세요.")
-                return False
-                
-            print(f"\n🏢 사용 가능한 Provider:")
-            for i, provider in enumerate(providers, 1):
-                print(f"  {i}. {provider}")
-            
-            provider_choice = input("Provider 번호 또는 이름 입력: ").strip()
-            if provider_choice.isdigit():
-                idx = int(provider_choice) - 1
-                if 0 <= idx < len(providers):
-                    provider = providers[idx]
-                else:
-                    print("❌ 잘못된 번호입니다.")
-                    return False
+            if tasks:
+                for task in tasks:
+                    print(f"  • {task}")
+                    task_config = self.schema_manager.get_task_info(task)
+                    required_fields = task_config.get('required_fields', [])
+                    if required_fields:
+                        print(f"    📝 필수 필드: {', '.join(required_fields)}")
+                    
+                    allowed_values = task_config.get('allowed_values', {})
+                    if allowed_values:
+                        print(f"    🔧 허용 값:")
+                        for field, values in allowed_values.items():
+                            print(f"      - {field}: {', '.join(values)}")
             else:
-                provider = provider_choice
-                if provider not in providers:
-                    print(f"❌ Provider '{provider}'가 존재하지 않습니다.")
-                    return False
+                print("  📭 등록된 Task가 없습니다.")
+                print("  💡 'python main.py config task create' 명령으로 Task를 생성해주세요.")
+            
+            return True
+            
+        except Exception as e:
+            print(f"❌ Task 목록 조회 중 오류: {e}")
+            return False
+    
+    def upload_interactive(self):
+        try:
+            data_file = self._get_file_path()
+            if not data_file:
+                return False
+        
+            data_type = self._select_data_type()
             
             # 4. 데이터 타입별 플로우
             if data_type == "raw":
-                # Raw 데이터: 새 Dataset 생성
-                dataset = input("\n📦 새 Dataset 이름: ").strip()
-                if not dataset:
-                    print("❌ Dataset 이름이 필요합니다.")
-                    return False
-                
-                description = input("📄 데이터셋 설명 (선택사항): ").strip()
-                source = input("🔗 원본 소스 URL (선택사항): ").strip()
-                
-                print(f"\n📋 업로드 정보:")
-                print(f"  📁 파일: {data_file}")
-                print(f"  📝 타입: Raw 데이터")
-                print(f"  🏢 Provider: {provider}")
-                print(f"  📦 Dataset: {dataset} (새로 생성)")
-                if description:
-                    print(f"  📄 설명: {description}")
-                if source:
-                    print(f"  🔗 소스: {source}")
-                
-                confirm = input("\n업로드하시겠습니까? (y/N): ").strip().lower()
-                if confirm in ['y', 'yes']:
-                    staging_dir, job_id = self.data_manager.upload_raw_data(
-                        data_file=data_file,
-                        provider=provider,
-                        dataset=dataset,
-                        dataset_description=description,
-                        original_source=source
-                    )
-                    print(f"✅ 업로드 완료: {staging_dir}")
-                    print("💡 'python main.py process start' 명령으로 처리를 시작할 수 있습니다.")
-                    return True
+                self._upload_raw_data(data_file)
                     
             elif data_type == "task":
-                # Task 데이터: 기존 Dataset에서 선택
-                print(f"\n📦 기존 Dataset 선택:")
-                print("💡 Task 데이터는 기존에 업로드된 raw 데이터에서 추출됩니다.")
-                
-                # 해당 Provider의 기존 dataset 목록 조회
-                catalog_path = self.data_manager.catalog_path / f"provider={provider}"
-                existing_datasets = []
-                
-                if catalog_path.exists():
-                    for dataset_dir in catalog_path.iterdir():
-                        if dataset_dir.is_dir() and dataset_dir.name.startswith("dataset="):
-                            dataset_name = dataset_dir.name.replace("dataset=", "")
-                            existing_datasets.append(dataset_name)
-                
-                if not existing_datasets:
-                    print(f"❌ Provider '{provider}'에 업로드된 데이터가 없습니다.")
-                    print("💡 먼저 raw 데이터를 업로드해주세요.")
-                    return False
-                
-                print(f"\n📦 사용 가능한 Dataset ({len(existing_datasets)}개):")
-                for i, dataset_name in enumerate(existing_datasets, 1):
-                    print(f"  {i}. {dataset_name}")
-                
-                dataset_choice = input("Dataset 번호 또는 이름 입력: ").strip()
-                if dataset_choice.isdigit():
-                    idx = int(dataset_choice) - 1
-                    if 0 <= idx < len(existing_datasets):
-                        dataset = existing_datasets[idx]
-                    else:
-                        print("❌ 잘못된 번호입니다.")
-                        return False
-                else:
-                    dataset = dataset_choice
-                    if dataset not in existing_datasets:
-                        print(f"❌ Dataset '{dataset}'가 존재하지 않습니다.")
-                        return False
-                
-                # Task 선택
-                tasks = self.schema_manager.get_all_tasks()
-                if not tasks:
-                    print("❌ 등록된 Task가 없습니다. 먼저 Task를 생성해주세요.")
-                    return False
-                    
-                print(f"\n📝 사용 가능한 Task:")
-                task_names = list(tasks.keys())
-                for i, task_name in enumerate(task_names, 1):
-                    print(f"  {i}. {task_name}")
-                
-                task_choice = input("Task 번호 또는 이름 입력: ").strip()
-                if task_choice.isdigit():
-                    idx = int(task_choice) - 1
-                    if 0 <= idx < len(task_names):
-                        task = task_names[idx]
-                    else:
-                        print("❌ 잘못된 번호입니다.")
-                        return False
-                else:
-                    task = task_choice
-                    if task not in tasks:
-                        print(f"❌ Task '{task}'가 존재하지 않습니다.")
-                        return False
-                
-                # Variant 입력
-                variant = input("\n🏷️ Variant 이름: ").strip()
-                if not variant:
-                    print("❌ Variant 이름이 필요합니다.")
-                    return False
-                
-                # 필수 필드 입력
-                all_tasks = self.data_manager.schema_manager.get_all_tasks()
-                task_info = all_tasks.get(task, {})
-                required_fields = task_info.get('required_fields', [])
-                allowed_values = task_info.get('allowed_values', {})
-                
-                meta = {}
-                if required_fields:
-                    print(f"\n📝 필수 필드 입력:")
-                    for field in required_fields:
-                        if field in allowed_values:
-                            print(f"  {field} 허용값: {allowed_values[field]}")
-                        value = input(f"  {field}: ").strip()
-                        if not value:
-                            print(f"❌ 필수 필드 '{field}'가 누락되었습니다.")
-                            return False
-                        meta[field] = value
-                
-                # 검증
-                is_valid, error_msg = self.data_manager.schema_manager.validate_task_metadata(task, meta)
-                if not is_valid:
-                    print(f"❌ 검증 실패: {error_msg}")
-                    return False
-                
-                print(f"\n📋 업로드 정보:")
-                print(f"  📁 파일: {data_file}")
-                print(f"  📝 타입: Task 데이터")
-                print(f"  🏢 Provider: {provider}")
-                print(f"  📦 Dataset: {dataset} (기존)")
-                print(f"  📝 Task: {task}")
-                print(f"  🏷️ Variant: {variant}")
-                print(f"  📋 메타데이터: {meta}")
-                
-                confirm = input("\n업로드하시겠습니까? (y/N): ").strip().lower()
-                if confirm in ['y', 'yes']:
-                    staging_dir, job_id = self.data_manager.upload_task_data(
-                        data_file=data_file,
-                        provider=provider,
-                        dataset=dataset,
-                        task=task,
-                        variant=variant,
-                        meta=meta
-                    )
-                    print(f"✅ 업로드 완료: {staging_dir}")
-                    print("💡 'python main.py process start' 명령으로 처리를 시작할 수 있습니다.")
-                    return True
+                self._upload_task_data(data_file)
                 
         except KeyboardInterrupt:
             print("\n❌ 업로드가 취소되었습니다.")
@@ -585,20 +380,13 @@ class DataManagerCLI:
             print(f"❌ 업로드 중 오류: {e}")
             return False
     
-    def download_data_interactive(self):
-        """대화형 데이터 다운로드 (간소화 버전)"""
-        print("\n" + "="*50)
-        print("📥 데이터 다운로드")
-        print("="*50)
-        
+    def export_interactive(self):
         try:
-            # 1. 파티션 정보 조회
-            print("🔄 사용 가능한 데이터 조회 중...")
-            partitions_df = self.data_manager.get_catalog_partitions()
-            
+            print("🔄 DB 데이터 조회 중...")
+            partitions_df = self.data_manager.get_partitions()
             if partitions_df.empty:
                 print("❌ 사용 가능한 데이터가 없습니다.")
-                print("💡 'python main.py catalog update' 명령으로 Catalog를 먼저 구축해주세요.")
+                print("💡 'python main.py db update' 명령으로 DB를 먼저 구축해주세요.")
                 return False
                 
             print(f"📊 {len(partitions_df)}개 파티션 사용 가능")
@@ -615,25 +403,20 @@ class DataManagerCLI:
             print(search_results.head(10))
             
             # 3. 다운로드 실행
-            return self._download_selected_data(search_results)
+            return self._export_selected_data(search_results)
             
         except FileNotFoundError as e:
             print(f"❌ {e}")
-            print("💡 'python main.py catalog update' 명령으로 Catalog DB를 생성해주세요.")
+            print("💡 'python main.py db update' 명령으로 DB를 생성해주세요.")
             return False
         except Exception as e:
             print(f"❌ 다운로드 중 오류: {e}")
             return False
 
     def trigger_processing(self):
-        """NAS 처리 수동 시작"""
-        print("\n" + "="*50)
-        print("🔄 NAS 데이터 처리 시작")
-        print("="*50)
-        
         try:
             # 현재 상태 확인
-            status = self.data_manager.get_nas_status()
+            status = self.data_manager.get_server_status()
             if status:
                 pending_count = status.get('pending', 0)
                 processing_count = status.get('processing', 0)
@@ -652,14 +435,14 @@ class DataManagerCLI:
                         print("❌ 처리가 취소되었습니다.")
                         return False
             else:
-                print("⚠️ NAS 서버 상태를 확인할 수 없습니다.")
+                print("⚠️ 서버 상태를 확인할 수 없습니다.")
                 continue_anyway = input("그래도 처리를 시작하시겠습니까? (y/N): ").strip().lower()
                 if continue_anyway not in ['y', 'yes']:
                     print("❌ 처리가 취소되었습니다.")
                     return False
             
             # 처리 시작
-            job_id = self.data_manager.trigger_nas_processing()
+            job_id = self.data_manager.trigger_processing()
             if job_id:
                 print(f"✅ 처리 시작됨: {job_id}")
                 
@@ -830,7 +613,7 @@ class DataManagerCLI:
                         continue
             
             # 2. 🔄 처리 중/완료 (Jobs)
-            jobs = self.data_manager.list_nas_jobs() or []
+            jobs = self.data_manager.list_server_jobs() or []
             recent_jobs = jobs[-5:] if jobs else []  # 최근 5개
             
             # 출력
@@ -868,12 +651,13 @@ class DataManagerCLI:
             print(f"❌ 데이터 현황 조회 중 오류: {e}")
             return False
 
-    def validate_data_integrity_interactive(self, report=False):
+    def validate_db_integrity_interactive(self, report=False):
         """대화형 데이터 무결성 검사"""
         print("\n" + "="*50)
         print("🔍 데이터 무결성 검사")
         print("="*50)
-        
+        if not report:
+            print("💡 'report=True' 옵션을 사용하면 상세 보고서를 생성합니다.")
         try:
             # 검사 범위 선택
             print("🔍 검사 범위 선택:")
@@ -893,20 +677,15 @@ class DataManagerCLI:
                 if scope_choice == "1":
                     
                     print("\n🔄 사용 가능한 데이터 조회 중...")
-                    partitions_df = self.data_manager.get_catalog_partitions()
-                    
-                    if partitions_df.empty:
-                        print("❌ 사용 가능한 데이터가 없습니다.")
-                        return False
-                        
+                    partitions_df = self.data_manager.get_partitions()                   
+                                            
                     print(f"📊 {len(partitions_df)}개 파티션 사용 가능")
                     
                     # 검색 수행 (텍스트 검색 제외, 파티션 기반만)
                     search_results = self._partition_search_interactive(partitions_df)
                     
                     if search_results is None or search_results.empty:
-                        print("❌ 검색 결과가 없습니다.")
-                        return False  # 🔥 여기서 바로 종료
+                        raise ValueError("검색 결과가 없습니다. 조건을 다시 확인해주세요.")
                         
                     print(f"\n📊 검사 대상: {len(search_results):,}개 항목")
                     
@@ -915,14 +694,12 @@ class DataManagerCLI:
                     search_results = self.data_manager.search()  # 전체 검색
                     
                     if search_results is None or search_results.empty:
-                        print("❌ 검사할 데이터가 없습니다.")
-                        return False
+                        raise ValueError("전체 데이터가 비어있습니다. DB를 먼저 구축해주세요.")
                         
                     print(f"\n📊 전체 데이터: {len(search_results):,}개 항목")
                     
             except Exception as e:
-                print(f"❌ 검색 실패: {e}")
-                return False  # 🔥 예외 발생 시에도 바로 종
+                raise e
             
             sample_check = self._ask_yes_no(
                 question="샘플 데이터만 검사하시겠습니까?",
@@ -943,44 +720,35 @@ class DataManagerCLI:
         
             # 검사 실행
             print("\n🔄 무결성 검사 시작...")
-            result = self.data_manager.validate_data_integrity(
+            result = self.data_manager.validate_db_integrity(
                 search_results=search_results, 
                 sample_percent=sample_percent
             )
             
-            # 결과 출력
             print("\n" + "="*50)
             print("📋 검사 결과 요약")
             print("="*50)
-            
-            if 'errors' in result and result['errors']:
-                print("❌ 검사 중 오류 발생:")
-                for error in result['errors']:
-                    print(f"  • {error}")
-                return False
-            
+
             total_items = result.get('total_items', 0)
             checked_items = result.get('checked_items', 0)
             missing_count = result.get('missing_count', 0)
             integrity_rate = result.get('integrity_rate', 0)
-            
-            if total_items == 0:
-                print("❌ 검사할 데이터가 없습니다.")
-                return False
+            errors = result.get('errors', [])
             
             print(f"📊 검사 통계:")
             print(f"  • 총 항목: {total_items:,}개")
             print(f"  • 검사 항목: {checked_items:,}개")
             print(f"  • 누락 파일: {missing_count:,}개")
             print(f"  • 무결성 비율: {integrity_rate:.1f}%")
+            # error
+            print(f"  • 오류 발생: {len(errors)}개")
+            
             
             if missing_count == 0:
                 print("\n✅ 모든 검사 통과! 데이터가 정상입니다.")
-                return True
             else:
                 print(f"\n⚠️ {missing_count}개 파일이 누락되었습니다.")
                 
-                # 샘플 표시
                 missing_files = result.get('missing_files', [])
                 if missing_files:
                     print(f"\n📁 누락된 파일 (상위 3개):")
@@ -992,11 +760,11 @@ class DataManagerCLI:
                     report_path = self._generate_validation_report(result)
                     print(f"📄 상세 보고서: {report_path}")
                 
-                return missing_count == 0
+                print("\n" + "="*50)
+                print("💡 'python main.py db validate --report' 명령으로 상세 보고서를 생성할 수 있습니다.")
                 
         except Exception as e:
-            print(f"❌ 검사 중 오류: {e}")
-            return False
+            raise e
 
     def _generate_validation_report(self, result):
         """검사 보고서 생성"""
@@ -1026,18 +794,19 @@ class DataManagerCLI:
     def _ask_yes_no(self, question, default=False):
         """y/N 질문 함수"""
         full_question = f"{question} (y/N): " if not default else f"{question} (Y/n): "
+        
         while True:
             answer = input(full_question).strip().lower()
             
-            if not answer:  # Enter만 누른 경우
-                return default.lower() in ['y', 'yes']
+            if not answer:
+                return default
             
             if answer in ['y', 'yes']:
                 return True
             elif answer in ['n', 'no']:
                 return False
             else:
-                print("❌ y/yes 또는 n/no를 입력해주세요.")     
+                print("❌ y/yes 또는 n/no를 입력해주세요.") 
         
     def _search_interactive(self, partitions_df):
         """대화형 검색 수행"""
@@ -1250,12 +1019,12 @@ class DataManagerCLI:
         # 검색 실행
         return self.data_manager.search(text_search=text_search_config)
 
-    def _download_selected_data(self, search_results):
+    def _export_selected_data(self, search_results):
         """대화형 다운로드 수행"""
         print("\n💾 다운로드 옵션:")
-        print("  1. Parquet 파일 (pandas 호환)")
-        print("  2. Dataset 폴더 (HuggingFace 호환)")
-        print("  3. Dataset + 이미지 로딩 (즉시 사용 가능)")
+        print("  1. Parquet (path)")
+        print("  2. Dataset (path)")
+        print("  3. Dataset (PIL)")
         
         while True:
             choice = input("다운로드 옵션 (1-3) [1]: ").strip() or "1"
@@ -1264,25 +1033,38 @@ class DataManagerCLI:
                 break
             else:
                 print("❌ 잘못된 선택입니다. 1, 2, 또는 3을 입력해주세요.")
-        
-        default_path = f"./downloads/export_{len(search_results)}_items"
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        default_path = f"./exports/export_{timestamp}_{len(search_results)}items"
         save_path = input(f"저장 경로 [{default_path}]: ").strip() or default_path
         
         try:
             if choice == "1":
-                output_path = self.data_manager.download_as_parquet(search_results, save_path, absolute_paths=True)
+                output_path = self.data_manager.export(
+                    search_results=search_results, 
+                    output_path=save_path, 
+                    format='parquet',
+                    absolute_paths=True
+                )
                 print(f"✅ Parquet 저장 완료: {output_path}")
                 
             elif choice == "2":
-                output_path = self.data_manager.download_as_dataset(
-                    search_results, save_path, include_images=False, absolute_paths=True,
+                output_path = self.data_manager.export(
+                    search_results=search_results, 
+                    output_path=save_path, 
+                    format="dataset",
+                    include_images=False, 
+                    absolute_paths=True,
                 )
                 print(f"✅ Dataset 저장 완료: {output_path}")
                 self._show_usage_example(output_path)
                 
             elif choice == "3":
-                output_path = self.data_manager.download_as_dataset(
-                    search_results, save_path, include_images=True, absolute_paths=True,
+                output_path = self.data_manager.export(
+                    search_results=search_results, 
+                    output_path=save_path, 
+                    format="dataset",
+                    include_images=True, 
+                    absolute_paths=True,
                 )
                 print(f"✅ Dataset + 이미지 저장 완료: {output_path}")
                 self._show_usage_example(output_path, with_images=True)
@@ -1306,240 +1088,409 @@ class DataManagerCLI:
             print(f"# pandas로 변환")
             print(f"df = dataset.to_pandas()")
         print(f"```")
+
+    def _select_provider(self):
+        providers = self.schema_manager.get_all_providers()
+        if not providers:
+            print("❌ 등록된 Provider가 없습니다. 먼저 Provider를 생성해주세요.")
+            
+        print(f"\n🏢 사용 가능한 Provider:")
+        for i, provider in enumerate(providers, 1):
+            print(f"  {i}. {provider}")
         
+        while True:        
+            provider_choice = input("Provider 번호 또는 이름 입력: ").strip()
+            if provider_choice.isdigit():
+                idx = int(provider_choice) - 1
+                if 0 <= idx < len(providers):
+                    return providers[idx]
+                else:
+                    print("❌ 잘못된 번호입니다.")
+            else:
+                if provider_choice in providers:
+                    return provider_choice
+                else:
+                    print(f"❌ Provider '{provider_choice}'가 존재하지 않습니다.")
+    
+    def _select_task(self):
+        tasks = self.schema_manager.get_all_tasks()
+        if not tasks:
+            print("❌ 등록된 Task가 없습니다. 먼저 Task를 생성해주세요.")
+
+        print(f"\n🛠️ 사용 가능한 Task:")
+        for i, task in enumerate(tasks, 1):
+            print(f"  {i}. {task}")
+        
+        while True:        
+            task_choice = input("Task 번호 또는 이름 입력: ").strip()
+            if task_choice.isdigit():
+                idx = int(task_choice) - 1
+                if 0 <= idx < len(tasks):
+                    return tasks[idx]
+                else:
+                    print("❌ 잘못된 번호입니다.")
+            else:
+                if task_choice in tasks:
+                    return task_choice
+                else:
+                    print(f"❌ Task '{task_choice}'가 존재하지 않습니다.")
+                    
+    def _upload_raw_data(self, data_file):
+        
+        provider = self._select_provider()
+        
+        while True:
+            dataset = input("\n📦 새 Dataset 이름: ").strip()
+            if dataset:
+                break
+            print("❌ Dataset 이름이 필요합니다. 다시 입력해주세요.")
+        
+        description = input("📄 데이터셋 설명 (선택사항): ").strip()
+        source = input("🔗 원본 소스 URL (선택사항): ").strip()
+        self._show_upload_summary(
+            data_file=data_file,
+            data_type="raw",
+            provider=provider,
+            dataset=dataset,
+            description=description,
+            source=source
+        )
+        
+        choice = self._ask_yes_no(
+            question="업로드를 시작하시겠습니까?",
+            default=True,
+        )
+        if not choice:
+            print("❌ 업로드가 취소되었습니다.")
+            return False
+        try:
+            staging_dir, job_id = self.data_manager.upload_raw(
+                data_file=data_file,
+                provider=provider,
+                dataset=dataset,
+                dataset_description=description,
+                original_source=source
+            )
+            print(f"✅ 업로드 완료: {staging_dir}")
+            print("💡 'python main.py process start' 명령으로 처리를 시작할 수 있습니다.")
+            return True
+        except Exception as e:
+            print(f"❌ 업로드 실패: {e}")
+            return False
+        
+    def _upload_task_data(self, data_file):
+        partitions = self.data_manager.get_partitions()
+        raw_partitions = partitions[partitions['task'] == 'raw']
+        if raw_partitions.empty:
+            print("❌ 업로드된 데이터가 없습니다.") 
+            print("💡 먼저 raw 데이터를 업로드해주세요.")
+            return False
+        existing_providers = raw_partitions['provider'].unique().tolist()
+        print(f"\n📂 업로드된 Provider ({len(existing_providers)}개):")
+        for i, provider in enumerate(existing_providers, 1):
+            print(f"  {i}. {provider}")
+        while True:
+            provider_choice = input("\n🏢 Provider 선택: ").strip()
+            if provider_choice.isdigit():
+                idx = int(provider_choice) - 1
+                if 0 <= idx < len(existing_providers):
+                    provider = existing_providers[idx]
+                    break
+                else:
+                    print("❌ 잘못된 번호입니다.")
+            else:
+                if provider_choice in existing_providers:
+                    provider = provider_choice
+                    break
+                else:
+                    print(f"❌ Provider '{provider_choice}'가 존재하지 않습니다.")
+                    
+        existing_datasets = raw_partitions[raw_partitions['provider'] == provider]['dataset'].unique().tolist()
+        if not existing_datasets:
+            print("❌ 업로드된 데이터가 없습니다.")
+            print("💡 먼저 raw 데이터를 업로드해주세요.")
+            return False
+        
+        print(f"\n📂 업로드된 Dataset ({len(existing_datasets)}개):")
+        for i, dataset_name in enumerate(existing_datasets, 1):
+            print(f"  {i}. {dataset_name}")
+    
+        while True:
+            dataset_choice = input("Dataset 번호 또는 이름 입력: ").strip()                    
+            if dataset_choice.isdigit():
+                idx = int(dataset_choice) - 1
+                if 0 <= idx < len(existing_datasets):
+                    dataset = existing_datasets[idx]
+                    break
+                else:
+                    print("❌ 잘못된 번호입니다.")
+            else:
+                if dataset_choice in existing_datasets:
+                    dataset = dataset_choice
+                    break
+                else:
+                    print(f"❌ Dataset '{dataset_choice}'가 존재하지 않습니다.")
+            
+            print("💡 다시 선택해주세요.")
+        
+        task = self._select_task()
+        
+        while True:
+            variant = input("\n🏷️ Variant 이름: ").strip()
+            if variant:
+                break
+            print("❌ Variant 이름은 필수입니다. 다시 입력해주세요.")
+            
+        task_info = self.schema_manager.get_task_info(task)
+        required_fields = task_info.get('required_fields', [])
+        allowed_values = task_info.get('allowed_values', {})
+        
+        meta = {}
+        if required_fields:
+            print(f"\n📝 필수 필드 입력:")
+            for field in required_fields:
+                if field in allowed_values:
+                    print(f"  {field} 허용값: {allowed_values[field]}")
+                value = input(f"  {field}: ").strip()
+                if not value:
+                    print(f"❌ 필수 필드 '{field}'가 누락되었습니다.")
+                    return False
+                meta[field] = value
+        
+        is_valid, error_msg = self.data_manager.schema_manager.validate_task_metadata(task, meta)
+        if not is_valid:
+            print(f"❌ 검증 실패: {error_msg}")
+            return False
+
+        self._show_upload_summary(
+            data_file=data_file,
+            data_type="task",
+            provider=provider,
+            dataset=dataset,
+            task=task,
+            variant=variant,
+            meta=meta
+        )
+        choice = self._ask_yes_no(
+            question="업로드를 진행하시겠습니까?",
+            default=True,
+        )
+        if not choice:
+            print("❌ 업로드가 취소되었습니다.")
+            return False
+        
+        try:
+            staging_dir, job_id = self.data_manager.upload_task(
+                data_file=data_file,
+                provider=provider,
+                dataset=dataset,
+                task=task,
+                variant=variant,
+                meta=meta
+            )
+            print(f"✅ 업로드 완료: {staging_dir}")
+            print("💡 'python main.py process start' 명령으로 처리를 시작할 수 있습니다.")
+            return True
+        except Exception as e:
+            print(f"❌ 업로드 실패: {e}")
+            return False
+
+    def _show_upload_summary(
+        self, 
+        data_file, 
+        data_type, 
+        provider, 
+        dataset, 
+        task=None, 
+        variant=None,
+        meta=None,
+        description=None, 
+        source=None
+    ):
+        """업로드 정보 요약 출력"""
+        print(f"\n업로드 정보:")
+        print(f"file_path: {data_file}")
+        print(f"type: {data_type}")
+        print(f"Provider: {provider}")
+        print(f"Dataset: {dataset}")
+        if task:
+            print(f"Task: {task}")
+        if variant:
+            print(f"Variant: {variant}")
+        if description:
+            print(f"description: {description}")
+        if source:
+            print(f"source: {source}")
+        if meta:
+            print(f"meta: {meta}")
+            
+    def _select_data_type(self):
+        """데이터 타입 선택 (raw/task)"""
+        while True:
+            data_type = input("\n📝 데이터 타입 (raw/task) [raw]: ").strip().lower() or "raw"
+            if data_type in ["raw", "task"]:
+                return data_type
+            print("❌ 잘못된 데이터 타입입니다. (raw 또는 task)")
+            
+    def _get_file_path(self):
+        """데이터 파일 경로 입력 및 검증"""
+        data_file = input("📁 데이터 파일 경로: ").strip()
+        if not data_file:
+            print("❌ 데이터 파일 경로가 필요합니다.")
+            return None
+        
+        try:
+            file_type = self.data_manager._get_file_type(data_file)
+            print(f"✅ 파일 유형: {file_type}")
+            return data_file
+        except (FileNotFoundError, ValueError, TypeError) as e:
+            print(f"❌ {e}")
+            return None        
+
 def main():
     from utils.config import Config
 
     config = Config.load()
     parser = argparse.ArgumentParser(
-        description="📊 Data Manager CLI - 데이터 업로드/처리/다운로드 관리",
+        description="Data Manager CLI",
         formatter_class=argparse.RawDescriptionHelpFormatter,
-        epilog="""
-📋 사용 가능한 명령어:
-
-🔧 설정 관리:
-python main.py config                         # 설정 도움말
-python main.py config list                    # 전체 설정 확인
-python main.py config provider               # Provider 관리 도움말
-python main.py config task                   # Task 관리 도움말
-
-📥 데이터 관리:
-python main.py upload                         # 데이터 업로드
-python main.py download                       # 데이터 다운로드
-
-다운로드 포맷:
-    1. Parquet (메타데이터만)
-    2. Arrow Dataset (메타데이터만) 
-    3. Dataset + 이미지 (HuggingFace datasets 형태)
-    
-🔄 처리 관리:
-python main.py process                        # 처리 시작 
-python main.py process start                  # 새 처리 시작
-python main.py process status JOB_ID          # 작업 상태 확인
-python main.py process list                   # 내 데이터 현황
-
-📊 Catalog DB 관리:
-python main.py catalog info                   # Catalog DB 정보 확인
-python main.py catalog update                 # Catalog DB 업데이트 
-python main.py catalog check                  # Catalog 빠른 상태 확인
-python main.py catalog processes              # DB 사용 프로세스 확인
-
-🔍 데이터 무결성 검사:
-python main.py validate                       # 데이터 무결성 검사
-python main.py validate --report              # 검사 보고서 생성
-
-💡 팁: Dataset 형태로 저장하면 datasets 라이브러리로 쉽게 로드할 수 있습니다.
-    from datasets import load_from_disk
-    dataset = load_from_disk('./downloads/my_dataset')
-        """
+        epilog='''
+Examples:
+  %(prog)s upload                          # 대화형 업로드
+  %(prog)s process start                   # 데이터 처리 시작
+  %(prog)s db update                       # DB 업데이트
+  %(prog)s config provider list            # Provider 목록 보기
+  
+For more help on subcommands:
+  %(prog)s <command> --help
+        '''.strip()
     )
     parser.add_argument("--base-path", default=config.base_path,
-                       help="데이터 저장 기본 경로")
-    parser.add_argument("--nas-url", default=config.nas_url,
-                       help="NAS API 서버 URL")
+                       help="데이터 저장 기본 경로 (default: %(default)s)")
+    parser.add_argument("--server-url", default=config.server_url,
+                       help="Processing 서버 URL (default: %(default)s)")
     parser.add_argument("--log-level", default=config.log_level.upper(),
-                       help="로깅 레벨 (DEBUG, INFO, WARNING, ERROR, CRITICAL)")
+                       help="로깅 레벨 (default: %(default)s)")
     parser.add_argument("--num-proc", type=int, default=config.num_proc,
-                       help="병렬 처리 프로세스 수")
+                       help="병렬 처리 프로세스 수 (default: %(default)s)")
     
-    subparsers = parser.add_subparsers(dest='command', help='명령어')
+    subparsers = parser.add_subparsers(dest='command', title='commands', description='사용 가능한 명령어', help='명령어 설명', metavar='<command>')
+        
+    # Config 관리
+    config_parser = subparsers.add_parser('config', help='Schema 설정', description='Schema 설정')
+    config_subparsers = config_parser.add_subparsers(dest='config_type', title='Config Types', metavar='<type>')
     
-    
-    # Config 관리 (Provider + Task)
-    config_parser = subparsers.add_parser('config', help='설정 관리 (Provider, Task)')
-    config_subparsers = config_parser.add_subparsers(dest='config_type')
-    
-    # Provider 관리
-    provider_parser = config_subparsers.add_parser('provider', help='Provider 관리')
-    provider_subparsers = provider_parser.add_subparsers(dest='provider_action')
-    provider_subparsers.add_parser('create', help='새 Provider 생성')
-    provider_subparsers.add_parser('remove', help='Provider 제거')
-    provider_subparsers.add_parser('list', help='Provider 목록')
-    
-    # Task 관리
-    task_parser = config_subparsers.add_parser('task', help='Task 관리')
-    task_subparsers = task_parser.add_subparsers(dest='task_action')
-    task_subparsers.add_parser('create', help='새 Task 생성')
-    task_subparsers.add_parser('remove', help='Task 제거')
-    task_subparsers.add_parser('list', help='Task 목록')
-    
-    # Config 전체 목록
+    # Config 목록
     config_subparsers.add_parser('list', help='전체 설정 목록')
     
-    # 데이터 업로드
-    subparsers.add_parser('upload', help='데이터 업로드')
-    # 데이터 다운로드
-    subparsers.add_parser('download', help='데이터 다운로드')
+    # Provider 관리
+    provider_parser = config_subparsers.add_parser('provider', help='Provider 관리', description='데이터 제공자(Provider) 설정을 관리합니다')
+    provider_subparsers = provider_parser.add_subparsers(dest='provider_action', title='Provider Actions', metavar='<action>')
+    provider_create_parser = provider_subparsers.add_parser('create', help='새 Provider 생성',)
+    provider_create_parser.add_argument('name', nargs='?', help='새 Provider 이름 (예: "aihub", "huggingface", "opensource")')
+    provider_remove_parser = provider_subparsers.add_parser('remove', help='Provider 제거')
+    provider_remove_parser.add_argument('name', nargs='?', help='제거할 Provider 이름 (예: "aihub", "huggingface", "opensource")')
+    provider_subparsers.add_parser('list', help='Provider 목록 확인')
+
+    # Task 관리
+    task_parser = config_subparsers.add_parser('task', help='Task 관리', description='데이터 처리 작업(Task) 설정을 관리합니다')
+    task_subparsers = task_parser.add_subparsers(dest='task_action', title='Task Actions', metavar='<action>')
+    task_create_parser = task_subparsers.add_parser('create', help='새 Task 생성')
+    task_create_parser.add_argument('name', nargs='?', help='새 Task 이름 (예: "ocr", "document_conversion", "layout")')
+    task_remove_parser = task_subparsers.add_parser('remove', help='Task 제거')
+    task_remove_parser.add_argument('name', nargs='?', help='제거할 Task 이름 (예: "ocr", "document_conversion", "layout")')
+    task_subparsers.add_parser('list', help='Task 목록 확인')
+    
+    # 데이터 업로드 및 내보내기
+    subparsers.add_parser('upload', help='데이터 업로드', description='데이터를 업로드합니다.')
+    subparsers.add_parser('export', help='데이터 내보내기', description='업로드된 데이터를 내보냅니다.')
     
     
     # 처리 관리
-    process_parser = subparsers.add_parser('process', help='데이터 처리 관리')
-    process_subparsers = process_parser.add_subparsers(dest='process_action')
+    process_parser = subparsers.add_parser('process', help='Staging 데이터 처리 관리', description='Staging 데이터 처리 작업을 관리합니다.')
+    process_subparsers = process_parser.add_subparsers(dest='process_action', title='Process Actions', metavar='<action>')
     process_subparsers.add_parser('start', help='새 처리 시작')
     process_subparsers.add_parser('list', help='내 데이터 전체 현황 확인')
-    job_status_parser = process_subparsers.add_parser('status', help='특정 작업 상태 확인')
-    job_status_parser.add_argument('job_id', help='작업 ID')
-    
-    # Catalog DB 관리
-    catalog_parser = subparsers.add_parser('catalog', help='Catalog DB 관리')
-    catalog_subparsers = catalog_parser.add_subparsers(dest='catalog_action')
-    catalog_subparsers.add_parser('info', help='Catalog DB 정보 확인')
-    catalog_subparsers.add_parser('check', help='Catalog 빠른 상태 확인')
-    catalog_subparsers.add_parser('update', help='Catalog DB 안전 업데이트')
-    catalog_subparsers.add_parser('processes', help='DB 사용 프로세스 확인')
-    
-    # 데이터 무결성 검사
-    validate_parser = subparsers.add_parser('validate', help='Catalog DB 상태 검사 및 문제 해결')
+    job_status_parser = process_subparsers.add_parser('status', help='작업 상태 확인')
+    job_status_parser.add_argument('job_id', nargs='?', help='확인할 작업 ID (예: abc123)')
+    # DB 관리
+    db_parser = subparsers.add_parser('db', help='DB 관리', description='DB 상태를 관리합니다.')
+    db_subparsers = db_parser.add_subparsers(dest='db_action', title='DB Actions', metavar='<action>')
+    db_subparsers.add_parser('info', help='DB 정보 확인')
+    db_subparsers.add_parser('update', help='DB 업데이트')
+    db_subparsers.add_parser('processes', help='DB 사용 프로세스 확인')
+    validate_parser = db_subparsers.add_parser('validate', help='DB 상태 검사 및 문제 해결')
     validate_parser.add_argument('--report', action='store_true', help='검사 보고서 생성')
-    # 상태 확인
     
     args = parser.parse_args()
     if not args.command:
-        print("\n🚀 Data Manager CLI에 오신 것을 환영합니다!")
-        print("="*60)
-        print("\n사용 가능한 주요 명령어:")
-        print("  🔧 python main.py config     - 설정 관리 (Provider, Task)")
-        print("  📥 python main.py upload     - 데이터 업로드")
-        print("  📤 python main.py download   - 데이터 다운로드")
-        print("  🔄 python main.py process    - 데이터 처리")
-        print("  📊 python main.py catalog    - Catalog DB 관리")
-        print("  🔍 python main.py validate   - 데이터 무결성 검사")
-        
-        print("\n🌟 처음 사용하시나요? 다음 순서로 시작해보세요:")
-        print(" 1️⃣  python main.py config provider create  # 데이터 제공자 생성")
-        print(" 2️⃣  python main.py config task create      # 작업 유형 정의")
-        print(" 3️⃣  python main.py upload                  # 데이터 업로드")
-        print(" 4️⃣  python main.py process                 # 데이터 처리 시작")
-        
-        print("\n 💡 데이터 다운로드는 'python main.py download' 명령으로 가능합니다.")
-        print(" 1️⃣  python main.py catalog update         # Catalog DB 구축")
-        print(" 2️⃣  python main.py download                # 데이터 다운로드")
-        print("      → 옵션 1: Parquet (메타데이터만)")
-        print("      → 옵션 2: Arrow Dataset (메타데이터만)")  
-        print("      → 옵션 3: Dataset + 이미지 (HuggingFace 형태)")
-
-        print("\n🔍 데이터 관리 및 문제 해결:")
-        print("  📊 python main.py catalog check            # 빠른 상태 확인")
-        print("  🔍 python main.py validate                 # 데이터 무결성 검사")
-        
-
-        print("\n💡 각 명령어 뒤에 -h 또는 --help를 붙이면 상세 도움말을 볼 수 있습니다.")
-        print("   예: python main.py config -h")
-        print("\n🔥 Dataset 형태로 저장하면 ML 작업에 바로 사용할 수 있어요!")
-        print("   from datasets import load_from_disk")
-        print("   dataset = load_from_disk('./downloads/my_dataset')")
-        print("\n" + "="*60)
+        parser.print_help()
         return
-
     
     # CLI 인스턴스 생성
     try:
         cli = DataManagerCLI(
             base_path=args.base_path,
-            nas_api_url=args.nas_url,
+            server_url=args.server_url,
             log_level=args.log_level,
             num_proc=args.num_proc
         )
     except Exception as e:
         print(f"❌ CLI 초기화 실패: {e}")
-        return 1
+        return 
     
     try:
         if args.command == 'config':
             if not args.config_type:
-                print("\n❓ config 하위 명령어를 선택해주세요:")
-                print("  📋 python main.py config list      - 전체 설정 확인")
-                print("  🏢 python main.py config provider  - Provider 관리")
-                print("  📝 python main.py config task      - Task 관리")
+                config_parser.print_help()
                 return
                 
             if args.config_type == 'provider':
                 if not args.provider_action:
-                    print("\n❓ provider 하위 명령어를 선택해주세요:")
-                    print("  📋 python main.py config provider list    - Provider 목록")
-                    print("  ➕ python main.py config provider create  - Provider 생성")
-                    print("  🗑️  python main.py config provider remove  - Provider 제거")
+                    provider_parser.print_help()
                     return
                     
                 if args.provider_action == 'create':
-                    cli.create_provider_interactive()
+                    if not args.name:
+                        provider_create_parser.print_help()
+                        return
+                    cli.create_provider(args.name)    
                 elif args.provider_action == 'remove':
-                    cli.remove_provider_interactive()
+                    if not args.name:
+                        provider_remove_parser.print_help()
+                        return
+                    cli.remove_provider(args.name)
                 elif args.provider_action == 'list':
-                    providers = cli.schema_manager.get_all_providers()
-                    print(f"\n🏢 등록된 Provider ({len(providers)}개):")
-                    if providers:
-                        for provider in providers:
-                            print(f"  • {provider}")
-                    else:
-                        print("  📭 등록된 Provider가 없습니다.")
-                        print("  💡 'python main.py config provider create' 명령으로 Provider를 생성해주세요.")
+                    cli.list_providers()
             
             elif args.config_type == 'task':
                 if not args.task_action:
-                    print("\n❓ task 하위 명령어를 선택해주세요:")
-                    print("  📋 python main.py config task list    - Task 목록")
-                    print("  ➕ python main.py config task create  - Task 생성")
-                    print("  🗑️  python main.py config task remove  - Task 제거")
+                    task_parser.print_help()
                     return
                     
                 if args.task_action == 'create':
-                    cli.create_task_interactive()
+                    if not args.name:
+                        task_create_parser.print_help()
+                        return
+                    cli.create_task(args.name)
                 elif args.task_action == 'remove':
-                    cli.remove_task_interactive()
+                    if not args.name:
+                        task_remove_parser.print_help()
+                        return
+                    cli.remove_task(args.name)
                 elif args.task_action == 'list':
-                    tasks = cli.schema_manager.get_all_tasks()
-                    print(f"\n📝 등록된 Task ({len(tasks)}개):")
-                    if tasks:
-                        for task_name, task_config in tasks.items():
-                            print(f"  • {task_name}")
-                            required_fields = task_config.get('required_fields', [])
-                            if required_fields:
-                                print(f"    📝 필수 필드: {', '.join(required_fields)}")
-                            allowed_values = task_config.get('allowed_values', {})
-                            if allowed_values:
-                                print(f"    🔧 허용 값:")
-                                for field, values in allowed_values.items():
-                                    print(f"      - {field}: {', '.join(values)}")
-                    else:
-                        print("  📭 등록된 Task가 없습니다.")
-                        print("  💡 'python main.py config task create' 명령으로 Task를 생성해주세요.")
-            
+                    cli.list_tasks()
             elif args.config_type == 'list':
                 cli.schema_manager.show_schema_info()
         
         elif args.command == 'upload':
-            cli.upload_data_interactive()
-        elif args.command == 'download':
-            cli.download_data_interactive()
+            cli.upload_interactive()
+        elif args.command == 'export':
+            cli.export_interactive()
         elif args.command == 'process':
             if not args.process_action:
-                print("\n❓ process 하위 명령어를 선택해주세요:")
-                print("  🚀 python main.py process start           - 새 처리 시작")
-                print("  🔍 python main.py process status JOB_ID   - 작업 상태 확인")
-                print("  📋 python main.py process list            - 내 데이터 현황")
+                process_parser.print_help()
                 return
-                
             if args.process_action == 'start':
                 cli.trigger_processing()
             elif args.process_action == 'status':
@@ -1547,39 +1498,20 @@ python main.py validate --report              # 검사 보고서 생성
             elif args.process_action == 'list':
                 cli.list_all_data()
         
-        elif args.command == 'catalog':
-            if not args.catalog_action:
-                print("\n❓ catalog 하위 명령어를 선택해주세요:")
-                print("  📊 python main.py catalog info     - Catalog DB 상세 정보")
-                print("  🔍 python main.py catalog check    - Catalog 빠른 상태 확인")
-                print("  🔄 python main.py catalog update   - Catalog DB 안전 업데이트")
-                print("  🔍 python main.py catalog processes - DB 사용 프로세스 확인")
+        elif args.command == 'db':
+            if not args.db_action:
+                db_parser.print_help()
                 return
-                
-            if args.catalog_action == 'info':
-                cli.show_catalog_db_info()
-            elif args.catalog_action == 'check':  # 새로 추가
-                cli.quick_catalog_check()
-            elif args.catalog_action == 'update':  # 새로 추가
-                cli.build_catalog_db_interactive()
-            elif args.catalog_action == 'processes':  # 새로 추가
+            elif args.db_action == 'info':
+                cli.show_db_info()
+            elif args.db_action == 'update':  # 새로 추가
+                cli.build_db_interactive()
+            elif args.db_action == 'processes':  # 새로 추가
                 cli.check_db_processes() 
-        elif args.command == 'validate':
-            # 매개변수 확인 및 정리
-            report = getattr(args, 'report', False)
-            if report:
-                print("📄 보고서 생성 모드 활성화")
-            
-            # 검사 실행
-            success = cli.validate_data_integrity_interactive(report=report)
-            
-            if not success:
-                return 1
-            else:
-                print("\n✅ 데이터 무결성 검사 완료!")
-                if report:
-                    print("📄 상세 보고서가 생성되었습니다.")
-                return 0
+            elif args.db_action == 'validate':
+                cli.validate_db_integrity_interactive(
+                    report=args.report
+                )
 
     except KeyboardInterrupt:
         print("\n👋 작업이 중단되었습니다.")
@@ -1590,18 +1522,6 @@ python main.py validate --report              # 검사 보고서 생성
     except ValueError as e:
         print(f"❌ 입력 값 오류: {e}")
         print("💡 입력 값을 다시 확인해주세요.")
-    except ConnectionError as e:
-        print(f"❌ 연결 오류: {e}")
-        print("💡 NAS 서버 연결을 확인해주세요.")
-    except CatalogNotFoundError as e:
-        print(f"❌ {e}")
-    except CatalogEmptyError as e:
-        print(f"❌ {e}")
-    except CatalogLockError as e:
-        print(f"❌ {e}")
-        print("💡 잠시 후 다시 시도해주세요.")
-    except CatalogError as e:
-        print(f"❌ {e}")
     except Exception as e:
         print(f"❌ 예상치 못한 오류: {e}")
 

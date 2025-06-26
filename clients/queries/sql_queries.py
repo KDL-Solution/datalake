@@ -2,8 +2,7 @@
 
 from typing import Dict, Any
 
-class JSONQueries:
-    """JSON 데이터 처리를 위한 쿼리 템플릿 모음"""
+class SQLQueries:
 
     @staticmethod
     def extract_valid_content(
@@ -139,3 +138,8 @@ class JSONQueries:
         CREATE OR REPLACE TABLE {table_name} AS 
         SELECT * FROM read_parquet('{parquet_path}/**/*.parquet', hive_partitioning=true)
         """
+        
+    @staticmethod
+    def get_providers_query(table: str) -> str:
+        """모든 Provider 목록 조회 쿼리"""
+        return f"SELECT DISTINCT provider FROM {table} ORDER BY provider"

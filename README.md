@@ -50,12 +50,12 @@ cd datalake
 pip install -e .
 ```
 
-### 2. 필수 디렉토리 구조 생성
+### 서버 전용
+#### 1. 필수 디렉토리 구조 생성
 ```bash
 mkdir -p /mnt/AI_NAS/datalake/{staging/{pending,processing,failed},catalog,assets,config,logs}
 ```
-
-### 3. NAS 처리 서버 실행 ( 서버 전용 )
+#### 2. Process 처리 서버 실행 
 ```bash
 python server/app.py \
     --host 0.0.0.0 \
@@ -114,11 +114,11 @@ python main.py process list
 
 #### 4. 데이터 다운로드
 ```bash
-# Catalog DB 구축 (최초 1회)
-python main.py catalog rebuild
+# DB 구축 (최초 1회)
+python main.py db update
 
 # 데이터 다운로드
-python main.py download
+python main.py export
 # 검색 방법: 1 (파티션 기반) 또는 2 (텍스트 검색)
 # 다운로드 형태: 1 (Parquet), 2 (Arrow), 3 (Dataset+이미지)
 ```
@@ -131,12 +131,13 @@ from core.datalake import DatalakeClient
 
 # 클라이언트 초기화
 client = DatalakeClient(
+    user_id="user",
     base_path="/mnt/AI_NAS/datalake",
-    nas_api_url="http://localhost:8091"
+    server_url="http://localhost:8091"
 )
 
 # Raw 데이터 업로드
-staging_dir, job_id = client.upload_raw_data(
+staging_dir, job_id = client.upload_raw(
     data_file="dataset.parquet",  # 또는 pandas DataFrame
     provider="huggingface",
     dataset="coco_2017",
@@ -144,7 +145,7 @@ staging_dir, job_id = client.upload_raw_data(
 )
 
 # Task 데이터 업로드
-staging_dir, job_id = client.upload_task_data(
+staging_dir, job_id = client.upload_task(
     data_file=processed_df,
     provider="huggingface", 
     dataset="coco_2017",
@@ -156,20 +157,17 @@ staging_dir, job_id = client.upload_task_data(
 
 #### 2. 데이터 조회
 ```python
-from clients.duckdb_client import DuckDBClient
+from core.datalake import DatalakeClient
 
-# DuckDB 클라이언트
-with DuckDBClient("/mnt/AI_NAS/datalake/catalog.duckdb") as duck:
-    # 파티션 조회
-    partitions = duck.retrieve_partitions("catalog")
-    
-    # 조건부 데이터 조회
-    data = duck.retrieve_with_existing_cols(
-        providers=["huggingface"],
-        datasets=["coco_2017"], 
-        tasks=["ocr"],
-        variants=["base_ocr"]
-    )
+client = DatalakeClient(
+    user_id="user",
+    base_path="/mnt/AI_NAS/datalake",
+    server_url="http://localhost:8091"
+)
+# providers, datasets, tasks, variants 개별 조회 가능
+client.search(
+    providers='huggingface', # or ['huggingface', 'aihub'],
+)
 ```
 
 ## 📊 데이터 구조
@@ -197,8 +195,8 @@ assets/
 │   └── dataset=coco_2017/
 │       ├── ab/
 │       │   ├── cd/
-│       │   │   ├── abcd1234...hash.jpg
-│       │   │   └── abcd5678...hash.jpg
+│       │   │   ├── abcd1234...13.jpg
+│       │   │   └── abcd5678...14.jpg
 │       │   └── ef/
 │       └── gh/
 ```
@@ -209,7 +207,7 @@ assets/
 from datasets import load_from_disk
 
 # Dataset 형태로 다운로드된 데이터 로드
-dataset = load_from_disk("./downloads/my_dataset")
+dataset = load_from_disk("./exports/my_dataset")
 
 # 이미지 확인
 dataset[0]['image'].show()
@@ -222,7 +220,7 @@ df = dataset.to_pandas()
 
 ### 일반적인 문제
 
-**1. NAS API 연결 실패**
+**1. 서버 연결 실패**
 ```bash
 # 서버 상태 확인
 curl http://localhost:8091/health
@@ -231,15 +229,9 @@ curl http://localhost:8091/health
 python server/app.py --port 8091
 ```
 
-**2. 메모리 부족**
-```python
-# 배치 크기 줄이기
-client = DatalakeClient(num_proc=4, batch_size=500)
-```
-
 **3. 권한 문제**
 ```bash
 # 디렉토리 권한 설정
-chmod -R 775 /mnt/AI_NAS/datalake
-chown -R $USER:$GROUP /mnt/AI_NAS/datalake
+chmod -R 775 /mnt/AI_NAS/datalake/{directory_name}
+chown -R $USER:$GROUP /mnt/AI_NAS/datalake/{directory_name}
 ```
