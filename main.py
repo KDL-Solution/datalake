@@ -1033,8 +1033,8 @@ class DataManagerCLI:
                 break
             else:
                 print("❌ 잘못된 선택입니다. 1, 2, 또는 3을 입력해주세요.")
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        default_path = f"./exports/export_{timestamp}_{len(search_results)}items"
+        timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+        default_path = f"./exports/export_{timestamp}_{len(search_results)}_items"
         save_path = input(f"저장 경로 [{default_path}]: ").strip() or default_path
         
         try:

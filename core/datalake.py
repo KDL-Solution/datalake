@@ -8,7 +8,6 @@ import requests
 import time 
 import subprocess
 import psutil
-import swifter
 from pathlib import Path
 from datetime import datetime
 from datasets import Dataset, load_from_disk
@@ -532,7 +531,7 @@ class DatalakeClient:
             df_copy['path'] = df_copy['path'].apply(
                 lambda x: (self.assets_path / x).as_posix() if isinstance(x, str) and x else x
             )
-            df_copy["exists"] = df_copy["path"].swifter.apply(
+            df_copy["exists"] = df_copy["path"].apply(
                 lambda x: Path(x).exists()
             )
             df_copy = df_copy[df_copy["exists"]]
@@ -549,13 +548,17 @@ class DatalakeClient:
         self,
         search_results: pd.DataFrame,
         absolute_paths: bool = True,
+        check_path_exists: bool = True,
         include_images: bool = False,
     ):
         self.logger.info("📥 Dataset 객체 생성 시작...")
         
         df_copy = self.to_pandas(search_results, absolute_paths)
         dataset = Dataset.from_pandas(df_copy)
-        
+        print(dataset.column_names)
+        if check_path_exists and 'path' in dataset.column_names:
+            print("?")
+            dataset = self._check_file_exist(dataset)
         if include_images:
             dataset = self._add_images_to_dataset(dataset)
 
@@ -568,6 +571,7 @@ class DatalakeClient:
         output_path: Union[str, Path],
         format: str = "auto",
         absolute_paths: bool = True,
+        check_path_exists: bool = True,
         include_images: bool = False,  # dataset 전용
     ) -> Path:
         """
@@ -597,7 +601,7 @@ class DatalakeClient:
         if format == "parquet":
             return self._save_as_parquet(search_results, output_path, absolute_paths)
         elif format == "dataset":
-            return self._save_as_dataset(search_results, output_path, absolute_paths, include_images)
+            return self._save_as_dataset(search_results, output_path, include_images, check_path_exists, absolute_paths)
         else:
             raise ValueError(f"지원하지 않는 형식입니다: {format}")
     
@@ -789,6 +793,44 @@ class DatalakeClient:
             self.logger.error(f"❌ 프로세스 확인 실패: {e}")
             return {'error': str(e)}
      
+    def _check_file_exist(self, dataset):
+        """Dataset의 파일 존재 여부를 병렬로 확인"""
+        def check_exists(example):
+            try:
+                if example.get('path'):
+                    file_path = Path(example['path'])
+                    example['exists'] = file_path.exists()
+                else:
+                    example['exists'] = False
+            except Exception as e:
+                self.logger.warning(f"파일 존재 확인 실패: {example.get('path', 'unknown')} - {e}")
+                example['exists'] = False
+            return example
+
+        self.logger.info("📁 파일 존재 여부 확인 중...")
+        dataset_with_exists = dataset.map(
+            check_exists,
+            desc="파일 존재 확인",
+            num_proc=self.num_proc
+        )
+
+        # 존재하는 파일만 필터링
+        valid_dataset = dataset_with_exists.filter(
+            lambda x: x,
+            input_columns=['exists'],
+            desc="존재하는 파일 필터링",
+            num_proc=self.num_proc
+        )
+
+        # exists 컬럼 제거
+        valid_dataset = valid_dataset.remove_columns(['exists'])
+
+        total_items = len(dataset)
+        valid_items = len(valid_dataset)
+        self.logger.info(f"📊 파일 존재 확인 결과: {valid_items:,}/{total_items:,} 존재")
+
+        return valid_dataset
+    
     def _save_as_parquet(
         self, 
         search_results: pd.DataFrame, 
@@ -813,10 +855,11 @@ class DatalakeClient:
         search_results: pd.DataFrame,
         output_path: Union[str, Path], 
         include_images: bool = False,
+        check_path_exists: bool = True,
         absolute_paths: bool = True,
     ) -> Path:
     
-        dataset = self.to_dataset(search_results, include_images, absolute_paths)
+        dataset = self.to_dataset(search_results, absolute_paths, check_path_exists, include_images)
         
         output_path = Path(output_path)
         output_path.mkdir(parents=True, exist_ok=True)
@@ -952,12 +995,10 @@ class DatalakeClient:
             try:
                 if example.get('path'):
                     image_path = Path(example['path'])
-                
-                    if image_path.exists():
-                        pil_image = Image.open(image_path)
-                        example['image'] = pil_image
-                        example['has_valid_image'] = True
-                        return example
+                    pil_image = Image.open(image_path)
+                    example['image'] = pil_image
+                    example['has_valid_image'] = True
+                    return example
             except Exception as e:
                 self.logger.warning(f"이미지 로드 실패: {example.get('path', 'unknown')} - {e}")
 
@@ -965,15 +1006,16 @@ class DatalakeClient:
             example['has_valid_image'] = False
             return example
 
-        # 이미지 로드
         self.logger.info("🖼️ 이미지 로딩 중...")
         dataset_with_images = dataset.map(
             load_image,
             desc="이미지 로딩",
             num_proc=self.num_proc
         )
-
-        # 유효한 이미지만 필터링
+        if len(dataset_with_images) == 0:
+            self.logger.warning("⚠️ 이미지가 포함된 데이터가 없습니다.")
+            return dataset_with_images
+        
         valid_dataset = dataset_with_images.filter(
             lambda x: x,
             desc="유효 이미지 필터링",
@@ -986,7 +1028,6 @@ class DatalakeClient:
 
         total_items = len(dataset)
         valid_items = len(valid_dataset)
-
         self.logger.info(f"📊 이미지 로딩 결과: {valid_items:,}/{total_items:,} 성공")
 
         return valid_dataset
