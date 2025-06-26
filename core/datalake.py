@@ -531,14 +531,6 @@ class DatalakeClient:
             df_copy['path'] = df_copy['path'].apply(
                 lambda x: (self.assets_path / x).as_posix() if isinstance(x, str) and x else x
             )
-            df_copy["exists"] = df_copy["path"].apply(
-                lambda x: Path(x).exists()
-            )
-            df_copy = df_copy[df_copy["exists"]]
-            df_copy = df_copy.drop(
-                "exists",
-                axis=1,
-            )
             self.logger.debug("📁 경로를 절대경로로 변환")
             
         self.logger.info(f"✅ DataFrame 변환 완료: {len(df_copy):,}개 항목")

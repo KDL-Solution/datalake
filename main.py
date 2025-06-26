@@ -1022,7 +1022,7 @@ class DataManagerCLI:
     def _export_selected_data(self, search_results):
         """대화형 다운로드 수행"""
         print("\n💾 다운로드 옵션:")
-        print("  1. Parquet (path)")
+        print("  1. Parquet (text only)")
         print("  2. Dataset (path)")
         print("  3. Dataset (PIL)")
         
