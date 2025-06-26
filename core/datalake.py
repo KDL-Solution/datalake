@@ -24,11 +24,16 @@ from clients.duckdb_client import DuckDBClient
 class DatalakeClient:
     def __init__(
         self, 
+        user_id: str = None, # 사용자 ID (필수)
         base_path: str = "/mnt/AI_NAS/datalake/",
         nas_api_url: str = "http://192.168.20.62:8091",
         log_level: str = "INFO",
         num_proc: int = 8, # 병렬 처리 프로세스 수
     ):
+        if not user_id:
+            raise ValueError("user_id는 필수 입니다. 예: DatalakeClient(user_id='user_123')")
+        
+        self.user_id = user_id
         self.base_path = Path(base_path)
         self.nas_api_url = nas_api_url.rstrip('/')
         
@@ -39,7 +44,8 @@ class DatalakeClient:
         self.staging_failed_path = self.staging_path / "failed"
         self.catalog_path = self.base_path / "catalog"
         self.assets_path  = self.base_path / "assets"
-        self.duckdb_path = self.base_path / "db" / "catalog.duckdb"
+
+        self.duckdb_path = self.base_path / "users" / f"{user_id}_catalog.duckdb"
         
         self.num_proc = num_proc
         self.image_data_candidates = ['image', 'image_bytes']
@@ -310,7 +316,7 @@ class DatalakeClient:
             self.logger.error(f"❌ NAS API 연결 실패: {e}")
             return None
         
-    def wait_for_job_completion(self, job_id: str, polling_interval: int = 60, timeout: int = 3600) -> dict:
+    def wait_for_job_completion(self, job_id: str, polling_interval: int = 10, timeout: int = 3600) -> dict:
         """작업 완료까지 대기 (폴링)"""
         self.logger.info(f"⏳ 작업 완료 대기 중: {job_id}")
         
@@ -484,7 +490,7 @@ class DatalakeClient:
             self.logger.error(f"❌ 파티션 조회 실패: {e}")
             raise
 
-    def search_catalog(
+    def search(
         self,
         providers: Optional[List[str]] = None,
         datasets: Optional[List[str]] = None,
@@ -1012,7 +1018,7 @@ class DatalakeClient:
             'has_images': has_images,
             'has_files': has_files,
             'total_rows': total_rows,
-            'uploaded_by': os.getenv('USER', 'unknown'),
+            'uploaded_by': self.user_id,
             'uploaded_at': datetime.now().isoformat(),
             'file_id': str(uuid.uuid4())[:8],
             
@@ -1302,6 +1308,7 @@ class DatalakeClient:
             has_file = metadata.get('has_files', False)
             if has_file:
                 staging_assets_dir = staging_dir / "assets"
+                staging_assets_dir.mkdir(mode=0o775, parents=True, exist_ok=True)
                 dataset_obj  = self._copy_file_path_to_staging(
                     dataset_obj, staging_assets_dir
                 )
@@ -1389,7 +1396,11 @@ class DatalakeClient:
         if missing_paths:
             missing_list = '\n'.join(missing_paths)
             raise FileNotFoundError(f"❌ 필수 디렉토리가 없습니다:\n{missing_list}")
-        setup_logging(log_level=log_level, base_path=str(self.base_path))
+        setup_logging(
+            user_id=self.user_id,
+            log_level=log_level, 
+            base_path=str(self.base_path)
+        )
         self.logger = logging.getLogger(__name__)
         self.logger.debug("✅ 모든 필수 디렉토리 확인 완료")
         
@@ -1451,7 +1462,3 @@ if __name__ == "__main__":
             print(f"작업 완료: {job_status}")
         except Exception as e:
             print(f"작업 대기 중 오류 발생: {e}")
-    
-    
-    
-    

@@ -157,6 +157,18 @@ class DataManagerCLI:
             
             if catalog_info.get('is_outdated'):
                 print("⚠️ DB 업데이트 필요")
+                choice = self._ask_yes_no(
+                    question="DB를 업데이트하시겠습니까?",
+                    default=True,
+                )
+                if choice:
+                    print("🔄 DB 업데이트 중...")
+                    success = self.data_manager.build_catalog_db()
+                    if success:
+                        print("✅ DB 업데이트 완료")
+                    else:
+                        print("❌ DB 업데이트 실패")
+                        return False
             else:
                 print("✅ DB 최신 상태")
             
@@ -900,7 +912,7 @@ class DataManagerCLI:
                     
                 elif scope_choice == "2":
                     print("\n🔄 전체 데이터 조회 중...")
-                    search_results = self.data_manager.search_catalog()  # 전체 검색
+                    search_results = self.data_manager.search()  # 전체 검색
                     
                     if search_results is None or search_results.empty:
                         print("❌ 검사할 데이터가 없습니다.")
@@ -1086,7 +1098,7 @@ class DataManagerCLI:
         
         # 검색 실행
         print(f"\n🔍 검색 실행 중...")
-        return self.data_manager.search_catalog(
+        return self.data_manager.search(
             providers=providers,
             datasets=datasets,
             tasks=tasks,
@@ -1236,7 +1248,7 @@ class DataManagerCLI:
             text_search_config["json_path"] = json_path
         
         # 검색 실행
-        return self.data_manager.search_catalog(text_search=text_search_config)
+        return self.data_manager.search(text_search=text_search_config)
 
     def _download_selected_data(self, search_results):
         """대화형 다운로드 수행"""

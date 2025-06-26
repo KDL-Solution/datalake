@@ -6,6 +6,9 @@ import io
 import threading
 import time
 import gc
+from collections import Counter
+from datetime import datetime
+from tqdm import tqdm
 from pathlib import Path
 from typing import Dict
 from PIL import Image
@@ -63,11 +66,18 @@ class NASDataProcessor:
         }
     
     def process_all_pending(self) -> Dict:
-        """모든 Pending 데이터 처리"""
+        """모든 Pending 데이터 처리 (에러 정보 포함)"""
         self.logger.info("🔄 Pending 데이터 처리 시작")
         
         if not self.staging_pending_path.exists():
-            return {"success": 0, "failed": 0, "message": "Pending 디렉토리 없음"}
+            return {
+                "success": 0, 
+                "failed": 0, 
+                "message": "Pending 디렉토리 없음",
+                "errors": [],
+                "success_details": [],
+                "failed_details": []
+            }
         
         pending_dirs = [
             d for d in self.staging_pending_path.iterdir()
@@ -75,18 +85,30 @@ class NASDataProcessor:
         ]
         
         if not pending_dirs:
-            return {"success": 0, "failed": 0, "message": "처리할 데이터 없음"}
+            return {
+                "success": 0, 
+                "failed": 0, 
+                "message": "처리할 데이터 없음",
+                "errors": [],
+                "success_details": [],
+                "failed_details": []
+            }
         
         self.logger.info(f"📦 처리 대상: {len(pending_dirs)}개")
         
         success_count = 0
         failed_count = 0
+        success_details = []
+        failed_details = []
+        error_summary = []
         
         for pending_dir in pending_dirs:
             processing_dir = None
+            dir_name = pending_dir.name
+            
             try:
                 # processing으로 이동
-                processing_dir = self.staging_processing_path / pending_dir.name
+                processing_dir = self.staging_processing_path / dir_name
                 shutil.move(str(pending_dir), str(processing_dir))
                 
                 # 처리 실패 플래그 초기화
@@ -96,27 +118,119 @@ class NASDataProcessor:
                 # 처리
                 self._process_single_directory(processing_dir)
                 
+                # 처리 중 에러가 있었는지 확인
+                if self.processing_failed or self.error_messages:
+                    # 내부 처리 실패
+                    error_msg = "; ".join(self.error_messages) if self.error_messages else "처리 중 알 수 없는 오류"
+                    raise Exception(f"내부 처리 실패: {error_msg}")
+                
                 # 성공 시 정리
                 shutil.rmtree(processing_dir)
                 success_count += 1
                 
-                self.logger.info(f"✅ 완료: {pending_dir.name}")
+                success_info = {
+                    "directory": dir_name,
+                    "status": "success",
+                    "timestamp": datetime.now().isoformat(),
+                }
+                success_details.append(success_info)
+                
+                self.logger.info(f"✅ 완료: {dir_name}")
                 
             except Exception as e:
                 failed_count += 1
-                self.logger.error(f"❌ 실패: {pending_dir.name} - {e}")
+                error_msg = str(e)
                 
+                # 상세 에러 정보 수집
+                error_info = {
+                    "directory": dir_name,
+                    "error": error_msg,
+                    "error_type": type(e).__name__,
+                    "timestamp": datetime.now().isoformat(),
+                }
+                
+                # 추가 에러 컨텍스트 수집
+                try:
+                    if processing_dir and processing_dir.exists():
+                        error_info["processing_dir_exists"] = True
+                        # 메타데이터 파일 확인
+                        metadata_file = processing_dir / "upload_metadata.json"
+                        if metadata_file.exists():
+                            error_info["metadata_exists"] = True
+                            try:
+                                with open(metadata_file, 'r', encoding='utf-8') as f:
+                                    metadata = json.load(f)
+                                    error_info["metadata_info"] = {
+                                        "file_count": len(metadata.get("files", [])),
+                                        "upload_time": metadata.get("upload_time", "unknown")
+                                    }
+                            except:
+                                error_info["metadata_read_error"] = True
+                        else:
+                            error_info["metadata_exists"] = False
+                    else:
+                        error_info["processing_dir_exists"] = False
+                        
+                except Exception as context_error:
+                    error_info["context_collection_error"] = str(context_error)
+                
+                failed_details.append(error_info)
+                error_summary.append(f"{dir_name}: {error_msg}")
+                
+                self.logger.error(f"❌ 실패: {dir_name} - {error_msg}")
+                
+                # Failed 디렉토리로 이동
                 if processing_dir and processing_dir.exists():
-                    failed_dir = self.staging_failed_path / pending_dir.name
+                    failed_dir = self.staging_failed_path / dir_name
                     failed_dir.parent.mkdir(mode=0o775, parents=True, exist_ok=True)
                     try:
+                        # 에러 정보를 파일로 저장
+                        error_file = failed_dir.parent / f"{dir_name}_error.json"
                         shutil.move(str(processing_dir), str(failed_dir))
+                        
+                        # 에러 정보 저장
+                        with open(error_file, 'w', encoding='utf-8') as f:
+                            json.dump(error_info, f, ensure_ascii=False, indent=2)
+                            
                     except Exception as move_error:
-                        self.logger.error(f"Failed 디렉토리 이동 실패: {move_error}")
-                        if processing_dir.exists():
-                            shutil.rmtree(processing_dir)
+                        move_error_msg = str(move_error)
+                        error_info["move_error"] = move_error_msg
+                        self.logger.error(f"Failed 디렉토리 이동 실패: {move_error_msg}")
+        remain_processing_dirs = [
+            d for d in self.staging_processing_path.iterdir()
+            if d.is_dir() and not (d / "upload_metadata.json").exists()
+        ]
+        for remain_dir in remain_processing_dirs:
+            try:
+                shutil.rmtree(remain_dir)
+                self.logger.info(f"✅ 처리 중 디렉토리 정리: {remain_dir.name}")
+            except Exception as e:
+                self.logger.error(f"❌ 처리 중 디렉토리 정리 실패: {remain_dir.name} - {str(e)}")
+        most_common_errors = []
+        if failed_details:
+            error_types = [detail.get("error_type", "Unknown") for detail in failed_details]
+            most_common = Counter(error_types).most_common(3)
+            most_common_errors = [{"error_type": error_type, "count": count} for error_type, count in most_common]
+        # 결과 구성
+        result = {
+            "success": success_count,
+            "failed": failed_count,
+            "total_processed": success_count + failed_count,
+            "success_details": success_details,
+            "failed_details": failed_details,
+            "errors": error_summary,
+            "summary": {
+                "success_rate": f"{(success_count/(success_count + failed_count)*100):.1f}%" if (success_count + failed_count) > 0 else "0%",
+                "most_common_errors": most_common_errors,
+                "processing_time": datetime.now().isoformat(),
+            }
+        }
         
-        result = {"success": success_count, "failed": failed_count}
+        if failed_count > 0:
+            result["message"] = f"처리 완료: {success_count}개 성공, {failed_count}개 실패"
+        else:
+            result["message"] = f"모든 데이터 처리 성공: {success_count}개"
+        
         return result
     
     def _check_path_and_setup_logging(self, log_level: str = "INFO"):
@@ -139,7 +253,11 @@ class NASDataProcessor:
         if missing_paths:
             missing_list = '\n'.join(missing_paths)
             raise FileNotFoundError(f"❌ 필수 디렉토리가 없습니다:\n{missing_list}")
-        setup_logging(log_level=log_level, base_path=str(self.base_path))
+        setup_logging(
+            user_id="processor",
+            log_level=log_level, 
+            base_path=str(self.base_path)
+        )
         self.logger = logging.getLogger(__name__)
         self.logger.debug("✅ 모든 필수 디렉토리 확인 완료")
 
@@ -226,7 +344,7 @@ class NASDataProcessor:
         self.logger.info(f"📄 파일 처리 시작: {self.file_path_key} ({total_files}개)")
         
         shard_config = self._get_shard_config(total_files)
-        self.logger.info(f"🔧 샤딩 설정: {shard_config['info']}")
+        self.logger.info(f"🔧 샤딩 설정: {shard_config}")
         assets_base.mkdir(mode=0o775, parents=True, exist_ok=True)
         process_batch_func = partial(
             self._process_file_batch,

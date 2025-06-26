@@ -4,7 +4,11 @@ import os
 from pathlib import Path
 from datetime import datetime
 
-def setup_logging(log_level: str = "INFO", base_path: str = None):
+def setup_logging(
+    user_id:str,
+    log_level: str = "INFO", 
+    base_path: str = None
+):
     """전역 로깅 설정 (한 번만 호출)"""
     if logging.getLogger().handlers:
         return  # 이미 설정됨
@@ -21,8 +25,7 @@ def setup_logging(log_level: str = "INFO", base_path: str = None):
         log_dir = Path(base_path) / "logs"
         log_dir.mkdir(mode=0o775, parents=True, exist_ok=True)
         date_str = datetime.now().strftime("%Y%m%d")
-        user = os.getenv('USER', 'unknown')
-        log_file = log_dir / f"{date_str}_{user}.log"
+        log_file = log_dir / f"{date_str}_{user_id}.log"
         
         file_handler = logging.FileHandler(log_file, encoding='utf-8')
         file_handler.setFormatter(formatter)

@@ -129,7 +129,7 @@ def main(
     exporter = TableImageOTSLExporterForDataset()
     manager = DatalakeClient()
 
-    search_results = manager.search_catalog(
+    search_results = manager.search(
         variants=[
             "table_image_otsl",
         ]
