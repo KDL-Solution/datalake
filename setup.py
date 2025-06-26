@@ -49,7 +49,7 @@ extras_require["all"] = list(set(sum(extras_require.values(), [])))
 # Console scripts
 console_scripts = [
     "datalake=main:main",
-    "datalake-server=managers.processing_server:main",
+    "datalake-server=server.app:main",
 ]
 
 setup(

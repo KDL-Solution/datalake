@@ -250,8 +250,7 @@ async def run_processing_job(job_id: str):
                 current_jobs[job_id].completed_at = datetime.now().isoformat()
                 current_jobs[job_id].error = error_msg
 
-
-if __name__ == "__main__":
+def main():
     import argparse
     
     parser = argparse.ArgumentParser(description="Datalake Processing API Server")
@@ -275,3 +274,5 @@ if __name__ == "__main__":
         port=args.port,
         workers=args.workers,
     )
+if __name__ == "__main__":
+    main()

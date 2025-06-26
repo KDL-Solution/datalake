@@ -1,237 +1,186 @@
 # DataLake Management System
 
-대용량 멀티모달 데이터(이미지, 텍스트, 메타데이터)를 효율적으로 관리하는 엔터프라이즈급 데이터 레이크 시스템입니다.
+Multimodal data management system with automatic processing, deduplication, and querying capabilities.
 
-## 🚀 주요 기능
+## Features
 
-### 📊 데이터 관리
-- **Raw 데이터 업로드**: 원본 데이터셋을 Provider/Dataset 구조로 조직화
-- **Task 데이터 관리**: OCR, VQA, KIE, Layout 등 특정 태스크용 데이터 생성
-- **스키마 검증**: 데이터 타입과 메타데이터 자동 검증
-- **중복 제거**: 해시 기반 이미지 및 파일 중복 제거
+- **Data Management**: Raw and task-specific data with Provider/Dataset/Task/Variant hierarchy
+- **Processing**: Parallel processing with image optimization and file deduplication
+- **Querying**: DuckDB and AWS Athena support with partition and JSON search
+- **API Server**: FastAPI async processing server
+- **CLI**: Command-line interface for data operations
 
-### 🔄 데이터 처리
-- **병렬 처리**: 멀티프로세싱을 통한 대용량 데이터 고속 처리
-- **이미지 최적화**: PIL 기반 이미지 압축 및 해시 생성
-- **파일 관리**: 샤딩 기반 효율적 파일 저장 시스템
-- **백그라운드 작업**: FastAPI 기반 비동기 처리 서버
-
-### 🔍 데이터 조회
-- **통합 검색**: DuckDB 및 AWS Athena 지원
-- **파티션 기반 조회**: Provider/Dataset/Task/Variant 계층 구조
-- **JSON 검색**: OCR 결과 등 JSON 데이터 내 텍스트 검색
-- **다양한 출력**: Parquet, Arrow Dataset, HuggingFace Dataset 형태
-
-## 📁 시스템 구조
+## Architecture
 
 ```
 datalake/
-├── core/                   
-│   ├── datalake.py  
-│   └── schema.py        
-├── server/          
-│   ├── app.py          # FastAPI 처리 서버
-│   └── processor.py    # 데이터 처리 엔진
-├── clients/                      # 쿼리 클라이언트
-│   ├── duckdb_client.py    # DuckDB 클라이언트
-│   ├── athena_client.py    # AWS Athena 클라이언트
-│   └── queries/
-│       └── json_queries.py
-├── main.py             # CLI 인터페이스
-└── config.yaml         # CLI config 설정
+├── core/                   # Data management
+├── server/                 # Processing server  
+├── clients/                # Query clients (DuckDB, Athena)
+├── staging/                # Processing pipeline
+│   ├── pending/
+│   ├── processing/
+│   └── failed/
+├── catalog/                # Parquet data
+└── assets/                 # File storage
 ```
 
-## 🛠️ 설치
+## Installation
 
-### 1. 패키지 설치
 ```bash
-git clone <repository>
+git clone https://github.com/KDL-Solution/datalake.git
 cd datalake
 pip install -e .
-```
 
-### 서버 전용
-#### 1. 필수 디렉토리 구조 생성
-```bash
+# # Create required directories (if you are the admin)
 mkdir -p /mnt/AI_NAS/datalake/{staging/{pending,processing,failed},catalog,assets,config,logs}
 ```
-#### 2. Process 처리 서버 실행 
+
+## Usage
+
+### 1. Start Processing Server (if you are the admin)
+
 ```bash
-python server/app.py \
-    --host 0.0.0.0 \
-    --port 8091 \
-    --base-path /mnt/AI_NAS/datalake \
-    --num-proc 16 \
-    --batch-size 1000
+datalake-server --port 8000 --num-proc 16
+# or: python -m server.app --port 8000 --num-proc 16
 ```
 
-## 📖 사용법
+### 2. Python API
 
-### CLI 사용법
-
-#### 1. 초기 설정
-```bash
-# Provider 생성
-python main.py config provider create
-
-# Task 생성 (OCR 예시)
-python main.py config task create
-# Task 이름: ocr
-# 필수 필드: lang, src
-# 허용 값: lang=ko,en,ja,multi / src=real,synthetic
-```
-
-#### 2. 데이터 업로드
-```bash
-# Raw 데이터 업로드
-python main.py upload
-# 데이터 타입: raw
-# 파일 경로: /path/to/dataset
-# Provider: huggingface
-# Dataset: coco_2017
-
-# Task 데이터 업로드
-python main.py upload  
-# 데이터 타입: task
-# Provider: huggingface
-# Dataset: coco_2017 (기존)
-# Task: ocr
-# Variant: base_ocr
-# 메타데이터: lang=ko, src=real
-```
-
-#### 3. 데이터 처리
-```bash
-# 처리 시작
-python main.py process start
-
-# 처리 상태 확인
-python main.py process status <JOB_ID>
-
-# 내 데이터 현황
-python main.py process list
-```
-
-#### 4. 데이터 다운로드
-```bash
-# DB 구축 (최초 1회)
-python main.py db update
-
-# 데이터 다운로드
-python main.py export
-# 검색 방법: 1 (파티션 기반) 또는 2 (텍스트 검색)
-# 다운로드 형태: 1 (Parquet), 2 (Arrow), 3 (Dataset+이미지)
-```
-
-### Python API 사용법
-
-#### 1. 기본 사용법
 ```python
 from core.datalake import DatalakeClient
 
-# 클라이언트 초기화
+# Initialize client
 client = DatalakeClient(
     user_id="user",
     base_path="/mnt/AI_NAS/datalake",
     server_url="http://localhost:8091"
 )
 
-# Raw 데이터 업로드
+# Upload raw data
 staging_dir, job_id = client.upload_raw(
-    data_file="dataset.parquet",  # 또는 pandas DataFrame
+    data_file="dataset.parquet",  # or pandas DataFrame, HF Dataset
     provider="huggingface",
-    dataset="coco_2017",
-    dataset_description="COCO 2017 dataset for object detection"
+    dataset="coco_2017"
 )
 
-# Task 데이터 업로드
+# Upload task data  
 staging_dir, job_id = client.upload_task(
-    data_file=processed_df,
-    provider="huggingface", 
-    dataset="coco_2017",
+    data_file="ocr_results.parquet", 
+    provider="huggingface",
+    dataset="coco_2017", 
     task="ocr",
     variant="base_ocr",
     meta={"lang": "ko", "src": "real"}
 )
+
+# Trigger processing
+job_id = client.trigger_processing()
+result = client.wait_for_job_completion(job_id)
+
+# Build database
+client.build_db()
+
+# Search data
+results = client.search(
+    providers=["huggingface"],
+    datasets=["coco_2017"],
+    tasks=["ocr"]
+)
+
+# Export results
+client.export(results, "./output", format="dataset", include_images=True)
 ```
 
-#### 2. 데이터 조회
-```python
-from core.datalake import DatalakeClient
+### 3. CLI Usage
 
-client = DatalakeClient(
-    user_id="user",
-    base_path="/mnt/AI_NAS/datalake",
-    server_url="http://localhost:8091"
-)
-# providers, datasets, tasks, variants 개별 조회 가능
-client.search(
-    providers='huggingface', # or ['huggingface', 'aihub'],
-)
+```bash
+# Configure providers and tasks
+datalake config provider create huggingface
+datalake config task create ocr
+
+# Upload and process data
+datalake upload
+datalake process start
+
+# Build database and export
+datalake db update
+datalake export
+
+# or use: python main.py <command>
 ```
 
-## 📊 데이터 구조
+## Configuration
 
-### Catalog 구조
+### Schema Configuration (`config/schema.yaml`)
+
+```yaml
+providers:
+  huggingface:
+    description: 'Hugging Face datasets'
+  aihub:
+    description: 'AI Hub public datasets'
+
+tasks:
+  ocr:
+    description: 'Optical Character Recognition'
+    required_fields: ['lang', 'src']
+    allowed_values:
+      lang: ['ko', 'en', 'ja', 'multi']
+      src: ['real', 'synthetic']
+```
+
+### Server Configuration (`config.yaml`)
+
+```yaml
+base_path: "/mnt/AI_NAS/datalake"
+server_url: "http://192.168.20.62:8091"
+log_level: "INFO"
+num_proc: 16
+```
+
+## Data Flow
+
+1. **Upload**: Raw/task data → staging/pending
+2. **Process**: pending → processing → catalog (parquet) + assets (files)
+3. **Database**: Catalog parquet files → DuckDB/Athena tables
+4. **Query**: Search by partitions or JSON content
+5. **Export**: Results → Parquet/Dataset/HF Dataset
+
+## Development
+
+### Server Development
+
+```bash
+# Dev server with reload
+uvicorn server.app:app --reload --host 0.0.0.0 --port 8000
+```
+
+### Database Schema
+
+Data is stored in Hive-partitioned Parquet format:
 ```
 catalog/
 ├── provider=huggingface/
 │   └── dataset=coco_2017/
-│       ├── task=raw/
-│       │   ├── variant=image/
-│       │   │   ├── data.parquet     # 메타데이터
-│       │   │   └── _metadata.json   # 업로드 정보
-│       │   └── variant=mixed/
-│       └── task=ocr/
-│           └── variant=base_ocr/
-└── provider=aihub/
-    └── dataset=document_ocr/
+│       ├── task=raw/variant=image/
+│       └── task=ocr/variant=base_ocr/
 ```
 
-### Assets 구조 (샤딩)
-```
-assets/
-├── provider=huggingface/
-│   └── dataset=coco_2017/
-│       ├── ab/
-│       │   ├── cd/
-│       │   │   ├── abcd1234...13.jpg
-│       │   │   └── abcd5678...14.jpg
-│       │   └── ef/
-│       └── gh/
-```
+Required columns: `hash`, `path`, task-specific metadata fields
 
+## API
 
-### HuggingFace Datasets 연동
-```python
-from datasets import load_from_disk
+### Classes
 
-# Dataset 형태로 다운로드된 데이터 로드
-dataset = load_from_disk("./exports/my_dataset")
+- `DatalakeClient`: Main client
+- `DuckDBClient`: Local querying  
+- `DatalakeProcessor`: Data processing
+- `SchemaManager`: Configuration management
 
-# 이미지 확인
-dataset[0]['image'].show()
+### Endpoints
 
-# pandas로 변환
-df = dataset.to_pandas()
-```
-
-## 🐛 TroubleShoot
-
-### 일반적인 문제
-
-**1. 서버 연결 실패**
-```bash
-# 서버 상태 확인
-curl http://localhost:8091/health
-
-# 서버 재시작
-python server/app.py --port 8091
-```
-
-**3. 권한 문제**
-```bash
-# 디렉토리 권한 설정
-chmod -R 775 /mnt/AI_NAS/datalake/{directory_name}
-chown -R $USER:$GROUP /mnt/AI_NAS/datalake/{directory_name}
-```
+- `POST /process`: Start processing
+- `GET /status`: Server status  
+- `GET /jobs/{job_id}`: Job status
+- `GET /jobs`: List jobs
