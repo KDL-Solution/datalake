@@ -267,21 +267,21 @@ class DuckDBClient:
             table_info = self.get_table_info(table)
             if table_info.empty:
                 return pd.DataFrame()
-                
+
             # 모든 컬럼명 가져오기
             all_columns = table_info['column_name'].tolist()
-            
+
             # 실제 데이터에서 NULL이 아닌 값이 있는 컬럼 확인
             non_null_cols = []
             for col in all_columns:
                 check_sql = f"SELECT COUNT(*) as count FROM {table} WHERE {col} IS NOT NULL"
                 if conditions:
                     check_sql += f" AND {' AND '.join(conditions)}"
-                
+
                 result = self.execute_query(check_sql)
                 if result['count'].iloc[0] > 0:
                     non_null_cols.append(col)
-            
+
             # 존재하는 컬럼만으로 조회
             sql = f"SELECT {', '.join(non_null_cols)} FROM {table}"
             if conditions:

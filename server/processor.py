@@ -10,7 +10,7 @@ from collections import Counter
 from datetime import datetime
 from tqdm import tqdm
 from pathlib import Path
-from typing import Dict, Optional, List
+from typing import Dict
 from PIL import Image
 from datasets import Dataset, load_from_disk
 from datasets.features import Image as ImageFeature
@@ -260,7 +260,7 @@ class DatalakeProcessor:
         )
         self.logger = logging.getLogger(__name__)
         self.logger.debug("✅ 모든 필수 디렉토리 확인 완료")
-   
+
     def _process_single_directory(self, processing_dir: Path):
         """단일 디렉토리 처리 - datasets 라이브러리 활용"""
         # 메타데이터 읽기

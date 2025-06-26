@@ -8,6 +8,7 @@ import requests
 import time 
 import subprocess
 import psutil
+import swifter
 from pathlib import Path
 from datetime import datetime
 from datasets import Dataset, load_from_disk
@@ -18,6 +19,7 @@ from PIL import Image
 from core.schema import SchemaManager
 from utils.logging import setup_logging
 from clients.duckdb_client import DuckDBClient
+
 
 class DatalakeClient:
     def __init__(
@@ -72,9 +74,9 @@ class DatalakeClient:
         overwrite: bool = False, # 기존 pending 데이터 제거 여부
     ):
         task = "raw"
-        
+
         self.logger.info(f"📥 Raw data 업로드 시작: {provider}/{dataset}")
-        
+
         if not self.schema_manager.validate_provider(provider):
             raise ValueError(f"❌ 지원하지 않는 provider입니다: {provider}")
 
@@ -127,7 +129,7 @@ class DatalakeClient:
             raise FileNotFoundError(
                 f"❌ Raw 데이터가 존재하지 않습니다: {provider}/{dataset}"
             )
-        
+
         if not self.schema_manager.validate_provider(provider):
             raise ValueError(f"❌ 지원하지 않는 provider입니다: {provider}")
         
@@ -139,7 +141,6 @@ class DatalakeClient:
             return None, None
         
         dataset_obj, file_info = self._load_data(data_file)
-        
 
         columns_to_remove = [key for key in meta.keys()
                             if key in dataset_obj.column_names]
@@ -205,7 +206,7 @@ class DatalakeClient:
         print("\n" + "="*60)
         print("📊 Data Processing Server Dashboard")
         print("="*60)
-        
+
         # 상태 조회
         status = self.get_server_status()
         if status:
@@ -224,7 +225,7 @@ class DatalakeClient:
             for job in jobs[-5:]:  # 최근 5개만
                 status_emoji = {"running": "🔄", "completed": "✅", "failed": "❌"}.get(job['status'], "❓")
                 print(f"  {status_emoji} {job['job_id']} - {job['status']} ({job['started_at']})")
-        
+
         print("="*60 + "\n")
         
     def trigger_processing(self) -> Optional[str]:
@@ -347,7 +348,7 @@ class DatalakeClient:
                 'modified_time': db_mtime.strftime('%Y-%m-%d %H:%M:%S'),
                 'is_outdated': self._is_db_outdated(),
             }
-            
+
             with DuckDBClient(str(self.duckdb_path), read_only=True) as duck_client:
                 tables = duck_client.list_tables()
                 info['tables'] = tables['name'].tolist()
@@ -366,7 +367,7 @@ class DatalakeClient:
                     try:
                         partitions_df = duck_client.retrieve_partitions(self.table_name)
                         info['partitions'] = len(partitions_df)
-                        
+
                         # Provider별 통계
                         if not partitions_df.empty:
                             provider_stats = partitions_df.groupby('provider').size().to_dict()
@@ -381,7 +382,7 @@ class DatalakeClient:
                         self.logger.warning(f"파티션 정보 조회 실패: {e}")
                 
             return info
-            
+
         except Exception as e:
             self.logger.error(f"❌DB 정보 조회 실패: {e}")
             return {
@@ -396,7 +397,7 @@ class DatalakeClient:
         try:
             if not self.catalog_path.exists():
                 raise FileNotFoundError(f"Catalog 디렉토리가 존재하지 않습니다: {self.catalog_path}")
-            
+
             # 기존 DB 파일 처리
             if self.duckdb_path.exists():
                 if force_rebuild:
@@ -405,17 +406,17 @@ class DatalakeClient:
                 else:
                     self.logger.info("⚠️ 기존 DB 파일이 존재합니다. force_rebuild=True로 재구축하세요.")
                     return False
-            
+
             # 디렉토리 생성
             self.duckdb_path.parent.mkdir(mode=0o777, parents=True, exist_ok=True)
-            
+
             # Parquet 파일들 확인
             parquet_files = list(self.catalog_path.rglob("*.parquet"))
             if not parquet_files:
                 raise FileNotFoundError("Parquet 파일을 찾을 수 없습니다.")
-            
+
             self.logger.info(f"📂 발견된 Parquet 파일: {len(parquet_files)}개")
-            
+
             # 새 DB 생성
             with DuckDBClient(str(self.duckdb_path), read_only=False) as duck_client:
                 parquet_pattern = str(self.catalog_path / "**" / "*.parquet")
@@ -427,7 +428,7 @@ class DatalakeClient:
                     hive_partitioning=True,
                     union_by_name=True
                 )
-                
+
                 # 결과 검증
                 count_result = duck_client.execute_query(f"SELECT COUNT(*) as total FROM {self.table_name}")
                 total_rows = count_result['total'].iloc[0]
@@ -436,11 +437,11 @@ class DatalakeClient:
                 self.logger.info(f"📊 총 {total_rows:,}개 행")
                 self.logger.info(f"💾 DB 파일: {self.duckdb_path}")
                 self.logger.info(f"📁 파일 크기: {self.duckdb_path.stat().st_size / 1024 / 1024:.1f}MB")
-                
+
             # 권한 설정
             self.duckdb_path.chmod(0o666)
             return True
-            
+
         except Exception as e:
             self.logger.error(f"❌ DB 구축 실패: {e}")
             # 실패 시 정리
@@ -465,11 +466,11 @@ class DatalakeClient:
                 
                 self.logger.debug(f"📊 총 {len(partitions_df)}개 파티션 조회됨")
                 return partitions_df
-                
+
         except Exception as e:
             self.logger.error(f"❌ 파티션 조회 실패: {e}")
             raise
-    
+
     def search(
         self,
         providers: Optional[List[str]] = None,
@@ -510,10 +511,10 @@ class DatalakeClient:
                     results = self._perform_partition_search(
                         duck_client, providers, datasets, tasks, variants, limit
                     )
-                
+
                 self.logger.info(f"📊 검색 결과: {len(results):,}개 항목")
                 return results
-                
+
         except Exception as e:
             self.logger.error(f"❌ 검색 실패: {e}")
             raise
@@ -527,9 +528,17 @@ class DatalakeClient:
         
         df_copy = search_results.copy()
         
-        if absolute_paths and 'path' in df_copy.columns:
+        if absolute_paths and 'path' in df_copy.columns.tolist():
             df_copy['path'] = df_copy['path'].apply(
-                lambda x: str(self.assets_path / x) if isinstance(x, str) and x else x
+                lambda x: (self.assets_path / x).as_posix() if isinstance(x, str) and x else x
+            )
+            df_copy["exists"] = df_copy["path"].swifter.apply(
+                lambda x: Path(x).exists()
+            )
+            df_copy = df_copy[df_copy["exists"]]
+            df_copy = df_copy.drop(
+                "exists",
+                axis=1,
             )
             self.logger.debug("📁 경로를 절대경로로 변환")
             
@@ -549,7 +558,7 @@ class DatalakeClient:
         
         if include_images:
             dataset = self._add_images_to_dataset(dataset)
-            
+
         self.logger.info(f"✅ Dataset 객체 생성 완료: {len(dataset):,}개 항목") 
         return dataset
     
@@ -599,7 +608,7 @@ class DatalakeClient:
     ) -> Dict:
         """
         데이터 무결성 검사
-        
+
         Args:
             search_results: 검사할 데이터 (None이면 전체 db 검사)
             sample_percent: 샘플링 비율 (0.1 = 10%)
@@ -608,7 +617,7 @@ class DatalakeClient:
             검사 결과 딕셔너리
         """
         self.logger.info("🔍 데이터 무결성 검사 시작...")
-        
+
         try:
             if search_results.empty:
                 self.logger.warning("⚠️ 검색 결과가 비어 있습니다. 무결성 검사를 건너뜁니다.")
@@ -619,19 +628,19 @@ class DatalakeClient:
                 }
             else:
                 self.logger.info(f"📊 검사 대상 항목: {len(search_results):,}개")
-            
+
             # 샘플링
             if sample_percent:
                 sample_size = int(len(search_results) * sample_percent)
                 search_results = search_results.sample(n=sample_size, random_state=42)
                 self.logger.info(f"📊 샘플 검사: {len(search_results):,}개 항목 ({sample_percent*100:.1f}%)")
-            
+
             dataset = Dataset.from_pandas(search_results)
             dataset = dataset.filter(
                 lambda x: x.get('hash') and x.get('path'), 
                 desc="필수 필드 필터링"
             )
-            
+
             # 파일 존재 여부 검사
             def check_file_exists(example):
                 path_val = example.get('path')
@@ -642,9 +651,8 @@ class DatalakeClient:
                 file_path = self.assets_path / path_val
                 exists = file_path.exists()
                 example['file_exists'] = exists
-                
                 return example
-            
+
             # 병렬 검사
             dataset_with_check = dataset.map(
                 check_file_exists,
@@ -652,15 +660,15 @@ class DatalakeClient:
                 num_proc=min(self.num_proc, 8),
                 load_from_cache_file=False
             )
-            
+
             # 누락된 파일 찾기
             missing_files_data = dataset_with_check.filter(
                 lambda x: not x['file_exists'],
                 desc="누락 파일 필터링"
             )
-            
+
             missing_files = missing_files_data.to_list()
-            
+
             result = {
                 'total_items': len(search_results),
                 'checked_items': len(dataset),
@@ -668,15 +676,14 @@ class DatalakeClient:
                 'missing_count': len(missing_files),
                 'integrity_rate': (len(dataset) - len(missing_files)) / len(dataset) * 100 if len(dataset) > 0 else 0
             }
-            
+
             self.logger.info(f"📊 무결성 검사 완료:")
             self.logger.info(f"  총 항목: {result['total_items']:,}개")
             self.logger.info(f"  검사 항목: {result['checked_items']:,}개")
             self.logger.info(f"  누락 파일: {result['missing_count']:,}개")
             self.logger.info(f"  무결성 비율: {result['integrity_rate']:.1f}%")
-            
             return result
-            
+
         except Exception as e:
             self.logger.error(f"❌ 무결성 검사 실패: {e}")
             return {
@@ -684,17 +691,17 @@ class DatalakeClient:
                 'missing_files': [],
                 'errors': [str(e)]
             }
-            
+
     def check_db_processes(self):
         """DB 사용 중인 프로세스 확인 (개선된 버전)"""
         print("\n🔍 DB 사용 중인 프로세스 확인")
         print("="*50)
         
         db_path = Path(self.duckdb_path).resolve()  # 절대경로로 변환
-        
+
         try:
             using_processes = []
-            
+
             for proc in psutil.process_iter(['pid', 'name', 'cmdline']):
                 try:
                     # 1. cmdline 검사 (기존 방식)
@@ -703,7 +710,7 @@ class DatalakeClient:
                         cmdline = ' '.join(proc.info['cmdline'])
                         if str(db_path) in cmdline:
                             cmdline_match = True
-                    
+
                     # 2. 열린 파일 디스크립터 검사 (새로운 방식)
                     file_match = False
                     try:
@@ -722,7 +729,7 @@ class DatalakeClient:
                     except (psutil.AccessDenied, psutil.NoSuchProcess):
                         # 권한이 없거나 프로세스가 사라진 경우
                         pass
-                    
+
                     # 3. 메모리 매핑 검사 (추가)
                     memory_match = False
                     try:
@@ -735,7 +742,7 @@ class DatalakeClient:
                     except (psutil.AccessDenied, psutil.NoSuchProcess, AttributeError):
                         # 일부 시스템에서는 memory_maps()가 없을 수 있음
                         pass
-                    
+
                     # 하나라도 매치되면 DB 사용 중인 프로세스
                     if cmdline_match or file_match or memory_match:
                         match_type = []
@@ -752,32 +759,32 @@ class DatalakeClient:
                         
                 except (psutil.NoSuchProcess, psutil.AccessDenied):
                     continue
-            
+
             # DB 파일 상태 정보도 포함
             db_info = {
                 'path': str(db_path),
                 'exists': db_path.exists()
             }
-            
+
             if db_path.exists():
                 stat = db_path.stat()
                 db_info.update({
                     'size': stat.st_size,
                     'modified_time': datetime.fromtimestamp(stat.st_mtime).isoformat()
                 })
-                
+
                 # WAL 파일 확인
                 wal_file = db_path.with_suffix('.duckdb.wal')
                 db_info['has_wal'] = wal_file.exists()
-            
+
             result = {
                 'processes': using_processes,
                 'db_info': db_info
             }
-            
+
             self.logger.info(f"📊 DB 프로세스 확인 완료: {len(using_processes)}개 프로세스 발견")
             return result
-            
+
         except Exception as e:
             self.logger.error(f"❌ 프로세스 확인 실패: {e}")
             return {'error': str(e)}
@@ -854,9 +861,9 @@ class DatalakeClient:
         """DB가 최신 상태인지 확인"""
         if not self.duckdb_path.exists():
             return True
-            
+
         db_mtime = self.duckdb_path.stat().st_mtime
-        
+
         # 가장 최근 Parquet 파일 확인
         latest_parquet_mtime = 0
         for parquet_file in self.catalog_path.rglob("*.parquet"):
@@ -865,7 +872,7 @@ class DatalakeClient:
                 latest_parquet_mtime = file_mtime
         
         return latest_parquet_mtime > db_mtime
-    
+
     def _cleanup_db_files(self):
         """DB 관련 파일들 정리"""
         files_to_remove = [
@@ -876,7 +883,7 @@ class DatalakeClient:
             self.duckdb_path.with_suffix('.duckdb.tmp'),
             self.duckdb_path.with_suffix('.duckdb.lock')
         ]
-        
+
         for file_path in files_to_remove:
             if file_path.exists():
                 try:
@@ -884,7 +891,7 @@ class DatalakeClient:
                     self.logger.debug(f"🗑️ 삭제: {file_path}")
                 except Exception as e:
                     self.logger.warning(f"⚠️ 삭제 실패: {file_path} - {e}")
-    
+
     def _perform_partition_search(
         self, 
         duck_client, 
@@ -904,12 +911,17 @@ class DatalakeClient:
             limit=limit
         )
 
-    def _perform_text_search(self, duck_client, text_search, limit):
+    def _perform_text_search(
+        self,
+        duck_client,
+        text_search,
+        limit,
+    ):
         """텍스트 기반 검색 실행"""
         column = text_search.get("column")
         text = text_search.get("text")
         json_path = text_search.get("json_path")
-        
+
         if json_path:
             # JSON 검색
             sql = duck_client.json_queries.search_text_in_column(
@@ -929,12 +941,12 @@ class DatalakeClient:
                 search_type="simple",
                 engine="duckdb"
             )
-        
+
         if limit is not None:
             sql += f" LIMIT {limit}"
             
         return duck_client.execute_query(sql)
-    
+
     def _add_images_to_dataset(self, dataset):
         def load_image(example):
             try:
@@ -948,11 +960,11 @@ class DatalakeClient:
                         return example
             except Exception as e:
                 self.logger.warning(f"이미지 로드 실패: {example.get('path', 'unknown')} - {e}")
-            
+
             example['image'] = None
             example['has_valid_image'] = False
             return example
-        
+
         # 이미지 로드
         self.logger.info("🖼️ 이미지 로딩 중...")
         dataset_with_images = dataset.map(
@@ -960,7 +972,7 @@ class DatalakeClient:
             desc="이미지 로딩",
             num_proc=self.num_proc
         )
-        
+
         # 유효한 이미지만 필터링
         valid_dataset = dataset_with_images.filter(
             lambda x: x,
@@ -968,17 +980,17 @@ class DatalakeClient:
             input_columns=['has_valid_image'],
             num_proc=self.num_proc
         )
-        
+
         # 임시 컬럼 제거
         valid_dataset = valid_dataset.remove_columns(['has_valid_image'])
-        
+
         total_items = len(dataset)
         valid_items = len(valid_dataset)
-        
+
         self.logger.info(f"📊 이미지 로딩 결과: {valid_items:,}/{total_items:,} 성공")
-        
+
         return valid_dataset
-    
+
     def _check_raw_data_exists(self, provider: str, dataset: str) -> bool:
         """해당 provider/dataset의 raw 데이터 존재 여부 확인"""
         raw_task_path = self.catalog_path / f"provider={provider}" / f"dataset={dataset}" / "task=raw"
@@ -1155,15 +1167,15 @@ class DatalakeClient:
         self.logger.info(f"✅ 데이터 파일 로드 완료: {data_file}")
         column_names = dataset_obj.column_names
         self.logger.info(f"데이터셋 컬럼: {column_names}")
-                
+
         metadata_columns_to_remove = [
             'provider', 'dataset', 'task', 'variant', 
             'data_type', 'uploaded_by', 'uploaded_at', 'file_id'
         ]
-        
+
         columns_to_remove = [col for col in metadata_columns_to_remove 
                             if col in dataset_obj.column_names]
-        
+
         if columns_to_remove:
             dataset_obj = dataset_obj.remove_columns(columns_to_remove)
             self.logger.info(f"🗑️ 기존 메타데이터 컬럼 제거: {columns_to_remove}")
@@ -1184,8 +1196,11 @@ class DatalakeClient:
             
         dataset_obj = self._process_cast_columns(dataset_obj)
         return dataset_obj, file_info
-    
-    def _detect_file_columns_and_type(self, dataset_obj: Dataset) -> Dict:
+
+    def _detect_file_columns_and_type(
+        self,
+        dataset_obj: Dataset,
+    ) -> Dict:
         """파일 컬럼들을 찾고 확장자 기반으로 type 결정"""
         result = {
             'image_columns': [],
@@ -1237,7 +1252,11 @@ class DatalakeClient:
         
         return result
 
-    def _normalize_column_names(self, dataset_obj: Dataset, file_info: Dict) -> Dataset:
+    def _normalize_column_names(
+        self,
+        dataset_obj: Dataset,
+        file_info: Dict,
+    ) -> Dataset:
         """컬럼명을 표준화 (image_columns → image, file_columns → file_path)"""
         
         # 이미지 컬럼 표준화
@@ -1260,7 +1279,7 @@ class DatalakeClient:
             if file_col != self.file_path_key:
                 dataset_obj = dataset_obj.rename_column(file_col, self.file_path_key)
         return dataset_obj
-    
+
     def _process_cast_columns(self, dataset_obj: Dataset):
         
         self.logger.info("🔍 JSON 변환 대상 컬럼 검사 시작")
@@ -1280,7 +1299,7 @@ class DatalakeClient:
             self.logger.info("📄 JSON 변환 대상 컬럼 없음")
         
         return dataset_obj
-    
+
     def _apply_json_transform(self, dataset_obj: Dataset, json_cast_columns: list) -> Dataset:
         """JSON 변환 적용"""
         self.logger.info(f"🔄 {len(json_cast_columns)}개 컬럼을 JSON으로 변환 중: {json_cast_columns}")
@@ -1302,7 +1321,11 @@ class DatalakeClient:
             self.logger.error(f"❌ JSON 변환 실패: {e}")
             raise ValueError(f"❌ JSON 변환 중 오류 발생: {e}")
 
-    def _save_to_staging(self, dataset_obj: Dataset, metadata: dict) -> str:
+    def _save_to_staging(
+        self,
+        dataset_obj: Dataset,
+        metadata: dict,
+    ) -> str:
         """데이터셋을 staging 폴더에 저장하고 메타데이터 파일 생성"""
         """데이터를 staging 폴더에 저장"""
         timestamp = datetime.now().strftime("%Y%m%d%H%M%S")
@@ -1388,7 +1411,6 @@ class DatalakeClient:
             raise ValueError(f"파일 경로 컬럼 '{self.file_path_key}'가 유효하지 않거나 존재하지 않습니다.")
     
     def _check_path_and_setup_logging(self, log_level: str):
-        
         required_paths = {
             'base': self.base_path,
             'staging': self.staging_path,
@@ -1474,7 +1496,3 @@ if __name__ == "__main__":
             print(f"작업 완료: {job_status}")
         except Exception as e:
             print(f"작업 대기 중 오류 발생: {e}")
-    
-    
-    
-    
