@@ -23,7 +23,7 @@ def setup_logging(
     # 파일 핸들러 (optional)
     if base_path:
         log_dir = Path(base_path) / "logs"
-        log_dir.mkdir(mode=0o775, parents=True, exist_ok=True)
+        log_dir.mkdir(mode=0o777, parents=True, exist_ok=True)
         date_str = datetime.now().strftime("%Y%m%d")
         log_file = log_dir / f"{date_str}_{user_id}.log"
         
