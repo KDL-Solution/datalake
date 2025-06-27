@@ -438,7 +438,7 @@ class DatalakeClient:
                 self.logger.info(f"📁 파일 크기: {self.duckdb_path.stat().st_size / 1024 / 1024:.1f}MB")
 
             # 권한 설정
-            self.duckdb_path.chmod(0o666)
+            self.duckdb_path.chmod(0o777)
             return True
 
         except Exception as e:
