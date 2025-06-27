@@ -657,7 +657,7 @@ class DataManagerCLI:
         print("🔍 데이터 무결성 검사")
         print("="*50)
         if not report:
-            print("💡 'report=True' 옵션을 사용하면 상세 보고서를 생성합니다.")
+            print("💡 'python main.py db validate --report' 명령으로 상세 보고서를 생성할 수 있습니다.")
         try:
             # 검사 범위 선택
             print("🔍 검사 범위 선택:")
