@@ -656,6 +656,7 @@ class DataManagerCLI:
         print("\n" + "="*50)
         print("🔍 데이터 무결성 검사")
         print("="*50)
+        print(report)
         if not report:
             print("💡 'python main.py db validate --report' 명령으로 상세 보고서를 생성할 수 있습니다.")
         try:
@@ -755,13 +756,12 @@ class DataManagerCLI:
                     for item in missing_files[:3]:
                         print(f"  • {item.get('hash', 'unknown')[:16]}... ({item.get('provider', 'unknown')}/{item.get('dataset', 'unknown')})")
                 
-                # 보고서 생성
-                if report:
-                    report_path = self._generate_validation_report(result)
-                    print(f"📄 상세 보고서: {report_path}")
-                
-                print("\n" + "="*50)
-                print("💡 'python main.py db validate --report' 명령으로 상세 보고서를 생성할 수 있습니다.")
+            # 보고서 생성
+            if report:
+                report_path = self._generate_validation_report(result)
+                print(f"📄 상세 보고서: {report_path}")
+            
+            print("\n" + "="*50)
                 
         except Exception as e:
             raise e
