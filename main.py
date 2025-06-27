@@ -1419,7 +1419,7 @@ For more help on subcommands:
     db_subparsers.add_parser('info', help='DB 정보 확인')
     db_subparsers.add_parser('update', help='DB 업데이트')
     db_subparsers.add_parser('processes', help='DB 사용 프로세스 확인')
-    validate_parser = db_subparsers.add_parser('validate', help='DB 상태 검사 및 문제 해결')
+    validate_parser = db_subparsers.add_parser('validate', help='DB 상태 검사 (--report: 상세 보고서)')
     validate_parser.add_argument('--report', action='store_true', help='검사 보고서 생성')
     
     args = parser.parse_args()
