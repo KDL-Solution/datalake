@@ -1,65 +1,23 @@
-import regex
-import pandas as pd
 import numpy as np
 from datasets import Dataset
 from typing import List
-from sklearn.model_selection import train_test_split
-from transformers import AutoProcessor
+from transformers import AutoProcessor, PreTrainedTokenizerBase
 
 from core.datalake import DatalakeClient
-
-# import sys
-# sys.path.insert(0, "/home/eric/workspace/datalake/")
 from export.utils import (
-    save_df_as_jsonl,
     user_prompt_dict,
     extract_otsl,
 )
 
 
-class TableImageOTSLExporter(object):
-    def export(
-        self,
-        df: pd.DataFrame,
-        save_path: str,
-        user_prompt: str = user_prompt_dict["table"],
-        multiturn: bool = False,
-    ) -> None:
-        df_copied = df.copy()
-
-        df_copied = df_copied[df_copied["label"].notna()]
-        # `"<otsl>"`로 시작해서 `"</otsl>"`로 끝나는 행만 필터:
-        df_copied["label"] = df_copied["label"].apply(
-            lambda x: extract_otsl(x),
-        )
-        # 수식 등을 제외:
-        df_copied = df_copied[~
-            df_copied["label"].str.contains(
-                r"\\",
-                regex=True,
-                na=False,
-            )
-        ]
-
-        df_copied["query"] = user_prompt
-
-        if multiturn:
-            df_copied = df_copied.groupby(
-                by=["path"],
-            ).agg(list).reset_index()
-
-        save_df_as_jsonl(
-            df=df_copied,
-            jsonl_path=save_path,
-        )
-
-
-class TableImageOTSLExporterForDataset:
+class TableImageOTSLExporter:
     def __init__(
         self,
+        quantiles: List[float] = [0.9, 0.95, 0.98, 0.99, 0.999, 1.],
         batch_size: int = 64,
         num_procs: int = 16,
     ):
+        self.quantiles = quantiles
         self.batch_size = batch_size
         self.num_procs = num_procs
 
@@ -67,13 +25,47 @@ class TableImageOTSLExporterForDataset:
         self,
         dataset: Dataset,
         save_path: str,
+        tokenizer: PreTrainedTokenizerBase = None,
+        token_length_quantile: float = 0.,
         user_prompt: str = user_prompt_dict["table"],
     ) -> None:
         # label이 `None`인 샘플 제거:
+        print(f"# original samples: {len(dataset):,}")
         dataset = dataset.filter(
             lambda x: x["label"] is not None,
             desc="Removing empty labels",
         )
+        print(f"# samples after removing empty labels: {len(dataset):,}")
+
+        token_length_thresh = 0
+        if tokenizer is not None and token_length_quantile > 0.:
+            dataset = dataset.map(
+                lambda x: {
+                    "token_length": [
+                        len(i)
+                        for i in tokenizer(x["label"])["input_ids"]
+                    ],
+                },
+                batched=True,
+                batch_size=self.batch_size,
+                num_proc=self.num_procs,
+            )
+            token_lengths = np.array(dataset["token_length"])
+            print(
+                np.quantile(
+                    token_lengths,
+                    self.quantiles,
+                )
+            )
+            token_length_thresh = np.quantile(
+                token_lengths,
+                token_length_quantile,
+            )
+            dataset = dataset.filter(
+                lambda x: x["token_length"] > token_length_thresh,
+            )
+        print(f"# samples after filtering using token length threshold {token_length_thresh:,}: {len(dataset):,}")
+
         dataset = dataset.map(
             lambda x: {
                 "label": [
@@ -108,28 +100,26 @@ class TableImageOTSLExporterForDataset:
         )
 
 
-def count_total_tags(
-    text: str,
-):
-    if not isinstance(text, str):
-        return 0
-    return len(regex.findall(r"</?[\p{L}_]+>", text))
-
-
 def main(
+    user_id: str,
     test_size: float = 0.0005,  # 0.5%
     val_size: float = 0.025,  # 2.5%
-    # quantile: float = 0.,
+    token_length_quantile: float = 0.,
     model: str = None,
     quantiles: List[float] = [0.9, 0.95, 0.98, 0.99, 0.999, 1.],
     batch_size: int = 64,
-    num_procs: int = 32,
+    num_procs: int = 64,
 ) -> None:
-    # exporter = TableImageOTSLExporter()
-    exporter = TableImageOTSLExporterForDataset()
-    manager = DatalakeClient()
+    exporter = TableImageOTSLExporter(
+        quantiles=quantiles,
+        batch_size=batch_size,
+        num_procs=num_procs,
+    )
+    client = DatalakeClient(
+        user_id=user_id,
+    )
 
-    search_results = manager.search(
+    search_results = client.search(
         variants=[
             "table_image_otsl",
         ]
@@ -142,74 +132,37 @@ def main(
             ],
         ).size()
     )
+    # search_results=search_results.head(5000)
 
-    # df = manager.to_pandas(
-    #     search_results,
-    # )
-
-    # if quantile > 0.:
-    #     df["tag_count"] = df["label"].progress_apply(
-    #         count_total_tags,
-    #     )
-    #     threshold = df["tag_count"].quantile(quantile)
-    #     print(f"Threshold: {threshold}")
-    #     df = df[df["tag_count"] >= threshold]
-
-    dataset = manager.to_dataset(
-        search_results
+    dataset = client.to_dataset(
+        search_results,
+        absolute_paths=True,
     )
-
-    if model is not None:
-        processor = AutoProcessor.from_pretrained(
-            model,
-            trust_remote_code=True,
-            device_map="cpu",
-        )
-        dataset = dataset.map(
-            lambda x: {
-                "token_length": [len(i) for i in processor.tokenizer(x["label"])["input_ids"]]
-            },
-            batched=True,
-            batch_size=batch_size,
-            num_proc=num_procs,
-        )
-        token_lengths = np.array(dataset["token_length"])
-        print(
-            np.quantile(
-                token_lengths,
-                quantiles,
-            )
-        )
-
-    # df_train_val, df_test = train_test_split(
-    #     df,
-    #     test_size=test_size,
-    # )
-    # df_train, df_val = train_test_split(
-    #     df_train_val,
-    #     test_size=val_size,
-    # )
-    # print(f"Train: {len(df_train)}, Val: {len(df_val)}, Test: {len(df_test)}")
     dataset_train_val, dataset_test = dataset.train_test_split(
         test_size=test_size,
-    )
+    ).values()
     dataset_train, dataset_val = dataset_train_val.train_test_split(
         test_size=val_size,
-    )
+    ).values()
     print(f"Train: {len(dataset_train)}, Val: {len(dataset_val)}, Test: {len(dataset_test)}")
 
-    exporter.export(
-        # df=df_train,
-        dataset_train,
-        save_path="/home/eric/workspace/datalake/export/data/table_image_otsl_train.jsonl",
+    processor = AutoProcessor.from_pretrained(
+        model,
+        use_fast=True,
+        trust_remote_code=True,
+        device_map="cpu",
     )
     exporter.export(
-        # df=df_val,
+        dataset_train,
+        save_path="/home/eric/workspace/datalake/export/data/table_image_otsl_train.jsonl",
+        tokenizer=processor.tokenizer,
+        token_length_quantile=token_length_quantile,
+    )
+    exporter.export(
         dataset_val,
         save_path="/home/eric/workspace/datalake/export/data/table_image_otsl_val.jsonl",
     )
     exporter.export(
-        # df=df_test,
         dataset_test,
         save_path="/home/eric/workspace/datalake/export/data/table_image_otsl_test.jsonl",
     )

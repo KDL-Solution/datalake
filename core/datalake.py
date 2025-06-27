@@ -586,7 +586,7 @@ class DatalakeClient:
 
         df_copy = self._prepare_dataframe(search_results, absolute_paths)
         dataset = Dataset.from_pandas(df_copy)
-        
+
         if include_images:
             dataset = self._add_images_to_dataset(dataset)
 
