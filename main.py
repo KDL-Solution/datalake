@@ -683,6 +683,24 @@ class DataManagerCLI:
                 else:
                     print("❌ 잘못된 선택입니다. 1 또는 2를 입력해주세요.")
             
+            sample_percent = None
+            sample_check = self._ask_yes_no(
+                question="샘플 데이터만 검사하시겠습니까?",
+                default=False,
+            )
+            
+            if sample_check:
+                while True:
+                    sample_input = input("샘플 비율 입력 (0.1 = 10%) [0.1]: ").strip() or "0.1"
+                    try:
+                        sample_percent = float(sample_input)
+                        if 0 < sample_percent <= 1:
+                            break
+                        else:
+                            print("❌ 비율은 0과 1 사이의 값이어야 합니다. 다시 입력해주세요.")
+                    except ValueError:
+                        print("❌ 숫자를 입력해주세요. (예: 0.1, 0.05)")
+                                    
             search_results = None
 
             if scope_choice == "1":
@@ -704,26 +722,18 @@ class DataManagerCLI:
             
             print(f"\n📊 검사 대상: {len(search_results):,}개 항목")    
         
-            sample_percent = None
-            sample_check = self._ask_yes_no(
-                question="샘플 데이터만 검사하시겠습니까?",
-                default=False,
-            )
-            
-            if sample_check:
-                while True:
-                    sample_input = input("샘플 비율 입력 (0.1 = 10%) [0.1]: ").strip() or "0.1"
-                    try:
-                        sample_percent = float(sample_input)
-                        if 0 < sample_percent <= 1:
-                            break
-                        else:
-                            print("❌ 비율은 0과 1 사이의 값이어야 합니다. 다시 입력해주세요.")
-                    except ValueError:
-                        print("❌ 숫자를 입력해주세요. (예: 0.1, 0.05)")
+            if sample_percent:
+                print(f"🔍 샘플 검사 비율: {sample_percent * 100:.1f}%")
+                sample_size = int(len(search_results) * sample_percent)
+                if sample_size < 1:
+                    print("❗ 샘플 크기가 너무 작습니다. 전체 데이터로 검사합니다.")
+                    sample_size = len(search_results)
+                search_results = search_results.sample(n=sample_size, random_state=42)
 
+            print(f"📊 샘플 검사 대상: {len(search_results):,}개 항목")
+            
             print("\n🔄 서버에 검사 요청 중...")
-            job_id = self.data_manager.request_asset_validation_with_data(
+            job_id = self.data_manager.request_asset_validation(
                 search_results=search_results,
                 sample_percent=sample_percent
             )
@@ -769,7 +779,9 @@ class DataManagerCLI:
                 print(f"🔄 백그라운드에서 유효성 검사 진행 중...")
                 print(f"💡 'python main.py db validate-status {job_id}' 명령으로 결과를 확인할 수 있습니다.")
                 return True
-                    
+        except KeyboardInterrupt:
+            print("\n❌ 중단되었습니다.")
+            return False
         except Exception as e:
             print(f"❌ 유효성 검사 중 오류: {e}")
             return False
@@ -798,6 +810,55 @@ class DataManagerCLI:
         except Exception as e:
             print(f"❌ 보고서 생성 실패: {e}")
             return None
+    
+    def _show_validation_results(self, result, report=False):
+        """유효성 검사 결과 출력"""
+        print("\n" + "="*50)
+        print("📋 유효성 검사 결과")
+        print("="*50)
+        
+        total_items = result.get('total_items', 0)
+        checked_items = result.get('checked_items', 0)
+        missing_count = result.get('missing_count', 0)
+        integrity_rate = result.get('integrity_rate', 0)
+        
+        # 결과 통계
+        print(f"📊 검사 통계:")
+        print(f"  • 총 항목: {total_items:,}개")
+        print(f"  • 검사 항목: {checked_items:,}개")
+        print(f"  • 누락 파일: {missing_count:,}개")
+        print(f"  • 무결성 비율: {integrity_rate:.1f}%")
+        
+        # 결과 평가
+        if missing_count == 0:
+            print("\n✅ 모든 파일이 정상적으로 존재합니다!")
+        else:
+            print(f"\n⚠️ {missing_count:,}개 파일이 NAS에서 누락되었습니다.")
+            
+            # 누락 파일 샘플 표시
+            missing_files = result.get('missing_files', [])
+            if missing_files:
+                print(f"\n📁 누락된 파일 (상위 5개):")
+                for i, item in enumerate(missing_files[:5], 1):
+                    hash_short = item.get('hash', 'unknown')[:16] + '...' if len(item.get('hash', '')) > 16 else item.get('hash', 'unknown')
+                    provider = item.get('provider', 'unknown')
+                    dataset = item.get('dataset', 'unknown')
+                    print(f"  {i}. {hash_short} ({provider}/{dataset})")
+                
+                if len(missing_files) > 5:
+                    print(f"  ... 및 {len(missing_files) - 5}개 더")
+        
+        # 보고서 생성
+        if report and missing_count > 0:
+            try:
+                report_path = self._generate_validation_report(result)
+                if report_path:
+                    print(f"\n📄 상세 보고서: {report_path}")
+            except Exception as e:
+                print(f"⚠️ 보고서 생성 실패: {e}")
+        
+        print("\n" + "="*50)
+        
         
     def _ask_yes_no(self, question, default=False):
         """y/N 질문 함수"""

@@ -1,186 +1,181 @@
 # DataLake Management System
 
-Multimodal data management system with automatic processing, deduplication, and querying capabilities.
+> Multimodal data management with automatic processing, deduplication, and querying
 
-## Features
+[![Python 3.8+](https://img.shields.io/badge/python-3.8+-blue.svg)](https://www.python.org/downloads/)
+[![FastAPI](https://img.shields.io/badge/FastAPI-latest-green.svg)](https://fastapi.tiangolo.com/)
 
-- **Data Management**: Raw and task-specific data with Provider/Dataset/Task/Variant hierarchy
-- **Processing**: Parallel processing with image optimization and file deduplication
-- **Querying**: DuckDB and AWS Athena support with partition and JSON search
-- **API Server**: FastAPI async processing server
-- **CLI**: Command-line interface for data operations
 
-## Architecture
+## Quick Start
 
-```
-datalake/
-├── core/                   # Data management
-├── server/                 # Processing server  
-├── clients/                # Query clients (DuckDB, Athena)
-├── staging/                # Processing pipeline
-│   ├── pending/
-│   ├── processing/
-│   └── failed/
-├── catalog/                # Parquet data
-└── assets/                 # File storage
-```
-
-## Installation
+### Installation
 
 ```bash
 git clone https://github.com/KDL-Solution/datalake.git
 cd datalake
 pip install -e .
 
-# # Create required directories (if you are the admin)
+# Create directories (admin only)
 mkdir -p /mnt/AI_NAS/datalake/{staging/{pending,processing,failed},catalog,assets,config,logs}
 ```
 
-## Usage
-
-### 1. Start Processing Server (if you are the admin)
+### Start Server (Admin)
 
 ```bash
 datalake-server --port 8000 --num-proc 16
-# or: python -m server.app --port 8000 --num-proc 16
 ```
 
-### 2. Python API
+### Basic Usage
 
 ```python
 from core.datalake import DatalakeClient
 
-# Initialize client
+# Initialize
 client = DatalakeClient(
     user_id="user",
     base_path="/mnt/AI_NAS/datalake",
     server_url="http://localhost:8091"
 )
 
-# Upload raw data
+# Upload data
 staging_dir, job_id = client.upload_raw(
-    data_file="dataset.parquet",  # or pandas DataFrame, HF Dataset
+    data_file="dataset.parquet",  # or DataFrame, HF Dataset
     provider="huggingface",
     dataset="coco_2017"
 )
 
-# Upload task data  
-staging_dir, job_id = client.upload_task(
-    data_file="ocr_results.parquet", 
-    provider="huggingface",
-    dataset="coco_2017", 
-    task="ocr",
-    variant="base_ocr",
-    meta={"lang": "ko", "src": "real"}
-)
-
-# Trigger processing
+# Process and build database
 job_id = client.trigger_processing()
 result = client.wait_for_job_completion(job_id)
-
-# Build database
 client.build_db()
 
-# Search data
+# Search and export
 results = client.search(
     providers=["huggingface"],
     datasets=["coco_2017"],
     tasks=["ocr"]
 )
-
-# Export results
 client.export(results, "./output", format="dataset", include_images=True)
 ```
 
-### 3. CLI Usage
+## CLI Usage
 
 ```bash
-# Configure providers and tasks
+# Configure
 datalake config provider create huggingface
 datalake config task create ocr
 
-# Upload and process data
+# Upload and process
 datalake upload
 datalake process start
 
-# Build database and export
+# Query and export
 datalake db update
 datalake export
-
-# or use: python main.py <command>
 ```
+
+## Data Flow
+
+```
+Upload → Staging → Processing → Catalog (Parquet) + Assets → Database → Query → Export
+```
+
+1. **Upload**: Raw/task data goes to staging/pending
+2. **Process**: Auto-process with deduplication to catalog + assets  
+3. **Database**: Build DuckDB/Athena tables from parquet
+4. **Query**: Search by hierarchy or JSON content
+5. **Export**: Results to Parquet/Dataset/HF format
 
 ## Configuration
 
-### Schema Configuration (`config/schema.yaml`)
+### Schema Config (`config/schema.yaml`)
 
 ```yaml
 providers:
   huggingface:
     description: 'Hugging Face datasets'
   aihub:
-    description: 'AI Hub public datasets'
+    description: 'AI Hub datasets'
 
 tasks:
   ocr:
-    description: 'Optical Character Recognition'
+    description: 'OCR results'
     required_fields: ['lang', 'src']
     allowed_values:
-      lang: ['ko', 'en', 'ja', 'multi']
+      lang: ['ko', 'en', 'ja']
       src: ['real', 'synthetic']
 ```
 
-### Server Configuration (`config.yaml`)
+### Server Config (`config.yaml`)
 
 ```yaml
 base_path: "/mnt/AI_NAS/datalake"
 server_url: "http://192.168.20.62:8091"
-log_level: "INFO"
 num_proc: 16
 ```
 
-## Data Flow
+## Data Structure
 
-1. **Upload**: Raw/task data → staging/pending
-2. **Process**: pending → processing → catalog (parquet) + assets (files)
-3. **Database**: Catalog parquet files → DuckDB/Athena tables
-4. **Query**: Search by partitions or JSON content
-5. **Export**: Results → Parquet/Dataset/HF Dataset
+```
+datalake/
+├── staging/           # Upload queue
+│   ├── pending/
+│   ├── processing/
+│   └── failed/
+├── catalog/           # Parquet data (Hive partitioned)
+│   └── provider=huggingface/
+│       └── dataset=coco_2017/
+│           ├── task=raw/variant=image/
+│           └── task=ocr/variant=base_ocr/
+└── assets/           # File storage
+```
+
+## API Reference
+
+### Classes
+- `DatalakeClient`: Main interface
+- `DuckDBClient`: Local querying
+- `DatalakeProcessor`: Data processing
+
+### Endpoints
+- `POST /process`: Start processing
+- `GET /status`: Server status
+- `GET /jobs/{job_id}`: Job status
 
 ## Development
 
-### Server Development
-
 ```bash
-# Dev server with reload
-uvicorn server.app:app --reload --host 0.0.0.0 --port 8000
+# Dev server
+uvicorn server.app:app --reload --port 8000
+
+# CLI alternative
+python main.py <command>
 ```
 
-### Database Schema
+## Examples
 
-Data is stored in Hive-partitioned Parquet format:
+### Task Data Upload
+
+```python
+# Upload OCR results
+staging_dir, job_id = client.upload_task(
+    data_file="ocr_results.parquet",
+    provider="huggingface",
+    dataset="coco_2017",
+    task="ocr",
+    variant="base_ocr",
+    meta={"lang": "ko", "src": "real"}
+)
 ```
-catalog/
-├── provider=huggingface/
-│   └── dataset=coco_2017/
-│       ├── task=raw/variant=image/
-│       └── task=ocr/variant=base_ocr/
+
+### Advanced Search
+
+```python
+# Search with filters
+results = client.search(
+    providers=["huggingface", "aihub"],
+    datasets=["coco_2017"],
+    tasks=["ocr"],
+    filter_json={"lang": "ko"}
+)
 ```
-
-Required columns: `hash`, `path`, task-specific metadata fields
-
-## API
-
-### Classes
-
-- `DatalakeClient`: Main client
-- `DuckDBClient`: Local querying  
-- `DatalakeProcessor`: Data processing
-- `SchemaManager`: Configuration management
-
-### Endpoints
-
-- `POST /process`: Start processing
-- `GET /status`: Server status  
-- `GET /jobs/{job_id}`: Job status
-- `GET /jobs`: List jobs
