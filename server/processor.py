@@ -10,7 +10,8 @@ from collections import Counter
 from datetime import datetime
 from tqdm import tqdm
 from pathlib import Path
-from typing import Dict
+from typing import Dict, List, Union, Optional
+import pandas as pd
 from PIL import Image
 from datasets import Dataset, load_from_disk
 from datasets.features import Image as ImageFeature
@@ -70,14 +71,7 @@ class DatalakeProcessor:
         self.logger.info("🔄 Pending 데이터 처리 시작")
         
         if not self.staging_pending_path.exists():
-            return {
-                "success": 0, 
-                "failed": 0, 
-                "message": "Pending 디렉토리 없음",
-                "errors": [],
-                "success_details": [],
-                "failed_details": []
-            }
+            return self._create_processing_result(message="Pending 디렉토리 없음")
         
         pending_dirs = [
             d for d in self.staging_pending_path.iterdir()
@@ -85,14 +79,7 @@ class DatalakeProcessor:
         ]
         
         if not pending_dirs:
-            return {
-                "success": 0, 
-                "failed": 0, 
-                "message": "처리할 데이터 없음",
-                "errors": [],
-                "success_details": [],
-                "failed_details": []
-            }
+            return self._create_processing_result(message="처리할 데이터 없음")
         
         self.logger.info(f"📦 처리 대상: {len(pending_dirs)}개")
         
@@ -128,12 +115,11 @@ class DatalakeProcessor:
                 shutil.rmtree(processing_dir)
                 success_count += 1
                 
-                success_info = {
+                success_details.append({
                     "directory": dir_name,
                     "status": "success",
                     "timestamp": datetime.now().isoformat(),
-                }
-                success_details.append(success_info)
+                })
                 
                 self.logger.info(f"✅ 완료: {dir_name}")
                 
@@ -149,90 +135,203 @@ class DatalakeProcessor:
                     "timestamp": datetime.now().isoformat(),
                 }
                 
-                # 추가 에러 컨텍스트 수집
-                try:
-                    if processing_dir and processing_dir.exists():
-                        error_info["processing_dir_exists"] = True
-                        # 메타데이터 파일 확인
-                        metadata_file = processing_dir / "upload_metadata.json"
-                        if metadata_file.exists():
-                            error_info["metadata_exists"] = True
-                            try:
-                                with open(metadata_file, 'r', encoding='utf-8') as f:
-                                    metadata = json.load(f)
-                                    error_info["metadata_info"] = {
-                                        "file_count": len(metadata.get("files", [])),
-                                        "upload_time": metadata.get("upload_time", "unknown")
-                                    }
-                            except:
-                                error_info["metadata_read_error"] = True
-                        else:
-                            error_info["metadata_exists"] = False
-                    else:
-                        error_info["processing_dir_exists"] = False
-                        
-                except Exception as context_error:
-                    error_info["context_collection_error"] = str(context_error)
-                
                 failed_details.append(error_info)
                 error_summary.append(f"{dir_name}: {error_msg}")
                 
                 self.logger.error(f"❌ 실패: {dir_name} - {error_msg}")
+                self._move_to_failed(processing_dir, dir_name, error_info)
                 
-                # Failed 디렉토리로 이동
-                if processing_dir and processing_dir.exists():
-                    failed_dir = self.staging_failed_path / dir_name
-                    failed_dir.parent.mkdir(mode=0o775, parents=True, exist_ok=True)
-                    try:
-                        # 에러 정보를 파일로 저장
-                        error_file = failed_dir.parent / f"{dir_name}_error.json"
-                        shutil.move(str(processing_dir), str(failed_dir))
-                        
-                        # 에러 정보 저장
-                        with open(error_file, 'w', encoding='utf-8') as f:
-                            json.dump(error_info, f, ensure_ascii=False, indent=2)
-                            
-                    except Exception as move_error:
-                        move_error_msg = str(move_error)
-                        error_info["move_error"] = move_error_msg
-                        self.logger.error(f"Failed 디렉토리 이동 실패: {move_error_msg}")
+        self._cleanup_processing_dirs()
+        
+        return self._create_processing_result(
+            success_count=success_count,
+            failed_count=failed_count,
+            success_details=success_details,
+            failed_details=failed_details,
+            error_summary=error_summary
+        )
+
+    def validate_files_existence(
+        self,
+        user_id: str,
+        search_data: List[Dict],
+        sample_percent: Optional[float] = None
+    ) -> Dict:
+        """NAS 파일 존재 여부 검사 (DataFrame 기반)"""
+        self.logger.info(f"🔍 파일 존재 여부 검사 시작 - 사용자: {user_id}, 데이터: {len(search_data)}개")
+        
+        try:
+            if not search_data:
+                return self._create_validation_result(0, 0, [], "검사할 데이터가 없습니다.")
+            
+            # DataFrame으로 변환
+            search_df = pd.DataFrame(search_data)
+            
+            total_items = len(search_df)
+            self.logger.info(f"📊 검사 대상: {total_items:,}개")
+            
+            # 샘플링
+            if sample_percent and sample_percent < 1.0:
+                sample_size = int(total_items * sample_percent)
+                search_df = search_df.sample(n=sample_size, random_state=42)
+                self.logger.info(f"📊 샘플 검사: {len(search_df):,}개 ({sample_percent*100:.1f}%)")
+            
+            # Dataset으로 변환
+            dataset = Dataset.from_pandas(search_df)
+            dataset = dataset.filter(
+                lambda x: x.get('hash') and x.get('path'),
+                desc="필수 필드 필터링"
+            )
+            
+            if len(dataset) == 0:
+                return self._create_validation_result(
+                    total_items, 0, [], "hash 또는 path 필드가 없는 데이터입니다."
+                )
+            
+            # 파일 존재 여부 확인
+            self.logger.info("📁 NAS 파일 존재 여부 확인 중...")
+            dataset_with_check = dataset.map(
+                self._check_file_exists,
+                desc="파일 존재 확인",
+                num_proc=min(self.num_proc, 8),
+                load_from_cache_file=False
+            )
+            
+            # 누락 파일 필터링
+            missing_files_dataset = dataset_with_check.filter(
+                lambda x: not x['file_exists'],
+                desc="누락 파일 필터링"
+            )
+            
+            return self._create_validation_result(
+                user_id=user_id,
+                total_items=total_items,
+                checked_items=len(dataset),
+                missing_files=missing_files_dataset.to_list(),
+                message="파일 존재 여부 검사 완료"
+            )
+            
+        except Exception as e:
+            return self._create_validation_result(
+                user_id=user_id,
+                message="파일 존재 여부 검사 중 오류 발생",
+                error=str(e)
+            ) 
+    
+    def _check_file_exists(self, example):
+        """파일 존재 여부 확인"""
+        path_val = example.get('path')
+        if not path_val:
+            example['file_exists'] = False
+            return example
+        
+        file_path = self.assets_path / path_val
+        exists = file_path.exists()
+        example['file_exists'] = exists
+        
+        if not exists:
+            example['checked_path'] = str(file_path)
+            
+        return example
+    
+    def _create_validation_result(
+        self,
+        user_id: str,
+        total_items: int = 0,
+        checked_items: int = 0, 
+        missing_files: List[Dict] = None,
+        message: str = "검사 완료",  # 기본 메시지
+        error: str = None  # 🔥 에러도 함께 처리
+    ) -> Dict:
+        """유효성 검사 결과 생성 (성공/실패 통합)"""
+        missing_files = missing_files or []
+        missing_count = len(missing_files)
+        integrity_rate = ((checked_items - missing_count) / checked_items * 100) if checked_items > 0 else 0
+        
+        result = {
+            'user_id': user_id,
+            'total_items': total_items,
+            'checked_items': checked_items,
+            'missing_files': missing_files[:100],
+            'missing_count': missing_count,
+            'integrity_rate': round(integrity_rate, 2),
+            'message': message,
+        }
+        
+        if error:
+            result['error'] = error
+        return result
+    
+    def _create_processing_result(
+        self, 
+        success_count: int = 0, 
+        failed_count: int = 0, 
+        success_details: List[Dict] = None,
+        failed_details: List[Dict] = None,
+        error_summary: List[str] = None,
+        message: str = "처리 완료"  # 기본값만 제공
+    ) -> Dict:
+        """처리 결과 생성 (순수하게 딕셔너리 구조만)"""
+        success_details = success_details or []
+        failed_details = failed_details or []
+        error_summary = error_summary or []
+        
+        total_processed = success_count + failed_count
+        success_rate = f"{(success_count/total_processed*100):.1f}%" if total_processed > 0 else "0%"
+        
+        # 에러 분석만
+        most_common_errors = []
+        if failed_details:
+            error_types = [detail.get("error_type", "Unknown") for detail in failed_details]
+            most_common = Counter(error_types).most_common(3)
+            most_common_errors = [{"error_type": et, "count": c} for et, c in most_common]
+        
+        return {
+            "success": success_count,
+            "failed": failed_count,
+            "total_processed": total_processed,
+            "message": message,  # 그냥 받은 그대로
+            "summary": {
+                "success_rate": success_rate,
+                "most_common_errors": most_common_errors,
+                "processing_time": datetime.now().isoformat(),
+            },
+            "success_details": success_details,
+            "failed_details": failed_details,
+            "errors": error_summary,
+        }
+
+    def _move_to_failed(self, processing_dir: Path, dir_name: str, error_info: Dict):
+        """실패한 디렉토리를 failed로 이동"""
+        if processing_dir and processing_dir.exists():
+            failed_dir = self.staging_failed_path / dir_name
+            failed_dir.parent.mkdir(mode=0o775, parents=True, exist_ok=True)
+            try:
+                error_file = failed_dir.parent / f"{dir_name}_error.json"
+                shutil.move(str(processing_dir), str(failed_dir))
+                
+                # 에러 정보 저장
+                with open(error_file, 'w', encoding='utf-8') as f:
+                    json.dump(error_info, f, ensure_ascii=False, indent=2)
+                    
+            except Exception as move_error:
+                error_info["move_error"] = str(move_error)
+                self.logger.error(f"Failed 디렉토리 이동 실패: {move_error}")
+    
+    def _cleanup_processing_dirs(self):
+        """처리 중 디렉토리 정리"""
         remain_processing_dirs = [
             d for d in self.staging_processing_path.iterdir()
             if d.is_dir() and not (d / "upload_metadata.json").exists()
         ]
+        
         for remain_dir in remain_processing_dirs:
             try:
                 shutil.rmtree(remain_dir)
                 self.logger.info(f"✅ 처리 중 디렉토리 정리: {remain_dir.name}")
             except Exception as e:
                 self.logger.error(f"❌ 처리 중 디렉토리 정리 실패: {remain_dir.name} - {str(e)}")
-        most_common_errors = []
-        if failed_details:
-            error_types = [detail.get("error_type", "Unknown") for detail in failed_details]
-            most_common = Counter(error_types).most_common(3)
-            most_common_errors = [{"error_type": error_type, "count": count} for error_type, count in most_common]
-        # 결과 구성
-        result = {
-            "success": success_count,
-            "failed": failed_count,
-            "total_processed": success_count + failed_count,
-            "success_details": success_details,
-            "failed_details": failed_details,
-            "errors": error_summary,
-            "summary": {
-                "success_rate": f"{(success_count/(success_count + failed_count)*100):.1f}%" if (success_count + failed_count) > 0 else "0%",
-                "most_common_errors": most_common_errors,
-                "processing_time": datetime.now().isoformat(),
-            }
-        }
-        
-        if failed_count > 0:
-            result["message"] = f"처리 완료: {success_count}개 성공, {failed_count}개 실패"
-        else:
-            result["message"] = f"모든 데이터 처리 성공: {success_count}개"
-        
-        return result
-    
+                
     def _check_path_and_setup_logging(self, log_level: str = "INFO"):
         
         required_paths = {
@@ -336,10 +435,8 @@ class DatalakeProcessor:
             self.logger.error(f"❌ datasets.map() 처리 실패: {e}")
             raise
         
-        
     def _process_files_with_map(self, dataset_obj: Dataset, metadata: Dict, assets_base: Path) -> Dataset:
         """파일 처리 (staging/assets → final/assets + hash)"""
-        print(metadata)
         total_files = len(dataset_obj)
         self.logger.info(f"📄 파일 처리 시작: {self.file_path_key} ({total_files}개)")
         
@@ -371,51 +468,56 @@ class DatalakeProcessor:
     
     def _process_image_batch(self, batch: Dict, assets_base: Path, shard_config: Dict) -> Dict:
         """배치 단위 이미지 처리 (PIL Image/bytes → hash.jpg)"""
-        images = batch[self.image_data_key]
-        self.logger.debug(f"배치 처리: {len(images)}개 이미지")        
-        image_hashes = []
-        image_paths = []
         
+        input_images = batch[self.image_data_key]
+        self.logger.debug(f"배치 처리: {len(input_images)}개 이미지")
+        
+        output_hashes = []
+        output_paths = []
         saved_count = 0
         duplicate_count = 0
         
-        for idx, image_data in enumerate(images):
+        for idx, raw_image_data in enumerate(input_images):
             try:
-                # 실패 시 중단
                 if self.processing_failed:
                     break
                 
-                if image_data is None:
-                    image_hashes.append(None)
-                    image_paths.append(None)
+                if raw_image_data is None:
+                    output_hashes.append(None)
+                    output_paths.append(None)
                     continue
                 
-                # PIL Image 처리
-                pil_image = image_data if hasattr(image_data, 'save') else Image.open(io.BytesIO(image_data))
+                # PIL Image로 변환
+                if hasattr(raw_image_data, 'save'):
+                    pil_image = raw_image_data
+                else:
+                    pil_image = Image.open(io.BytesIO(raw_image_data))
                 
-                image_hash  = self._get_image_hash(pil_image)
-                image_path = self._get_level_path(assets_base, shard_config, image_hash)
-                if image_hash in self.existing_hashes:
+                # 해시 계산 및 목적지 경로 생성
+                file_hash = self._get_image_hash(pil_image)
+                target_file_path = self._get_level_path(assets_base, shard_config, file_hash)
+                
+                # 중복 이미지 처리
+                if file_hash in self.existing_hashes:
                     duplicate_count += 1    
                 else:
-                    image_path.parent.mkdir(mode=0o775, parents=True, exist_ok=True)
+                    target_file_path.parent.mkdir(mode=0o775, parents=True, exist_ok=True)
                     
                     if pil_image.mode != 'RGB':
                         pil_image = pil_image.convert('RGB')
-                    pil_image.save(str(image_path), 'JPEG', quality=95)
+                    pil_image.save(str(target_file_path), 'JPEG', quality=95)
                     
-                    # 캐시에 추가 (thread-safe)
                     with self.cache_lock:
-                        self.existing_hashes.add(image_hash)
+                        self.existing_hashes.add(file_hash)
                     
                     saved_count += 1
                 
-                relative_path = str(image_path.relative_to(self.assets_path))
-                image_hashes.append(image_hash)
-                image_paths.append(relative_path)
+                # 결과 저장 (assets 기준 상대경로)
+                relative_target_path = str(target_file_path.relative_to(self.assets_path))
+                output_hashes.append(file_hash)
+                output_paths.append(relative_target_path)
                 
             except Exception as e:
-                # 이미지 처리 실패 시 전체 실패로 마킹
                 with self.failure_lock:
                     if not self.processing_failed:
                         self.processing_failed = True
@@ -423,56 +525,60 @@ class DatalakeProcessor:
                         self.error_messages.append(error_msg)
                         self.logger.error(f"❌ {error_msg}")
                 
-                # 실패 즉시 중단
                 raise RuntimeError(f"이미지 처리 실패: {str(e)}")
         
-        # 로그 출력 (배치별)
         if saved_count > 0 or duplicate_count > 0:
             self.logger.debug(f"배치 처리: 저장={saved_count}, 중복={duplicate_count}")
         
         return {
-            "path": image_paths,
-            "hash": image_hashes,
+            "path": output_paths,
+            "hash": output_hashes,
         }
         
     def _process_file_batch(self, batch: Dict, assets_base: Path, shard_config: Dict) -> Dict:
         """배치 단위 파일 처리 (staging/assets → final/assets + hash)"""
         
-        file_paths = batch[self.file_path_key]
-        self.logger.debug(f"배치 파일 처리: {len(file_paths)}개")
-        file_hashes = []
-        new_file_paths = []
+        input_file_paths = batch[self.file_path_key]
+        self.logger.debug(f"배치 파일 처리: {len(input_file_paths)}개")
         
+        output_hashes = []
+        output_paths = []
         saved_count = 0
         duplicate_count = 0
-        # print iterdir staging_pending_path
-        for idx, file_path in enumerate(file_paths):
+        
+        for idx, relative_path in enumerate(input_file_paths):
             try:
                 if self.processing_failed:
                     break
                 
-                if file_path is None:
-                    file_hashes.append(None)
-                    file_paths.append(None)
+                if relative_path is None:
+                    output_hashes.append(None)
+                    output_paths.append(None)
                     continue
-                    
-                file_path = self.staging_processing_path / file_path
-                if not file_path.exists():
-                    raise FileNotFoundError(f"파일이 존재하지 않습니다: {file_path}")
                 
-                file_hash = self._get_file_hash(file_path)
-                new_file_path = self._get_level_path(assets_base, shard_config, file_hash)
+                # staging에서 파일 읽기
+                source_file_path = self.staging_processing_path / relative_path
+                if not source_file_path.exists():
+                    raise FileNotFoundError(f"파일이 존재하지 않습니다: {source_file_path}")
+                
+                # 해시 계산 및 목적지 경로 생성
+                file_hash = self._get_file_hash(source_file_path)
+                target_file_path = self._get_level_path(assets_base, shard_config, file_hash)
+                
+                # 중복 파일 처리
                 if file_hash in self.existing_hashes:
                     duplicate_count += 1
                 else:
-                    new_file_path.parent.mkdir(mode=0o775, parents=True, exist_ok=True)
-                    shutil.move(str(file_path), str(new_file_path))
+                    target_file_path.parent.mkdir(mode=0o775, parents=True, exist_ok=True)
+                    shutil.move(str(source_file_path), str(target_file_path))
                     with self.cache_lock:
                         self.existing_hashes.add(file_hash)
                     saved_count += 1
-                relative_path = str(new_file_path.relative_to(self.assets_path))
-                file_hashes.append(file_hash)
-                new_file_paths.append(relative_path)
+                
+                # 결과 저장 (assets 기준 상대경로)
+                relative_target_path = str(target_file_path.relative_to(self.assets_path))
+                output_hashes.append(file_hash)
+                output_paths.append(relative_target_path)
                     
             except Exception as e:
                 with self.failure_lock:
@@ -482,15 +588,14 @@ class DatalakeProcessor:
                         self.error_messages.append(error_msg)
                         self.logger.error(f"❌ {error_msg}")
                 
-                # 실패 즉시 중단
                 raise RuntimeError(f"파일 처리 실패: {str(e)}")
         
         if saved_count > 0 or duplicate_count > 0:
             self.logger.debug(f"배치 파일 처리: 저장={saved_count}, 중복={duplicate_count}")
 
         return {
-            "path": new_file_paths,
-            "hash": file_hashes
+            "path": output_paths,
+            "hash": output_hashes
         }
         
     def _build_hash_cache(self, assets_base: Path):

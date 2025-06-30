@@ -443,32 +443,43 @@ class DataManagerCLI:
             
             # 처리 시작
             job_id = self.data_manager.trigger_processing()
-            if job_id:
-                print(f"✅ 처리 시작됨: {job_id}")
-                
-                # 대기 여부 확인
-                wait_completion = input("처리 완료까지 대기하시겠습니까? (y/N): ").strip().lower()
-                if wait_completion in ['y', 'yes']:
-                    try:
-                        print("⏳ 처리 완료 대기 중... (Ctrl+C로 중단)")
-                        result = self.data_manager.wait_for_job_completion(job_id, timeout=3600)
-                        print(f"📊 처리 완료: {result}")
-                        return True
-                    except KeyboardInterrupt:
-                        print("\n⏸️ 대기 중단됨. 백그라운드에서 처리는 계속됩니다.")
-                        print(f"💡 'python main.py process status {job_id}' 명령으로 상태를 확인할 수 있습니다.")
-                        return True
-                    except Exception as e:
-                        print(f"❌ 처리 대기 중 오류: {e}")
-                        return False
-                else:
-                    print(f"🔄 백그라운드에서 처리 중입니다. Job ID: {job_id}")
+            if not job_id:
+                print("❌ 처리 시작에 실패했습니다.")
+                return False
+            print(f"✅ 처리 시작됨: {job_id}")
+
+            wait_choice = self._ask_yes_no(
+                question="처리 완료까지 대기하시겠습니까?",
+                default=True,
+            )  
+            if wait_choice:
+                try:
+                    print("⏳ 처리 완료 대기 중... (Ctrl+C로 중단)")
+                    result = self.data_manager.wait_for_job_completion(
+                        job_id, 
+                        polling_interval=30,  # 30초마다 확인
+                        timeout=3600  # 1시간 타임아웃
+                    )
+                    
+                    if result.get('result'):
+                        print(f"📊 처리 완료: {result['result']}")
+                    else:
+                        print("❌ 결과를 가져올 수 없습니다.")
+                    return True
+                    
+                except KeyboardInterrupt:
+                    print("\n⏸️ 대기 중단됨. 백그라운드에서 처리는 계속됩니다.")
+                    print(f"💡 'python main.py process status {job_id}' 명령으로 상태를 확인할 수 있습니다.")
+                    return True
+                    
+                except TimeoutError:
+                    print("⏰ 처리 시간이 초과되었습니다.")
                     print(f"💡 'python main.py process status {job_id}' 명령으로 상태를 확인할 수 있습니다.")
                     return True
             else:
-                print("❌ 처리 시작에 실패했습니다.")
-                return False
-                
+                print(f"🔄 백그라운드에서 처리 진행 중...")
+                print(f"💡 'python main.py process status {job_id}' 명령으로 상태를 확인할 수 있습니다.")
+                return True
         except KeyboardInterrupt:
             print("\n❌ 처리가 취소되었습니다.")
             return False
@@ -667,46 +678,38 @@ class DataManagerCLI:
             
             while True:
                 scope_choice = input("검사 범위 (1-2) [1]: ").strip() or "1"
-                
                 if scope_choice in ["1", "2"]:
                     break
                 else:
                     print("❌ 잘못된 선택입니다. 1 또는 2를 입력해주세요.")
             
             search_results = None
-            try:
-                if scope_choice == "1":
-                    
-                    print("\n🔄 사용 가능한 데이터 조회 중...")
-                    partitions_df = self.data_manager.get_partitions()                   
-                                            
-                    print(f"📊 {len(partitions_df)}개 파티션 사용 가능")
-                    
-                    # 검색 수행 (텍스트 검색 제외, 파티션 기반만)
-                    search_results = self._partition_search_interactive(partitions_df)
-                    
-                    if search_results is None or search_results.empty:
-                        raise ValueError("검색 결과가 없습니다. 조건을 다시 확인해주세요.")
-                        
-                    print(f"\n📊 검사 대상: {len(search_results):,}개 항목")
-                    
-                elif scope_choice == "2":
-                    print("\n🔄 전체 데이터 조회 중...")
-                    search_results = self.data_manager.search()  # 전체 검색
-                    
-                    if search_results is None or search_results.empty:
-                        raise ValueError("전체 데이터가 비어있습니다. DB를 먼저 구축해주세요.")
-                        
-                    print(f"\n📊 전체 데이터: {len(search_results):,}개 항목")
-                    
-            except Exception as e:
-                raise e
+
+            if scope_choice == "1":
+                print("\n🔄 사용 가능한 데이터 조회 중...")
+                partitions_df = self.data_manager.get_partitions()                        
+                print(f"📊 {len(partitions_df)}개 파티션 사용 가능")
+                
+                search_results = self._partition_search_interactive(partitions_df)
+                
+                if search_results is None or search_results.empty:
+                    raise ValueError("검색 결과가 없습니다. 조건을 다시 확인해주세요.")
+                
+            elif scope_choice == "2":
+                print("\n🔄 전체 데이터 조회 중...")
+                search_results = self.data_manager.search() 
+                
+                if search_results is None or search_results.empty:
+                    raise ValueError("전체 데이터가 비어있습니다. DB를 먼저 구축해주세요.")
             
+            print(f"\n📊 검사 대상: {len(search_results):,}개 항목")    
+        
+            sample_percent = None
             sample_check = self._ask_yes_no(
                 question="샘플 데이터만 검사하시겠습니까?",
                 default=False,
             )
-            sample_percent = None
+            
             if sample_check:
                 while True:
                     sample_input = input("샘플 비율 입력 (0.1 = 10%) [0.1]: ").strip() or "0.1"
@@ -718,53 +721,58 @@ class DataManagerCLI:
                             print("❌ 비율은 0과 1 사이의 값이어야 합니다. 다시 입력해주세요.")
                     except ValueError:
                         print("❌ 숫자를 입력해주세요. (예: 0.1, 0.05)")
-        
-            # 검사 실행
-            print("\n🔄 무결성 검사 시작...")
-            result = self.data_manager.validate_db_integrity(
-                search_results=search_results, 
+
+            print("\n🔄 서버에 검사 요청 중...")
+            job_id = self.data_manager.request_asset_validation_with_data(
+                search_results=search_results,
                 sample_percent=sample_percent
             )
             
-            print("\n" + "="*50)
-            print("📋 검사 결과 요약")
-            print("="*50)
+            if not job_id:
+                print("❌ 유효성 검사 요청 실패")
+                return False
+            
+            print(f"✅ 유효성 검사 시작됨: {job_id}")
 
-            total_items = result.get('total_items', 0)
-            checked_items = result.get('checked_items', 0)
-            missing_count = result.get('missing_count', 0)
-            integrity_rate = result.get('integrity_rate', 0)
-            errors = result.get('errors', [])
+            wait_choice = self._ask_yes_no(
+                question="검사 완료까지 대기하시겠습니까?",
+                default=True,
+            )
             
-            print(f"📊 검사 통계:")
-            print(f"  • 총 항목: {total_items:,}개")
-            print(f"  • 검사 항목: {checked_items:,}개")
-            print(f"  • 누락 파일: {missing_count:,}개")
-            print(f"  • 무결성 비율: {integrity_rate:.1f}%")
-            # error
-            print(f"  • 오류 발생: {len(errors)}개")
-            
-            
-            if missing_count == 0:
-                print("\n✅ 모든 검사 통과! 데이터가 정상입니다.")
+            if wait_choice:
+                try:
+                    print("⏳ 유효성 검사 진행 중... (Ctrl+C로 중단)")
+                    result = self.data_manager.wait_for_job_completion(
+                        job_id, 
+                        polling_interval=30,  # 30초마다 확인
+                        timeout=3600  # 1시간 타임아웃
+                    )
+                    
+                    # 결과 출력
+                    if result.get('result'):
+                        self._show_validation_results(result['result'], report)
+                    else:
+                        print("❌ 결과를 가져올 수 없습니다.")
+                    return True
+                    
+                except KeyboardInterrupt:
+                    print("\n⏸️ 대기 중단됨. 백그라운드에서 검사는 계속됩니다.")
+                    print(f"💡 'python main.py db validate-status {job_id}' 명령으로 나중에 결과를 확인할 수 있습니다.")
+                    return True
+                    
+                except TimeoutError:
+                    print("⏰ 검사 시간이 초과되었습니다.")
+                    print(f"💡 'python main.py db validate-status {job_id}' 명령으로 나중에 결과를 확인할 수 있습니다.")
+                    return True
+                    
             else:
-                print(f"\n⚠️ {missing_count}개 파일이 누락되었습니다.")
-                
-                missing_files = result.get('missing_files', [])
-                if missing_files:
-                    print(f"\n📁 누락된 파일 (상위 3개):")
-                    for item in missing_files[:3]:
-                        print(f"  • {item.get('hash', 'unknown')[:16]}... ({item.get('provider', 'unknown')}/{item.get('dataset', 'unknown')})")
-                
-            # 보고서 생성
-            if report:
-                report_path = self._generate_validation_report(result)
-                print(f"📄 상세 보고서: {report_path}")
-            
-            print("\n" + "="*50)
-                
+                print(f"🔄 백그라운드에서 유효성 검사 진행 중...")
+                print(f"💡 'python main.py db validate-status {job_id}' 명령으로 결과를 확인할 수 있습니다.")
+                return True
+                    
         except Exception as e:
-            raise e
+            print(f"❌ 유효성 검사 중 오류: {e}")
+            return False
 
     def _generate_validation_report(self, result):
         """검사 보고서 생성"""

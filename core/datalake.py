@@ -597,96 +597,46 @@ class DatalakeClient:
         else:
             raise ValueError(f"지원하지 않는 형식입니다: {format}")
     
-    def validate_db_integrity(
-        self, 
+    def request_asset_validation(
+        self,
         search_results: pd.DataFrame,
         sample_percent: Optional[float] = None
-    ) -> Dict:
-        """
-        데이터 무결성 검사
-
-        Args:
-            search_results: 검사할 데이터 (None이면 전체 db 검사)
-            sample_percent: 샘플링 비율 (0.1 = 10%)
-            
-        Returns:
-            검사 결과 딕셔너리
-        """
-        self.logger.info("🔍 데이터 무결성 검사 시작...")
-
+    ) -> Optional[str]:
+        self.logger.info(f"🔍 파일 존재 여부 검사 요청 중... ({len(search_results):,}개)")
         try:
-            if search_results.empty:
-                self.logger.warning("⚠️ 검색 결과가 비어 있습니다. 무결성 검사를 건너뜁니다.")
-                return {
-                    'total_items': 0,
-                    'missing_files': [],
-                    'errors': ["검색 결과가 비어 있습니다."]
-                }
-            else:
-                self.logger.info(f"📊 검사 대상 항목: {len(search_results):,}개")
-
-            # 샘플링
-            if sample_percent:
-                sample_size = int(len(search_results) * sample_percent)
-                search_results = search_results.sample(n=sample_size, random_state=42)
-                self.logger.info(f"📊 샘플 검사: {len(search_results):,}개 항목 ({sample_percent*100:.1f}%)")
-
-            dataset = Dataset.from_pandas(search_results)
-            dataset = dataset.filter(
-                lambda x: x.get('hash') and x.get('path'), 
-                desc="필수 필드 필터링"
+            search_data = search_results.to_dict('records')
+            
+            response = requests.post(
+                f"{self.server_url}/validate-assets",  
+                json={
+                    "user_id": self.user_id,
+                    "search_data": search_data,
+                    "sample_percent": sample_percent
+                },
+                timeout=60
             )
-
-            # 파일 존재 여부 검사
-            def check_file_exists(example):
-                path_val = example.get('path')
-                if not path_val:
-                    example['file_exists'] = None
-                    return example
+            
+            if response.status_code == 200:
+                result = response.json()
+                job_id = result.get('job_id')
+                status = result.get('status')
                 
-                file_path = self.assets_path / path_val
-                exists = file_path.exists()
-                example['file_exists'] = exists
-                return example
-
-            # 병렬 검사
-            dataset_with_check = dataset.map(
-                check_file_exists,
-                desc="파일 존재 확인",
-                num_proc=min(self.num_proc, 8),
-                load_from_cache_file=False
-            )
-
-            # 누락된 파일 찾기
-            missing_files_data = dataset_with_check.filter(
-                lambda x: not x['file_exists'],
-                desc="누락 파일 필터링"
-            )
-
-            missing_files = missing_files_data.to_list()
-
-            result = {
-                'total_items': len(search_results),
-                'checked_items': len(dataset),
-                'missing_files': missing_files,
-                'missing_count': len(missing_files),
-                'integrity_rate': (len(dataset) - len(missing_files)) / len(dataset) * 100 if len(dataset) > 0 else 0
-            }
-
-            self.logger.info(f"📊 무결성 검사 완료:")
-            self.logger.info(f"  총 항목: {result['total_items']:,}개")
-            self.logger.info(f"  검사 항목: {result['checked_items']:,}개")
-            self.logger.info(f"  누락 파일: {result['missing_count']:,}개")
-            self.logger.info(f"  무결성 비율: {result['integrity_rate']:.1f}%")
-            return result
-
-        except Exception as e:
-            self.logger.error(f"❌ 무결성 검사 실패: {e}")
-            return {
-                'total_items': 0,
-                'missing_files': [],
-                'errors': [str(e)]
-            }
+                if status == 'already_running':
+                    self.logger.info("🔄 이미 유효성 검사가 진행 중입니다")
+                    return job_id
+                elif status == 'started':
+                    self.logger.info(f"✅ 파일 존재 여부 검사 시작됨: {job_id}")
+                    return job_id
+                else:
+                    self.logger.warning(f"⚠️ 알 수 없는 상태: {status}")
+                    return job_id
+            else:
+                self.logger.error(f"❌ 검사 요청 실패: {response.status_code}")
+                return None
+                
+        except requests.exceptions.RequestException as e:
+            self.logger.error(f"❌ 서버 연결 실패: {e}")
+            return None
 
     def check_db_processes(self):
         """DB 사용 중인 프로세스 확인 (개선된 버전)"""
