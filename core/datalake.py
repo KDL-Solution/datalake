@@ -604,6 +604,14 @@ class DatalakeClient:
     ) -> Optional[str]:
         self.logger.info(f"🔍 파일 존재 여부 검사 요청 중... ({len(search_results):,}개)")
         try:
+            required_columns = ['hash', 'path']
+            self.logger.debug(f"필수 컬럼: {required_columns}")
+            search_results = search_results[required_columns].dropna(subset=['hash', 'path'])
+            search_results = search_results.drop_duplicates(subset=['hash', 'path'])
+            if search_results.empty:
+                self.logger.warning("⚠️ 검색 결과가 비어 있습니다. 유효성 검사 요청을 건너뜁니다.")
+                return None
+            self.logger.debug(f"유효성 검사 대상 데이터: {len(search_results):,}개")
             search_data = search_results.to_dict('records')
             
             response = requests.post(
@@ -613,7 +621,7 @@ class DatalakeClient:
                     "search_data": search_data,
                     "sample_percent": sample_percent
                 },
-                timeout=60
+                timeout=120,
             )
             
             if response.status_code == 200:
