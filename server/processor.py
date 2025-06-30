@@ -6,12 +6,14 @@ import io
 import threading
 import time
 import gc
+import pandas as pd
+import random
+
 from collections import Counter
 from datetime import datetime
 from tqdm import tqdm
 from pathlib import Path
 from typing import Dict, List, Union, Optional
-import pandas as pd
 from PIL import Image
 from datasets import Dataset, load_from_disk
 from datasets.features import Image as ImageFeature
@@ -155,59 +157,78 @@ class DatalakeProcessor:
         self,
         user_id: str,
         search_data: List[Dict],
-        sample_percent: Optional[float] = None
+        sample_percent: Optional[float] = None,
+        chunk_size: int = 10000,
     ) -> Dict:
         """NAS 파일 존재 여부 검사 (DataFrame 기반)"""
         self.logger.info(f"🔍 파일 존재 여부 검사 시작 - 사용자: {user_id}, 데이터: {len(search_data)}개")
         
         try:
             if not search_data:
-                return self._create_validation_result(0, 0, [], "검사할 데이터가 없습니다.")
+                return self._create_validation_result(
+                    user_id=user_id,
+                    message="검사할 데이터가 없습니다"
+                )
             
-            # DataFrame으로 변환
-            search_df = pd.DataFrame(search_data)
-            
-            total_items = len(search_df)
-            self.logger.info(f"📊 검사 대상: {total_items:,}개")
+            total_items = len(search_data)
             
             # 샘플링
             if sample_percent and sample_percent < 1.0:
                 sample_size = int(total_items * sample_percent)
-                search_df = search_df.sample(n=sample_size, random_state=42)
-                self.logger.info(f"📊 샘플 검사: {len(search_df):,}개 ({sample_percent*100:.1f}%)")
+                search_data = random.sample(search_data, sample_size)
+                self.logger.info(f"📊 샘플 검사: {len(search_data):,}개 ({sample_percent*100:.1f}%)")
             
             # Dataset으로 변환
-            dataset = Dataset.from_pandas(search_df)
-            dataset = dataset.filter(
-                lambda x: x.get('hash') and x.get('path'),
-                desc="필수 필드 필터링"
-            )
+            total_checked = 0
+            total_missing = 0
+            missing_files = []
             
-            if len(dataset) == 0:
-                return self._create_validation_result(
-                    total_items, 0, [], "hash 또는 path 필드가 없는 데이터입니다."
+            for i in range(0, len(search_data), chunk_size):
+                chunk_data = search_data[i:i + chunk_size]
+                self.logger.debug(f"📦 배치 {i//chunk_size + 1}/{(len(search_data)-1)//chunk_size + 1} 처리 중... ({len(chunk_data)}개)")
+                
+                # 작은 배치만 Dataset으로 처리
+                chunk_df = pd.DataFrame(chunk_data)
+                chunk_dataset = Dataset.from_pandas(chunk_df)
+                
+                # 필수 필드 필터링
+                filtered_dataset  = chunk_dataset.filter(
+                    lambda x: x.get('hash') and x.get('path'),
+                    desc=f"배치 {i//chunk_size + 1} 필드 필터링"
                 )
-            
-            # 파일 존재 여부 확인
-            self.logger.info("📁 NAS 파일 존재 여부 확인 중...")
-            dataset_with_check = dataset.map(
-                self._check_file_exists,
-                desc="파일 존재 확인",
-                num_proc=min(self.num_proc, 8),
-                load_from_cache_file=False
-            )
-            
-            # 누락 파일 필터링
-            missing_files_dataset = dataset_with_check.filter(
-                lambda x: not x['file_exists'],
-                desc="누락 파일 필터링"
-            )
+                
+                if len(filtered_dataset ) == 0:
+                    del chunk_df, chunk_dataset, filtered_dataset
+                    continue
+                
+                # 파일 존재 여부 확인
+                checked_dataset = filtered_dataset.map(
+                    self._check_file_exists,
+                    desc=f"배치 {i//chunk_size + 1} 파일 확인",
+                    num_proc=self.num_proc, 
+                    load_from_cache_file=False
+                )
+                
+                missing_dataset = checked_dataset.filter(
+                    lambda x: not x['file_exists'],
+                    desc=f"배치 {i//chunk_size + 1} 누락 필터링"
+                )
+                
+                total_checked += len(filtered_dataset)
+                batch_missing_count = len(missing_dataset)
+                total_missing += batch_missing_count
+                missing_files.extend(missing_dataset.to_list())
+                del chunk_df, chunk_dataset, filtered_dataset, checked_dataset, missing_dataset
+                gc.collect()
+                
+                self.logger.debug(f"✅ 배치 완료: 검사={len(filtered_dataset)}, 누락={batch_missing_count}")
+                
             
             return self._create_validation_result(
                 user_id=user_id,
                 total_items=total_items,
-                checked_items=len(dataset),
-                missing_files=missing_files_dataset.to_list(),
+                checked_items=total_checked,
+                missing_files=missing_files,
                 message="파일 존재 여부 검사 완료"
             )
             
