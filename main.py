@@ -457,7 +457,7 @@ class DataManagerCLI:
                     print("⏳ 처리 완료 대기 중... (Ctrl+C로 중단)")
                     result = self.data_manager.wait_for_job_completion(
                         job_id, 
-                        polling_interval=30,  # 30초마다 확인
+                        polling_interval=10,  # 10초마다 확인
                         timeout=3600  # 1시간 타임아웃
                     )
                     
