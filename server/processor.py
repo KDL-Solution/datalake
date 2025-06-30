@@ -182,48 +182,63 @@ class DatalakeProcessor:
             total_checked = 0
             total_missing = 0
             missing_files = []
+            total_batches = (len(search_data) - 1) // chunk_size + 1
+            
+            self.logger.info(f"📊 총 배치 수: {total_batches}, 청크 크기: {chunk_size}")
             
             for i in range(0, len(search_data), chunk_size):
                 chunk_data = search_data[i:i + chunk_size]
-                self.logger.info(f"📦 배치 {i//chunk_size + 1}/{(len(search_data)-1)//chunk_size + 1} 처리 중... ({len(chunk_data)}개)")
+                batch_num = i // chunk_size + 1
+                self.logger.info(f"📦 배치 {batch_num}/{total_batches} 시작 - 청크 데이터: {len(chunk_data)}개")
                 
-                # 작은 배치만 Dataset으로 처리
-                chunk_df = pd.DataFrame(chunk_data)
-                chunk_dataset = Dataset.from_pandas(chunk_df)
-                
-                # 필수 필드 필터링
-                filtered_dataset  = chunk_dataset.filter(
-                    lambda x: x.get('hash') and x.get('path'),
-                    desc=f"배치 {i//chunk_size + 1} 필드 필터링"
-                )
-                
-                if len(filtered_dataset) == 0:
-                    del chunk_df, chunk_dataset, filtered_dataset
+                try:
+                    chunk_df = pd.DataFrame(chunk_data)
+                    self.logger.debug(f"📊 DataFrame 생성 완료: {len(chunk_df)}행, 컬럼: {chunk_df.columns.tolist()}")
+                    chunk_dataset = Dataset.from_pandas(chunk_df)
+                    self.logger.debug(f"📊 Dataset 생성 완료: {len(chunk_dataset)}개")
+                    
+                    self.logger.debug(f"🔍 필터링 전 첫 번째 데이터: {chunk_dataset[0] if len(chunk_dataset) > 0 else 'None'}")
+                    filtered_dataset  = chunk_dataset.filter(
+                        lambda x: x.get('hash') and x.get('path'),
+                        desc=f"배치 {batch_num} 필드 필터링"
+                    )
+                    
+                    self.logger.info(f"🔍 배치 {batch_num} 필터링 결과: {len(chunk_dataset)} → {len(filtered_dataset)}")
+                    if len(filtered_dataset) == 0:
+                        self.logger.warning(f"⚠️ 배치 {batch_num}: 필터링 후 데이터 없음 - continue")
+                        del chunk_df, chunk_dataset, filtered_dataset
+                        continue
+                    
+                    self.logger.debug(f"📁 배치 {batch_num} 파일 존재 확인 시작...")
+                    # 파일 존재 여부 확인
+                    checked_dataset = filtered_dataset.map(
+                        self._check_file_exists,
+                        desc=f"배치 {batch_num} 파일 확인",
+                        num_proc=self.num_proc, 
+                        load_from_cache_file=False
+                    )
+                    self.logger.debug(f"📁 배치 {batch_num} 파일 확인 완료: {len(checked_dataset)}개")
+                    
+                    missing_dataset = checked_dataset.filter(
+                        lambda x: not x['file_exists'],
+                        desc=f"배치 {batch_num} 누락 필터링"
+                    )
+                    
+                    total_checked += len(filtered_dataset)
+                    batch_missing_count = len(missing_dataset)
+                    total_missing += batch_missing_count
+                    missing_files.extend(missing_dataset.to_list())
+                    
+                    self.logger.info(f"✅ 배치 완료: 검사={len(filtered_dataset)}, 누락={batch_missing_count}")
+                    
+                    del chunk_df, chunk_dataset, filtered_dataset, checked_dataset, missing_dataset
+                    gc.collect()
+                except Exception as batch_error:
+                    self.logger.error(f"❌ 배치 {batch_num} 처리 중 오류: {batch_error}")
                     continue
                 
-                # 파일 존재 여부 확인
-                checked_dataset = filtered_dataset.map(
-                    self._check_file_exists,
-                    desc=f"배치 {i//chunk_size + 1} 파일 확인",
-                    num_proc=self.num_proc, 
-                    load_from_cache_file=False
-                )
-                
-                missing_dataset = checked_dataset.filter(
-                    lambda x: not x['file_exists'],
-                    desc=f"배치 {i//chunk_size + 1} 누락 필터링"
-                )
-                
-                total_checked += len(filtered_dataset)
-                batch_missing_count = len(missing_dataset)
-                total_missing += batch_missing_count
-                missing_files.extend(missing_dataset.to_list())
-                del chunk_df, chunk_dataset, filtered_dataset, checked_dataset, missing_dataset
-                gc.collect()
-                
-                self.logger.debug(f"✅ 배치 완료: 검사={len(filtered_dataset)}, 누락={batch_missing_count}")
-                
-            
+            self.logger.info(f"🏁 전체 검사 완료: 총 배치 {total_batches}개 처리됨")
+
             return self._create_validation_result(
                 user_id=user_id,
                 total_items=total_items,
@@ -233,6 +248,7 @@ class DatalakeProcessor:
             )
             
         except Exception as e:
+            self.logger.error(f"❌ 파일 존재 여부 검사 중 오류: {e}")
             return self._create_validation_result(
                 user_id=user_id,
                 message="파일 존재 여부 검사 중 오류 발생",
