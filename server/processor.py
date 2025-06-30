@@ -185,7 +185,7 @@ class DatalakeProcessor:
             
             for i in range(0, len(search_data), chunk_size):
                 chunk_data = search_data[i:i + chunk_size]
-                self.logger.debug(f"📦 배치 {i//chunk_size + 1}/{(len(search_data)-1)//chunk_size + 1} 처리 중... ({len(chunk_data)}개)")
+                self.logger.info(f"📦 배치 {i//chunk_size + 1}/{(len(search_data)-1)//chunk_size + 1} 처리 중... ({len(chunk_data)}개)")
                 
                 # 작은 배치만 Dataset으로 처리
                 chunk_df = pd.DataFrame(chunk_data)
@@ -197,7 +197,7 @@ class DatalakeProcessor:
                     desc=f"배치 {i//chunk_size + 1} 필드 필터링"
                 )
                 
-                if len(filtered_dataset ) == 0:
+                if len(filtered_dataset) == 0:
                     del chunk_df, chunk_dataset, filtered_dataset
                     continue
                 

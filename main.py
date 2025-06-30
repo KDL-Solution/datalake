@@ -667,7 +667,6 @@ class DataManagerCLI:
         print("\n" + "="*50)
         print("🔍 데이터 무결성 검사")
         print("="*50)
-        print(report)
         if not report:
             print("💡 'python main.py db validate --report' 명령으로 상세 보고서를 생성할 수 있습니다.")
         try:

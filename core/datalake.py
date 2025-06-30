@@ -602,7 +602,6 @@ class DatalakeClient:
         search_results: pd.DataFrame,
         sample_percent: Optional[float] = None
     ) -> Optional[str]:
-        self.logger.info(f"🔍 파일 존재 여부 검사 요청 중... ({len(search_results):,}개)")
         try:
             required_columns = ['hash', 'path']
             self.logger.debug(f"필수 컬럼: {required_columns}")
@@ -613,7 +612,7 @@ class DatalakeClient:
                 return None
             self.logger.debug(f"유효성 검사 대상 데이터: {len(search_results):,}개")
             search_data = search_results.to_dict('records')
-            
+            self.logger.info(f"🔍 유효성 검사 요청: {len(search_data):,}개 항목")
             response = requests.post(
                 f"{self.server_url}/validate-assets",  
                 json={

@@ -246,55 +246,70 @@ async def delete_job(job_id: str):
         del current_jobs[job_id]
         logger.info(f"✅ 작업 {job_id} 삭제됨")
         return {"message": f"Job {job_id} deleted"}
-
-
+                
+                
 async def run_processing_job(job_id: str):
     """백그라운드에서 실행할 처리 작업"""
-    try:
-        logger.info(f"🔄 처리 작업 시작: {job_id}")
+    await _run_background_job(
+        job_id=job_id,
+        job_name="처리 작업",
+        job_func=processor.process_pending_data,
+        job_args=(),
+    )
         
-        loop = asyncio.get_event_loop()
-        with concurrent.futures.ThreadPoolExecutor() as executor:
-            result = await loop.run_in_executor(
-                executor, 
-                processor.process_all_pending
-            )
-        async with job_lock:
-            if job_id in current_jobs:
-                current_jobs[job_id].status = "completed"
-                current_jobs[job_id].completed_at = datetime.now().isoformat()
-                current_jobs[job_id].result = result
-        logger.info(f"✅ 처리 작업 완료: {job_id}, 결과: {result}")
-        
-    except Exception as e:
-        await _handle_job_error(job_id, e, "처리 작업")
 
 async def run_validation_job(job_id: str, request: ValidateAssetsRequest):
-    """파일 유효성 검사 백그라운드 작업"""
+    """백그라운드에서 실행할 유효성 검사 작업"""
+    await _run_background_job(
+        job_id=job_id,
+        job_name="유효성 검사",
+        job_func=processor.validate_assets,
+        job_args=(request.user_id, request.search_data, request.sample_percent),
+        extra_log_info=f"유저: {request.user_id}, 데이터: {len(request.search_data)}개"
+    )
+
+
+async def _run_background_job(
+    job_id: str, 
+    job_name: str, 
+    job_func, 
+    job_args: tuple = (),
+    extra_log_info: str = ""
+):
     try:
-        logger.info(f"🔍 파일 유효성 검사 시작: {job_id} (데이터: {len(request.search_data)}개)")
+        log_msg = f"🔄 {job_name} 시작: {job_id}"
+        if extra_log_info:
+            log_msg += f" ({extra_log_info})"
+        logger.info(log_msg)
         
         loop = asyncio.get_event_loop()
         with concurrent.futures.ThreadPoolExecutor() as executor:
-            result = await loop.run_in_executor(
-                executor,
-                processor.validate_files_existence,
-                request.user_id,
-                request.search_data,
-                request.sample_percent
-            )
+            result = await loop.run_in_executor(executor, job_func, *job_args)
         
-        async with job_lock:
-            if job_id in current_jobs:
-                current_jobs[job_id].status = "completed"
-                current_jobs[job_id].completed_at = datetime.now().isoformat()
-                current_jobs[job_id].result = result
-                
-        logger.info(f"✅ 파일 유효성 검사 완료: {job_id}")
+        # 성공 시 상태 업데이트
+        await _update_job_status(job_id, "completed", result=result)
+        logger.info(f"✅ {job_name} 완료: {job_id}")
         
     except Exception as e:
-        await _handle_job_error(job_id, e, "파일 유효성 검사")
+        await _handle_job_error(job_id, e, job_name)
 
+async def _update_job_status(
+    job_id: str, 
+    status: str, 
+    result: dict = None, 
+    error: str = None
+):
+    """작업 상태 업데이트"""
+    async with job_lock:
+        if job_id in current_jobs:
+            current_jobs[job_id].status = status
+            current_jobs[job_id].completed_at = datetime.now().isoformat()
+            if result:
+                current_jobs[job_id].result = result
+            if error:
+                current_jobs[job_id].error = error
+                
+                
 async def _handle_job_error(job_id: str, error: Exception, job_type: str):
     error_msg = str(error)
     logger.error(f"❌ {job_type} 실패: {job_id} - {error_msg}")
