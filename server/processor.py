@@ -153,7 +153,7 @@ class DatalakeProcessor:
             error_summary=error_summary
         )
 
-    def validate_files_existence(
+    def validate_assets(
         self,
         user_id: str,
         search_data: List[Dict],
