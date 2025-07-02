@@ -360,18 +360,24 @@ class DataManagerCLI:
     
     def upload_interactive(self):
         try:
-            data_file = self._get_file_path()
-            if not data_file:
-                return False
-        
-            data_type = self._select_data_type()
+            """데이터 파일 경로 입력 및 검증"""
+            data_source = input("📁 데이터 파일 경로: ").strip()
+            if not data_source:
+                print("❌ 데이터 파일 경로가 필요합니다.")
+                return None
             
-            # 4. 데이터 타입별 플로우
+            dataset_obj = self.data_manager._load_to_dataset(data_source)
+        
+            while True:
+                data_type = input("\n📝 데이터 타입 (raw/task) [raw]: ").strip().lower() or "raw"
+                if data_type in ["raw", "task"]:
+                    break
+                print("❌ 잘못된 데이터 타입입니다. (raw 또는 task)")
+                
             if data_type == "raw":
-                self._upload_raw_data(data_file)
-                    
+                self._upload_raw_data(dataset_obj)
             elif data_type == "task":
-                self._upload_task_data(data_file)
+                self._upload_task_data(dataset_obj)
                 
         except KeyboardInterrupt:
             print("\n❌ 업로드가 취소되었습니다.")
@@ -795,14 +801,14 @@ class DataManagerCLI:
             
             # 1. 소스 경로 입력
             while True:
-                data_file = input("📁 데이터 파일 경로: ").strip()
-                if not data_file:
+                data_source = input("📁 데이터 파일 경로: ").strip()
+                if not data_source:
                     print("❌ 경로는 필수입니다. 다시 입력해주세요.")
                     continue
                     
-                data_file = Path(data_file)
-                if not data_file.exists():
-                    print(f"❌ 파일을 찾을 수 없습니다: {data_file}")
+                data_source = Path(data_source)
+                if not data_source.exists():
+                    print(f"❌ 파일을 찾을 수 없습니다: {data_source}")
                     continue
                 break
             
@@ -817,7 +823,7 @@ class DataManagerCLI:
             description = input("📄 설명 (선택): ").strip()
             
             print(f"\n🔍 생성할 컬렉션:")
-            print(f"   데이터: {data_file}")
+            print(f"   데이터: {data_source}")
             print(f"   이름: {name}")
             print(f"   버전: {version or '자동'}")
             print(f"   설명: {description or '없음'}")
@@ -833,7 +839,7 @@ class DataManagerCLI:
             # 5. 실행
             print(f"\n💾 컬렉션 생성 중...")
             final_version = self.data_manager.import_collection(
-                data_file=data_file,
+                data_source=data_source,
                 name=name,
                 version=version,
                 description=description
@@ -1116,8 +1122,8 @@ class DataManagerCLI:
         version = input("📋 버전 (Enter=자동): ").strip() or None
         description = input("📄 설명 (선택): ").strip()
         print(f"\n💾 컬렉션 저장 중...")
-        final_version = self.data_manager.save_collection(
-            search_results=search_results,
+        final_version = self.data_manager.import_collection(
+            data_source=search_results,
             name=name,
             version=version,
             description=description
@@ -1547,7 +1553,7 @@ class DataManagerCLI:
                 else:
                     print(f"❌ Task '{task_choice}'가 존재하지 않습니다.")
                     
-    def _upload_raw_data(self, data_file):
+    def _upload_raw_data(self, data_source):
         
         provider = self._select_provider()
         
@@ -1560,7 +1566,7 @@ class DataManagerCLI:
         description = input("📄 데이터셋 설명 (선택사항): ").strip()
         source = input("🔗 원본 소스 URL (선택사항): ").strip()
         self._show_upload_summary(
-            data_file=data_file,
+            data_source=data_source,
             data_type="raw",
             provider=provider,
             dataset=dataset,
@@ -1576,21 +1582,20 @@ class DataManagerCLI:
             print("❌ 업로드가 취소되었습니다.")
             return False
         try:
-            staging_dir, job_id = self.data_manager.upload_raw(
-                data_file=data_file,
+            _ = self.data_manager.upload_raw(
+                data_source=data_source,
                 provider=provider,
                 dataset=dataset,
                 dataset_description=description,
                 original_source=source
             )
-            print(f"✅ 업로드 완료: {staging_dir}")
             print("💡 'python main.py process start' 명령으로 처리를 시작할 수 있습니다.")
             return True
         except Exception as e:
             print(f"❌ 업로드 실패: {e}")
             return False
         
-    def _upload_task_data(self, data_file):
+    def _upload_task_data(self, data_source):
         partitions = self.data_manager.get_partitions()
         raw_partitions = partitions[partitions['task'] == 'raw']
         if raw_partitions.empty:
@@ -1675,7 +1680,7 @@ class DataManagerCLI:
             return False
 
         self._show_upload_summary(
-            data_file=data_file,
+            data_source=data_source,
             data_type="task",
             provider=provider,
             dataset=dataset,
@@ -1692,15 +1697,14 @@ class DataManagerCLI:
             return False
         
         try:
-            staging_dir, job_id = self.data_manager.upload_task(
-                data_file=data_file,
+            _  = self.data_manager.upload_task(
+                data_source=data_source,
                 provider=provider,
                 dataset=dataset,
                 task=task,
                 variant=variant,
                 meta=meta
             )
-            print(f"✅ 업로드 완료: {staging_dir}")
             print("💡 'python main.py process start' 명령으로 처리를 시작할 수 있습니다.")
             return True
         except Exception as e:
@@ -1709,7 +1713,7 @@ class DataManagerCLI:
 
     def _show_upload_summary(
         self, 
-        data_file, 
+        data_source, 
         data_type, 
         provider, 
         dataset, 
@@ -1721,7 +1725,7 @@ class DataManagerCLI:
     ):
         """업로드 정보 요약 출력"""
         print(f"\n업로드 정보:")
-        print(f"file_path: {data_file}")
+        print(f"file_path: {data_source}")
         print(f"type: {data_type}")
         print(f"Provider: {provider}")
         print(f"Dataset: {dataset}")
@@ -1736,29 +1740,6 @@ class DataManagerCLI:
         if meta:
             print(f"meta: {meta}")
             
-    def _select_data_type(self):
-        """데이터 타입 선택 (raw/task)"""
-        while True:
-            data_type = input("\n📝 데이터 타입 (raw/task) [raw]: ").strip().lower() or "raw"
-            if data_type in ["raw", "task"]:
-                return data_type
-            print("❌ 잘못된 데이터 타입입니다. (raw 또는 task)")
-            
-    def _get_file_path(self):
-        """데이터 파일 경로 입력 및 검증"""
-        data_file = input("📁 데이터 파일 경로: ").strip()
-        if not data_file:
-            print("❌ 데이터 파일 경로가 필요합니다.")
-            return None
-        
-        try:
-            file_type = self.data_manager._get_file_type(data_file)
-            print(f"✅ 파일 유형: {file_type}")
-            return data_file
-        except (FileNotFoundError, ValueError, TypeError) as e:
-            print(f"❌ {e}")
-            return None        
-
 def main():
     from utils.config import Config
 

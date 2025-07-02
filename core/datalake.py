@@ -117,13 +117,13 @@ class DatalakeClient:
         
     def upload_raw(
         self,
-        data_file: Union[str, Path, pd.DataFrame, Dataset],
+        data_source: Union[str, Path, pd.DataFrame, Dataset],
         provider: str,
         dataset: str,
         dataset_description: str = "", # 데이터셋 설명
         original_source: str = "", # 원본 소스 URL 
         overwrite: bool = False, # 기존 pending 데이터 제거 여부
-    ) -> bool:
+    ) -> str:
         task = "raw"
 
         self.logger.info(f"📥 Raw data 업로드 시작: {provider}/{dataset}")
@@ -136,7 +136,7 @@ class DatalakeClient:
             self.logger.info("💡 overwrite=True로 설정하면 기존 데이터를 덮어쓸 수 있습니다")
             return False
         
-        dataset_obj, file_info = self._load_data(data_file)
+        dataset_obj, file_info = self._load_data(data_source)
 
         metadata = self._create_metadata(
             provider=provider,
@@ -154,11 +154,11 @@ class DatalakeClient:
         staging_dir = self._save_to_staging(dataset_obj, metadata)
         self.logger.info(f"✅ Task 데이터 업로드 완료: {staging_dir}")
         
-        return True
+        return staging_dir
     
     def upload_task(
         self,
-        data_file: Union[str, Path, pd.DataFrame, Dataset],
+        data_source: Union[str, Path, pd.DataFrame, Dataset],
         provider: str,
         dataset: str,
         task: str,
@@ -166,7 +166,7 @@ class DatalakeClient:
         dataset_description: str = "",
         overwrite: bool = False,
         meta: Optional[Dict] = None,
-    ) -> bool:
+    ) -> str:
         self.logger.info(f"📥 Task data 업로드 시작: {provider}/{dataset}/{task}/{variant}")
         
         if not self._check_raw_data_exists(provider, dataset):
@@ -185,7 +185,7 @@ class DatalakeClient:
             self.logger.info("💡 overwrite=True로 설정하면 기존 데이터를 덮어쓸 수 있습니다")
             return False
         
-        dataset_obj, file_info = self._load_data(data_file)
+        dataset_obj, file_info = self._load_data(data_source)
 
         columns_to_remove = [key for key in meta.keys()
                             if key in dataset_obj.column_names]
@@ -212,7 +212,7 @@ class DatalakeClient:
         staging_dir = self._save_to_staging(dataset_obj, metadata)
         self.logger.info(f"✅ Task 데이터 업로드 완료: {staging_dir}")
         
-        return True
+        return staging_dir
     
     def get_server_status(self) -> Optional[Dict]:
         """서버 상태 조회"""
@@ -636,32 +636,16 @@ class DatalakeClient:
             return self._save_as_dataset(search_results, output_path, include_images, check_path_exists, absolute_paths)
         else:
             raise ValueError(f"지원하지 않는 형식입니다: {format}")
-    
-    def save_collection(
-        self,
-        search_results,
-        name,
-        version = None,
-        description: str = "",
-    ):
-        dataset = self.to_dataset(search_results, absolute_paths=True, check_path_exists=True)
-        return self.dataset_manager.save_collection(
-            dataset=dataset,
-            name=name,
-            version=version,
-            description=description,
-            user_id=self.user_id,
-        )
-        
+         
     def import_collection(
         self,
-        data_file: Union[str, Path, pd.DataFrame, Dataset],
+        data_source: Union[str, Path, pd.DataFrame, Dataset],
         name: str,
         version: Optional[str] = None,
         description: str = "",
     ) -> str:
         
-        dataset = self._load_to_dataset(data_file)
+        dataset = self._load_to_dataset(data_source)
         
         return self.collection_manager.save_collection(
             collection=dataset,
@@ -1149,13 +1133,13 @@ class DatalakeClient:
                 continue
         return existing_dirs
     
-    def _get_file_type(self, data_file) -> str:
-        if isinstance(data_file, Dataset):
+    def _get_file_type(self, data_source) -> str:
+        if isinstance(data_source, Dataset):
             return "dataset"
-        elif isinstance(data_file, pd.DataFrame):
+        elif isinstance(data_source, pd.DataFrame):
             return "dataframe"
-        elif isinstance(data_file, (str, Path)):
-            data_path = Path(data_file).resolve()
+        elif isinstance(data_source, (str, Path)):
+            data_path = Path(data_source).resolve()
             if not data_path.exists():
                 raise FileNotFoundError(f"❌ 데이터 파일이 존재하지 않습니다: {data_path}")
             
@@ -1166,35 +1150,32 @@ class DatalakeClient:
             else:
                 raise ValueError(f"❌ 지원하지 않는 파일 형식: {data_path.suffix}")
         else:
-            raise TypeError(f"❌ 지원하지 않는 데이터 타입: {type(data_file)}. "
+            raise TypeError(f"❌ 지원하지 않는 데이터 타입: {type(data_source)}. "
                             "Dataset, pandas DataFrame, str 또는 Path 객체만 지원합니다.")
             
-    def _load_to_dataset(self, data_file) -> Dataset:
-        data_type = self._get_file_type(data_file)
+    def _load_to_dataset(self, data_source) -> Dataset:
+        data_type = self._get_file_type(data_source)
         if data_type == "dataset":
-            self.logger.info(f"🤗 Hugging Face Dataset 로드 중: {len(data_file)} 행")
             try:
-                dataset_obj = data_file  # 이미 Dataset 객체이므로 그대로 사용
-                self.logger.info(f"✅ Hugging Face Dataset 로드 완료: {len(dataset_obj)} 행")
+                dataset_obj = data_source     
                 
-                # Dataset 정보 로깅
                 if hasattr(dataset_obj, 'features'):
                     features = list(dataset_obj.features.keys())
                     self.logger.info(f"📋 Dataset features: {features}")
+                self.logger.info(f"✅ Hugging Face Dataset 로드 완료: {len(dataset_obj)} 행")
                     
             except Exception as e:
                 raise ValueError(f"❌ Hugging Face Dataset 처리 실패: {e}")
         
         elif data_type == "dataframe":
-            self.logger.info(f"📊 pandas DataFrame 로드 중: {len(data_file)} 행")
             try:
-                dataset_obj = Dataset.from_pandas(data_file, preserve_index=False)
-                self.logger.info(f"✅ pandas DataFrame 로드 완료: {len(data_file)} 행")
+                dataset_obj = Dataset.from_pandas(data_source, preserve_index=False)    
+                self.logger.info(f"✅ pandas DataFrame 로드 완료: {len(dataset_obj)} 행")
             except Exception as e:
                 raise ValueError(f"❌ pandas DataFrame 변환 실패: {e}")
                 
         elif data_type == "datasets_folder":
-            data_path = Path(data_file).resolve()
+            data_path = Path(data_source).resolve()
             self.logger.info(f"📂 datasets 폴더 로드 중: {data_path}")
             try:
                 dataset_obj = load_from_disk(str(data_path))
@@ -1203,7 +1184,7 @@ class DatalakeClient:
                 raise ValueError(f"❌ datasets 폴더 로드 실패: {e}")
                 
         elif data_type == "parquet_file":
-            data_path = Path(data_file).resolve()
+            data_path = Path(data_source).resolve()
             self.logger.info(f"📂 Parquet 파일 로드 중: {data_path}")
             try:
                 df = pd.read_parquet(data_path)
@@ -1218,11 +1199,11 @@ class DatalakeClient:
             
         return dataset_obj
         
-    def _load_data(self, data_file) -> tuple[Dataset, dict]:
+    def _load_data(self, data_source) -> tuple[Dataset, dict]:
         
-        dataset_obj = self._load_to_dataset(data_file)
+        dataset_obj = self._load_to_dataset(data_source)
         
-        self.logger.info(f"✅ 데이터 파일 로드 완료: {data_file}")
+        self.logger.info(f"✅ 데이터 파일 로드 완료: {dataset_obj}")
         column_names = dataset_obj.column_names
         self.logger.info(f"데이터셋 컬럼: {column_names}")
 
@@ -1514,7 +1495,7 @@ if __name__ == "__main__":
     manager.schema_manager.add_provider("example_provider")
     manager.schema_manager.add_task("example_task", required_fields=["field1", "field2"], allowed_values={"field1": ["value1", "value2"]})
     staging_dir, job_id = manager.upload_raw(
-        data_file="test.parquet",
+        dataset_obj="test.parquet",
         provider="example_provider",
         dataset="example_dataset",
         dataset_description="This is a sample dataset for testing.",

@@ -39,13 +39,13 @@ client = DatalakeClient(
 
 # Upload data
 client.upload_raw(
-    data_file="dataset.parquet",  # or DataFrame, HF Dataset
+    data_source="dataset.parquet",  # or DataFrame, HF Dataset
     provider="huggingface",
     dataset="coco_2017"
 )
 
 client.upload_task(
-    data_file="ocr_results.parquet", # or DataFrame, HF Dataset
+    data_source="ocr_results.parquet", # or DataFrame, HF Dataset
     provider="huggingface", 
     dataset="coco_2017",
     task="ocr",
@@ -75,8 +75,8 @@ dataset = client.to_dataset(
 )
 
 # Create managed collection for training
-client.save_collection(
-    search_results=results,
+client.import_collection(
+    data_source=results,
     name="korean_ocr_train",
     version="v1.0",
     description="Korean OCR training dataset"
@@ -115,8 +115,8 @@ Collections provide versioned storage for training datasets with automatic metad
 ```python
 # From catalog search results
 results = client.search(providers=["huggingface"], tasks=["ocr"])
-client.save_collection(
-    search_results=results,
+client.import_collection(
+    data_source=results,
     name="my_training_set",
     version="v1.0",
     description="OCR training data v1"
@@ -124,22 +124,29 @@ client.save_collection(
 
 # Import external data
 client.import_collection(
-    data_file="external_data.parquet", # or dataset path
+    data_source="external_data", # dataset, parquet path
     name="external_dataset", 
-    version="v1.0"
+    version="v1.0",
+    description="Test"
 )
 ```
 
 ### Use Collections
 ```python
+# List all collections
+collections = client.collection_manager.list_collections()
+
 # Load collection (get as dataset object directly)
 dataset = client.load_collection("my_training_set", "v1.0")
 
 # Export collection
-client.export_collection("my_training_set", "v1.0", "./training_data")
+client.export_collection(
+    name="my_training_set", 
+    version="v1.0", 
+    output_path="./training_data",
+    format="datasets"
+)
 
-# List all collections
-collections = client.collection_manager.list_collections()
 ```
 
 ## Data Flow
