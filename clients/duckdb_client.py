@@ -1,9 +1,10 @@
 import os
 import sys
-from typing import Optional, Dict, Union, List
+from typing import Optional, Dict, Union, List, Literal
 import pandas as pd
 import duckdb
 from pathlib import Path
+from datasets import Dataset
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..')))
 from clients.queries.json_queries import JSONQueries
@@ -77,7 +78,11 @@ class DuckDBClient:
         except Exception as e:
             print(f"확장 설치 중 오류: {str(e)}")
 
-    def execute_query(self, sql: str) -> pd.DataFrame:
+    def execute_query(
+        self,
+        sql: str,
+        output_format: Literal["df", "dataset"] = "df",
+    ) -> pd.DataFrame:
         """SQL 쿼리 실행
         
         Args:
@@ -86,7 +91,12 @@ class DuckDBClient:
             pd.DataFrame: 쿼리 결과
         """
         try:
-            return self.connection.execute(sql).df()
+            if output_format == "df":
+                return self.connection.execute(sql).df()
+            elif output_format == "dataset":
+                return Dataset(
+                    self.connection.execute(sql).fetch_arrow_table(),
+                )
         except Exception as e:
             raise Exception(f"쿼리 실행 실패: {str(e)}\nSQL: {sql}")
 
@@ -221,6 +231,7 @@ class DuckDBClient:
         variants: List = [],
         table: str = "catalog",
         limit: Optional[int] = None,
+        output_format: Literal["df", "dataset"] = "df",
     ) -> pd.DataFrame:
         """존재하는 컬럼만 포함해서 조회"""
         if isinstance(providers, str):
@@ -292,7 +303,10 @@ class DuckDBClient:
             if limit is not None:
                 sql += f" LIMIT {limit}"
             
-            return self.execute_query(sql)
+            return self.execute_query(
+                sql,
+                output_format=output_format,
+            )
         except Exception as e:
             print(f"컬럼 조회 실패: {str(e)}")
             return pd.DataFrame()

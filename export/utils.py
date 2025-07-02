@@ -2,13 +2,17 @@ import re
 import json
 import math
 import pandas as pd
+from tqdm import tqdm
 from pathlib import Path
 from typing import List, Dict, Any
 from PIL import Image, ImageDraw
+from datasets import Dataset
 from io import BytesIO
 from docling.backend.html_backend import HTMLDocumentBackend
 from docling.datamodel.base_models import InputFormat
 from docling.datamodel.document import InputDocument
+
+EXPORT_DATA_DIR = Path(__file__).resolve().parent / "data"
 
 
 def to_chat_format(
@@ -63,6 +67,34 @@ def save_df_as_jsonl(
                 system_prompts=row.label,
             )
             _ = f.write(json.dumps(json_obj, ensure_ascii=False) + "\n")
+
+
+def save_dataset_as_jsonl(
+    dataset: Dataset,
+    jsonl_path,
+    batch_size: int = 8_192,
+    keep_columns: List[str] = [
+        "path",
+        "query",
+        "label",
+    ],
+):
+    dataset = dataset.remove_columns(
+        [
+            col for col in dataset.column_names
+            if col not in keep_columns
+        ],
+    )
+
+    with open(jsonl_path, "w", encoding="utf-8") as f:
+        batch = []
+        for example in tqdm(dataset, desc="Saving as JSONL..."):
+            batch.append(json.dumps(example, ensure_ascii=False))
+            if len(batch) >= batch_size:
+                f.write("\n".join(batch) + "\n")
+                batch = []
+        if batch:
+            f.write("\n".join(batch) + "\n")
 
 
 def round_by_factor(

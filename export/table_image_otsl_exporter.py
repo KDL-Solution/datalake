@@ -1,120 +1,87 @@
-import numpy as np
-from datasets import Dataset
+import regex
+import pandas as pd
 from typing import List
-from transformers import AutoProcessor, PreTrainedTokenizerBase
+from sklearn.model_selection import train_test_split
 
 from core.datalake import DatalakeClient
+# import sys
+# sys.path.insert(0, "/home/eric/workspace/datalake/")
 from export.utils import (
+    save_df_as_jsonl,
     user_prompt_dict,
-    extract_otsl,
 )
 
 
-class TableImageOTSLExporter:
+class TableImageOTSLExporter(object):
     def __init__(
         self,
-        quantiles: List[float] = [0.9, 0.95, 0.98, 0.99, 0.999, 1.],
-        batch_size: int = 64,
-        num_procs: int = 16,
     ):
-        self.quantiles = quantiles
-        self.batch_size = batch_size
-        self.num_procs = num_procs
+        self.otsl_pattern = regex.compile(
+            r"<otsl>.*?</otsl>",
+            regex.DOTALL,
+        )
+
+    def extract_otsl(
+        self,
+        text: str,
+    ) -> str:
+        """Find the content inside <otsl>...</otsl>
+        """
+        if not isinstance(text, str):
+            return None
+        match = regex.search(
+            self.otsl_pattern,
+            text,
+        )
+        if match:
+            return match.group(0).strip()
+        else:
+            return None
 
     def export(
         self,
-        dataset: Dataset,
+        df: pd.DataFrame,
         save_path: str,
-        tokenizer: PreTrainedTokenizerBase = None,
-        token_length_quantile: float = 0.,
         user_prompt: str = user_prompt_dict["table"],
     ) -> None:
-        # label이 `None`인 샘플 제거:
-        print(f"# original samples: {len(dataset):,}")
-        dataset = dataset.filter(
-            lambda x: x["label"] is not None,
-            desc="Removing empty labels",
-        )
-        print(f"# samples after removing empty labels: {len(dataset):,}")
+        df_copy = df.copy()
 
-        token_length_thresh = 0
-        if tokenizer is not None and token_length_quantile > 0.:
-            dataset = dataset.map(
-                lambda x: {
-                    "token_length": [
-                        len(i)
-                        for i in tokenizer(x["label"])["input_ids"]
-                    ],
-                },
-                batched=True,
-                batch_size=self.batch_size,
-                num_proc=self.num_procs,
-            )
-            token_lengths = np.array(dataset["token_length"])
-            print(
-                np.quantile(
-                    token_lengths,
-                    self.quantiles,
-                )
-            )
-            token_length_thresh = np.quantile(
-                token_lengths,
-                token_length_quantile,
-            )
-            dataset = dataset.filter(
-                lambda x: x["token_length"] > token_length_thresh,
-            )
-        print(f"# samples after filtering using token length threshold {token_length_thresh:,}: {len(dataset):,}")
-
-        dataset = dataset.map(
-            lambda x: {
-                "label": [
-                    extract_otsl(
-                        i,
-                    ) for i in x["label"]
-                ],
-            },
-            batched=True,
-            batch_size=self.batch_size,
-            num_proc=self.num_procs,
-            desc="Extracting <otsl>...</otsl>",
+        df_copy["label"] = df_copy["label"].swifter.apply(
+            lambda x: self.extract_otsl(x),
         )
-        dataset = dataset.filter(
-            lambda x: "\\" not in x["label"],
-            desc="Filtering LaTeX-style labels",
+        df_copy = df_copy[df_copy["label"].notna()]
+        # 수식 등 제거:
+        df_copy = df_copy[
+            ~df_copy["label"].str.contains(
+                r"\\",
+                # regex=True,
+                na=False,
+            )
+        ]
+        df_copy["query"] = user_prompt
+
+        save_df_as_jsonl(
+            df=df_copy,
+            jsonl_path=save_path,
         )
 
-        # user prompt 추가:
-        dataset = dataset.map(
-            lambda x: {
-                **x,
-                "query": user_prompt,
-            },
-            desc="Adding user prompt",
-        )
 
-        dataset.to_json(
-            save_path,
-            lines=True,
-            force_ascii=False,
-        )
+# def count_total_tags(
+#     text: str,
+# ):
+#     if not isinstance(text, str):
+#         return 0
+#     return len(regex.findall(r"</?[\p{L}_]+>", text))
 
 
 def main(
     user_id: str,
-    test_size: float = 0.0005,  # 0.5%
-    val_size: float = 0.025,  # 2.5%
-    token_length_quantile: float = 0.,
-    model: str = None,
-    quantiles: List[float] = [0.9, 0.95, 0.98, 0.99, 0.999, 1.],
-    batch_size: int = 64,
-    num_procs: int = 64,
+    # test_size: float = 0.0005,  # 0.5%
+    # val_size: float = 0.025,  # 2.5%
+    test_size: float = 0.001,  # 1%
+    val_size: float = 0.04,  # 4%
 ) -> None:
-    exporter = TableImageOTSLExporter(
-        quantiles=quantiles,
-        batch_size=batch_size,
-        num_procs=num_procs,
-    )
+    exporter = TableImageOTSLExporter()
     client = DatalakeClient(
         user_id=user_id,
     )
@@ -124,6 +91,7 @@ def main(
             "table_image_otsl",
         ]
     )
+    # search_results = search_results.head(2_000)
     print(
         search_results.groupby(
             [
@@ -132,39 +100,33 @@ def main(
             ],
         ).size()
     )
-    # search_results=search_results.head(5000)
 
-    dataset = client.to_dataset(
+    df = client.to_pandas(
         search_results,
         absolute_paths=True,
     )
-    dataset_train_val, dataset_test = dataset.train_test_split(
-        test_size=test_size,
-    ).values()
-    dataset_train, dataset_val = dataset_train_val.train_test_split(
-        test_size=val_size,
-    ).values()
-    print(f"Train: {len(dataset_train)}, Val: {len(dataset_val)}, Test: {len(dataset_test)}")
 
-    processor = AutoProcessor.from_pretrained(
-        model,
-        use_fast=True,
-        trust_remote_code=True,
-        device_map="cpu",
+    df_train_val, df_test = train_test_split(
+        df,
+        test_size=test_size,
+    )
+    df_train, df_val = train_test_split(
+        df_train_val,
+        test_size=val_size,
+    )
+    print(f"Train: {len(df_train)}, Val: {len(df_val)}, Test: {len(df_test)}")
+
+    exporter.export(
+        df=df_train,
+        save_path="/home/eric/workspace/datalake/export/data/table_image_otsl-train.jsonl",
     )
     exporter.export(
-        dataset_train,
-        save_path="/home/eric/workspace/datalake/export/data/table_image_otsl_train.jsonl",
-        tokenizer=processor.tokenizer,
-        token_length_quantile=token_length_quantile,
+        df=df_val,
+        save_path="/home/eric/workspace/datalake/export/data/table_image_otsl-val.jsonl",
     )
     exporter.export(
-        dataset_val,
-        save_path="/home/eric/workspace/datalake/export/data/table_image_otsl_val.jsonl",
-    )
-    exporter.export(
-        dataset_test,
-        save_path="/home/eric/workspace/datalake/export/data/table_image_otsl_test.jsonl",
+        df=df_test,
+        save_path="/home/eric/workspace/datalake/export/data/table_image_otsl-test.jsonl",
     )
 
 

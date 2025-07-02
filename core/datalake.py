@@ -13,7 +13,7 @@ from pathlib import Path
 from datetime import datetime
 from datasets import Dataset, load_from_disk
 from datasets import Image as DatasetImage
-from typing import Dict, Optional, List, Union
+from typing import Dict, Optional, List, Union, Literal
 from PIL import Image
 
 from core.schema import SchemaManager
@@ -497,7 +497,8 @@ class DatalakeClient:
         tasks: Optional[List[str]] = None,
         variants: Optional[List[str]] = None,
         text_search: Optional[Dict] = None,
-        limit: Optional[int] = None
+        limit: Optional[int] = None,
+        output_format: Literal["df", "dataset"] = "df",
     ) -> pd.DataFrame:
         """
         Catalog에서 데이터 검색
@@ -528,7 +529,13 @@ class DatalakeClient:
                 else:
                     # 파티션 기반 검색
                     results = self._perform_partition_search(
-                        duck_client, providers, datasets, tasks, variants, limit
+                        duck_client,
+                        providers,
+                        datasets,
+                        tasks,
+                        variants,
+                        limit,
+                        output_format=output_format,
                     )
 
                 self.logger.info(f"📊 검색 결과: {len(results):,}개 항목")
@@ -580,12 +587,16 @@ class DatalakeClient:
         search_results: pd.DataFrame,
         include_images: bool = False,
         absolute_paths: bool = True,
+        preserve_index: bool = False,
     ):
         """검색 결과를 HuggingFace Dataset 객체로 변환"""
         self.logger.info("📥 Dataset 객체 생성 시작...")
 
         df_copy = self._prepare_dataframe(search_results, absolute_paths)
-        dataset = Dataset.from_pandas(df_copy)
+        dataset = Dataset.from_pandas(
+            df_copy,
+            preserve_index=preserve_index,
+        )
 
         if include_images:
             dataset = self._add_images_to_dataset(dataset)
@@ -613,6 +624,70 @@ class DatalakeClient:
         self.logger.info(f"📊 {len(df_copy):,}개 항목, {file_size:.1f}MB")
 
         return output_path
+
+    def _prepare_dataset(
+        self, 
+        search_results: Dataset, 
+        absolute_paths: bool = True,
+        batch_size: int = 1_024,
+        num_procs: int = 4,
+    ) -> pd.DataFrame:
+        """검색 결과를 처리용 Dataset으로 준비"""
+        # ds_copy = search_results.map(
+        #     lambda x: x,
+        #     load_from_cache_file=False,
+        # )
+        ds_copy = search_results
+
+        # if absolute_paths and "path" in ds_copy.column_names:
+        #     def process(example):
+        #         if isinstance(example["path"], str) and example["path"]:
+        #             abs_path = (self.assets_path / example["path"]).as_posix()
+        #             exists = Path(abs_path).exists()
+        #             return {"path": abs_path, "exists": exists}
+        #         else:
+        #             return {"path": example["path"], "exists": False}
+
+        #     ds_copy = ds_copy.map(process)
+
+        if absolute_paths and "path" in search_results.column_names:
+            def process_batch(
+                batch,
+            ):
+                new_paths = []
+                exists_flags = []
+                for p in batch["path"]:
+                    if isinstance(p, str) and p:
+                        abs_path = (self.assets_path / p).as_posix()
+                        new_paths.append(abs_path)
+                        exists_flags.append(Path(abs_path).exists())
+                    else:
+                        new_paths.append(p)
+                        exists_flags.append(False)
+                return {
+                    "path": new_paths,
+                    "exists": exists_flags,
+                }
+
+            ds_copy = ds_copy.map(
+                process_batch,
+                batched=True,
+                batch_size=batch_size,
+                num_proc=num_procs,
+                desc="절대경로 변환 및 존재 여부 확인",
+            )
+
+            # 5. Filter to existing files
+            ds_copy = ds_copy.filter(
+                lambda x: x["exists"],
+            )
+            # 6. Remove the 'exists' column
+            ds_copy = ds_copy.remove_columns(
+                ["exists"],
+            )
+
+            self.logger.debug("📁 경로를 절대경로로 변환")
+        return ds_copy
 
     def download_as_dataset(
         self,
@@ -875,7 +950,8 @@ class DatalakeClient:
         datasets, 
         tasks, 
         variants, 
-        limit
+        limit,
+        output_format: Literal["df", "dataset"] = "df",
     ):
         """파티션 기반 검색 실행"""
         return duck_client.retrieve_with_existing_cols(
@@ -884,7 +960,8 @@ class DatalakeClient:
             tasks=tasks,
             variants=variants,
             table="catalog",
-            limit=limit
+            limit=limit,
+            output_format=output_format,
         )
 
     def _perform_text_search(
