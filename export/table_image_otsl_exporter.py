@@ -25,7 +25,7 @@ class TableImageOTSLExporter(object):
         self,
         text: str,
     ) -> str:
-        """Find the content inside <otsl>...</otsl>
+        """Find the content <otsl>...</otsl>
         """
         if not isinstance(text, str):
             return None
@@ -66,22 +66,11 @@ class TableImageOTSLExporter(object):
         )
 
 
-# def count_total_tags(
-#     text: str,
-# ):
-#     if not isinstance(text, str):
-#         return 0
-#     return len(regex.findall(r"</?[\p{L}_]+>", text))
-
-
 def main(
     user_id: str,
-    # test_size: float = 0.0005,  # 0.5%
-    # val_size: float = 0.025,  # 2.5%
     test_size: float = 0.001,  # 1%
     val_size: float = 0.04,  # 4%
 ) -> None:
-    exporter = TableImageOTSLExporter()
     client = DatalakeClient(
         user_id=user_id,
     )
@@ -116,6 +105,7 @@ def main(
     )
     print(f"Train: {len(df_train)}, Val: {len(df_val)}, Test: {len(df_test)}")
 
+    exporter = TableImageOTSLExporter()
     exporter.export(
         df=df_train,
         save_path="/home/eric/workspace/datalake/export/data/table_image_otsl-train.jsonl",

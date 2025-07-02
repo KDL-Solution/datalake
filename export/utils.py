@@ -59,13 +59,24 @@ def save_df_as_jsonl(
         parents=True,
         exist_ok=True,
     )
+
+    chat_format = False
+    cols = df.columns.tolist()
+    if "messages" in cols and "images" in cols:
+        chat_format = True
     with open(jsonl_path, "w", encoding="utf-8") as f:
         for row in df.itertuples(index=False):
-            json_obj = to_chat_format(
-                image_paths=row.path,
-                user_prompts=row.query,
-                system_prompts=row.label,
-            )
+            if chat_format:
+                json_obj = {
+                    "messages": row.messages,
+                    "images": row.images,
+                }
+            else:
+                json_obj = to_chat_format(
+                    image_paths=row.path,
+                    user_prompts=row.query,
+                    system_prompts=row.label,
+                )
             _ = f.write(json.dumps(json_obj, ensure_ascii=False) + "\n")
 
 
@@ -264,19 +275,6 @@ user_prompt_dict = {
     "table": "Parse the table in the image.",
     "image": "Read text in the image.",
 }
-
-
-def filter_valid_image_paths(
-    df: pd.DataFrame,
-) -> pd.DataFrame:
-    df_copied = df.copy()
-
-    if "path" in df_copied.columns.tolist():
-        df_copied["exists"] = df_copied["path"].apply(
-            lambda x: Path(x).exists()
-        )
-        df_copied = df_copied[df_copied["exists"]]
-    return df_copied
 
 
 def extract_otsl(
