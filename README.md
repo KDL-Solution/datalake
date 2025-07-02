@@ -16,7 +16,7 @@ cd datalake
 pip install -e .
 
 # Create directories (admin only)
-mkdir -p /mnt/AI_NAS/datalake/{staging/{pending,processing,failed},catalog,assets,config,logs}
+mkdir -p /mnt/AI_NAS/datalake/{staging/{pending,processing,failed},catalog,assets,collections,config,logs}
 ```
 
 ### Start Server (Admin)
@@ -38,10 +38,19 @@ client = DatalakeClient(
 )
 
 # Upload data
-staging_dir, job_id = client.upload_raw(
+client.upload_raw(
     data_file="dataset.parquet",  # or DataFrame, HF Dataset
     provider="huggingface",
     dataset="coco_2017"
+)
+
+client.upload_task(
+    data_file="ocr_results.parquet", # or DataFrame, HF Dataset
+    provider="huggingface", 
+    dataset="coco_2017",
+    task="ocr",
+    variant="base_ocr",
+    meta={"lang": "ko", "src": "real"}
 )
 
 # Process and build database
@@ -49,13 +58,29 @@ job_id = client.trigger_processing()
 result = client.wait_for_job_completion(job_id)
 client.build_db()
 
-# Search and export
+# Search and download
 results = client.search(
     providers=["huggingface"],
     datasets=["coco_2017"],
-    tasks=["ocr"]
+    # tasks=["ocr"],
+    # variant=["*"],
 )
-client.export(results, "./output", format="dataset", include_images=True)
+
+client.download(results, "./output", format="dataset", include_images=True)
+
+# Or get as dataset object directly
+dataset = client.to_dataset(
+    search_results=results,
+    include_images=True,
+)
+
+# Create managed collection for training
+client.save_collection(
+    search_results=results,
+    name="korean_ocr_train",
+    version="v1.0",
+    description="Korean OCR training dataset"
+)
 ```
 
 ## CLI Usage
@@ -69,22 +94,66 @@ datalake config task create ocr
 datalake upload
 datalake process start
 
-# Query and export
+# Query and download
 datalake db update
-datalake export
+datalake download
+datalake download --as-collection # Save as managed collection
+
+# Manage collections
+datalake collections list
+datalake collections info
+datalake collections import
+datalake collections export
+datalake collections delete
+```
+
+## Collections Management
+
+Collections provide versioned storage for training datasets with automatic metadata tracking.
+
+### Create Collections
+```python
+# From catalog search results
+results = client.search(providers=["huggingface"], tasks=["ocr"])
+client.save_collection(
+    search_results=results,
+    name="my_training_set",
+    version="v1.0",
+    description="OCR training data v1"
+)
+
+# Import external data
+client.import_collection(
+    data_file="external_data.parquet", # or dataset path
+    name="external_dataset", 
+    version="v1.0"
+)
+```
+
+### Use Collections
+```python
+# Load collection (get as dataset object directly)
+dataset = client.load_collection("my_training_set", "v1.0")
+
+# Export collection
+client.export_collection("my_training_set", "v1.0", "./training_data")
+
+# List all collections
+collections = client.collection_manager.list_collections()
 ```
 
 ## Data Flow
 
 ```
-Upload → Staging → Processing → Catalog (Parquet) + Assets → Database → Query → Export
+Upload → Staging → Processing → Catalog (Parquet) + Assets → Database → Query → Download/Collections
 ```
 
 1. **Upload**: Raw/task data goes to staging/pending
 2. **Process**: Auto-process with deduplication to catalog + assets  
 3. **Database**: Build DuckDB/Athena tables from parquet
 4. **Query**: Search by hierarchy or JSON content
-5. **Export**: Results to Parquet/Dataset/HF format
+5. **Download**: Results to Parquet/Dataset/HF format
+6. **Collections**: Version-managed datasets for training
 
 ## Configuration
 
@@ -127,13 +196,23 @@ datalake/
 │       └── dataset=coco_2017/
 │           ├── task=raw/variant=image/
 │           └── task=ocr/variant=base_ocr/
-└── assets/           # File storage
+├── assets/           # File storage (deduplicated)
+├── collections/      # Versioned training datasets
+│   ├── korean_ocr_train/
+│   │   ├── v1.0/
+│   │   ├── v1.1/
+│   │   └── latest
+│   └── sentiment_data/
+│       ├── v1.0/
+│       └── latest
+└── config/
 ```
 
 ## API Reference
 
 ### Classes
 - `DatalakeClient`: Main interface
+- `CollectionManager`: Version-managed datasets
 - `DuckDBClient`: Local querying
 - `DatalakeProcessor`: Data processing
 
@@ -150,32 +229,4 @@ uvicorn server.app:app --reload --port 8000
 
 # CLI alternative
 python main.py <command>
-```
-
-## Examples
-
-### Task Data Upload
-
-```python
-# Upload OCR results
-staging_dir, job_id = client.upload_task(
-    data_file="ocr_results.parquet",
-    provider="huggingface",
-    dataset="coco_2017",
-    task="ocr",
-    variant="base_ocr",
-    meta={"lang": "ko", "src": "real"}
-)
-```
-
-### Advanced Search
-
-```python
-# Search with filters
-results = client.search(
-    providers=["huggingface", "aihub"],
-    datasets=["coco_2017"],
-    tasks=["ocr"],
-    filter_json={"lang": "ko"}
-)
 ```

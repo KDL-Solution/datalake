@@ -29,6 +29,7 @@ class DatalakeProcessor:
         log_level: str = "INFO",
         num_proc: int = 4,
         batch_size: int = 1000,  # map()의 배치 크기
+        create_dirs: bool = True,
     ):
         # 경로 설정
         self.base_path = Path(base_path)
@@ -39,6 +40,7 @@ class DatalakeProcessor:
         
         self.catalog_path = self.base_path / "catalog"
         self.assets_path = self.base_path / "assets"
+        self.collections_path = self.base_path / "collections"
         
         self.num_proc = num_proc
         self.batch_size = batch_size
@@ -47,7 +49,7 @@ class DatalakeProcessor:
         self.image_data_key = 'image'  # 기본 이미지 컬럼 키
         self.file_path_key = 'file_path'  # 기본 파일 경로 컬럼 키
         
-        self._check_path_and_setup_logging(log_level)
+        self._initialize(log_level, create_dirs=create_dirs)
         
         self.existing_hashes = set()
         self.cache_built = False
@@ -369,7 +371,7 @@ class DatalakeProcessor:
             except Exception as e:
                 self.logger.error(f"❌ 처리 중 디렉토리 정리 실패: {remain_dir.name} - {str(e)}")
                 
-    def _check_path_and_setup_logging(self, log_level: str = "INFO"):
+    def _initialize(self, log_level: str = "INFO", create_dirs: bool = True):
         
         required_paths = {
             'base': self.base_path,
@@ -379,16 +381,23 @@ class DatalakeProcessor:
             'staging/failed': self.staging_failed_path,
             'catalog': self.catalog_path,
             'assets': self.assets_path,
+            'collections': self.collections_path,
         }
-        
-        missing_paths = []
-        for path_name, path_obj in required_paths.items():
-            if not path_obj.exists():
-                missing_paths.append(f"  - {path_name}: {path_obj}")
-        
-        if missing_paths:
-            missing_list = '\n'.join(missing_paths)
-            raise FileNotFoundError(f"❌ 필수 디렉토리가 없습니다:\n{missing_list}")
+        if create_dirs:
+            for path_name, path_obj in required_paths.items():
+                if not path_obj.exists():
+                    path_obj.mkdir(mode=0o777, parents=True, exist_ok=True)
+                    self.logger.debug(f"📁 디렉토리 생성: {path_name}")
+        else:
+            missing_paths = []
+            for path_name, path_obj in required_paths.items():
+                if not path_obj.exists():
+                    missing_paths.append(f"  - {path_name}: {path_obj}")
+            
+            if missing_paths:
+                missing_list = '\n'.join(missing_paths)
+                raise FileNotFoundError(f"❌ 필수 디렉토리가 없습니다:\n{missing_list}")
+            
         setup_logging(
             user_id="processor",
             log_level=log_level, 
@@ -396,6 +405,7 @@ class DatalakeProcessor:
         )
         self.logger = logging.getLogger(__name__)
         self.logger.debug("✅ 모든 필수 디렉토리 확인 완료")
+        
 
     def _process_single_directory(self, processing_dir: Path):
         """단일 디렉토리 처리 - datasets 라이브러리 활용"""

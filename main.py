@@ -380,30 +380,32 @@ class DataManagerCLI:
             print(f"❌ 업로드 중 오류: {e}")
             return False
     
-    def export_interactive(self):
+    def download_interactive(self, as_collection=False):
         try:
+            print("\n" + "="*50)
+            if as_collection:
+                print("📦 데이터셋 생성 (catalog → collections)")
+            else:
+                print("💾 데이터 다운로드")
+            print("="*50)
+            
             print("🔄 DB 데이터 조회 중...")
             partitions_df = self.data_manager.get_partitions()
             if partitions_df.empty:
                 print("❌ 사용 가능한 데이터가 없습니다.")
-                print("💡 'python main.py db update' 명령으로 DB를 먼저 구축해주세요.")
                 return False
                 
-            print(f"📊 {len(partitions_df)}개 파티션 사용 가능")
-            
-            # 2. 검색 수행
             search_results = self._search_interactive(partitions_df)
-            
             if search_results is None or search_results.empty:
                 print("❌ 검색 결과가 없습니다.")
                 return False
                 
             print(f"\n📊 검색 결과: {len(search_results):,}개 항목")
-            print("\n📋 결과 미리보기:")
-            print(search_results.head(10))
             
-            # 3. 다운로드 실행
-            return self._export_selected_data(search_results)
+            if as_collection:
+                return self._save_as_collection(search_results)
+            else:
+                return self._download_selected_data(search_results)
             
         except FileNotFoundError as e:
             print(f"❌ {e}")
@@ -785,6 +787,346 @@ class DataManagerCLI:
             print(f"❌ 유효성 검사 중 오류: {e}")
             return False
 
+    def import_collection_interactive(self):
+        try:
+            print("\n" + "="*50)
+            print("📥 외부 데이터 컬렉션 가져오기")
+            print("="*50)
+            
+            # 1. 소스 경로 입력
+            while True:
+                data_file = input("📁 데이터 파일 경로: ").strip()
+                if not data_file:
+                    print("❌ 경로는 필수입니다. 다시 입력해주세요.")
+                    continue
+                    
+                data_file = Path(data_file)
+                if not data_file.exists():
+                    print(f"❌ 파일을 찾을 수 없습니다: {data_file}")
+                    continue
+                break
+            
+            # 2. 컬렉션 이름 입력
+            while True:
+                name = input("\n📝 컬렉션 이름: ").strip()
+                if name:
+                    break
+                print("❌ 컬렉션 이름은 필수입니다.")
+            
+            version = input("📋 버전 (Enter=자동): ").strip() or None
+            description = input("📄 설명 (선택): ").strip()
+            
+            print(f"\n🔍 생성할 컬렉션:")
+            print(f"   데이터: {data_file}")
+            print(f"   이름: {name}")
+            print(f"   버전: {version or '자동'}")
+            print(f"   설명: {description or '없음'}")
+
+            choice = self._ask_yes_no(
+                question="컬렉션을 생성하시겠습니까?",
+                default=True,
+            )
+            if not choice:
+                print("❌ 생성이 취소되었습니다.")
+                return False
+
+            # 5. 실행
+            print(f"\n💾 컬렉션 생성 중...")
+            final_version = self.data_manager.import_collection(
+                data_file=data_file,
+                name=name,
+                version=version,
+                description=description
+            )
+
+            print(f"✅ 생성 완료: {name}@{final_version}")
+            print(f"💡 'python main.py collections info' 명령으로 확인 가능")
+            return True
+            
+        except KeyboardInterrupt:
+            print("\n❌ 생성이 취소되었습니다.")
+            return False
+        except Exception as e:
+            print(f"❌ 컬렉션 가져오기 중 오류: {e}")
+            return False
+        
+    def list_collections(self):
+        """등록된 컬렉션 목록 조회"""
+        try:
+            collections = self.data_manager.collection_manager.list_collections()
+            if not collections:
+                print("\n📭 저장된 컬렉션이 없습니다.")
+                
+            print(f"\n📦 저장된 컬렉션 ({len(collections)}개)")
+            print("="*80)
+            
+            for collection in collections:
+                print(f"📁 {collection['name']} ({collection['version']} 🔥) - {collection['description']}")
+                print(f"  - samples: {collection['num_samples']:,}")
+                print(f"  - versions: {collection['num_versions']}")
+                
+                
+            return True
+            
+        except Exception as e:
+            print(f"❌ 컬렉션 목록 조회 실패: {e}")
+            return False
+   
+    def _select_collection(self, multiple: bool = False):
+        """컬렉션 선택 공통 함수"""
+        collections = self.data_manager.collection_manager.list_collections()
+        if not collections:
+            print("No collections found.")
+            return None
+            
+        print(f"\nCollections ({len(collections)}):")
+        for i, collection in enumerate(collections, 1):
+            print(f"  {i}. {collection['name']} ({collection['version']})")
+        
+        collection_names = [c['name'] for c in collections]
+        
+        if multiple:
+            print("Select: name1,name2 | 1-3 | * (all)")
+            prompt = "Collections: "
+        else:
+            prompt = "Collection name or number: "
+        
+        while True:
+            name_input = input(f"\n{prompt}").strip()
+            if not name_input:
+                print("Collection name is required.")
+                continue
+                
+            if multiple and name_input == "*":
+                return collection_names
+            
+            selected = self._parse_input(name_input, collection_names)
+            if selected:
+                return selected if multiple else selected[0]
+
+    def _select_collection_version(self, collection_name: str, multiple: bool = False):
+        """버전 선택 공통 함수"""
+        versions = self.data_manager.collection_manager.list_versions(collection_name)
+            
+        print(f"\nVersions ({len(versions)}):")
+        for i, version in enumerate(versions, 1):
+            print(f"  {i}. {version}")
+            
+        if multiple:
+            print("Select: latest | v1,v2 | v1-v3 | * (all)")
+            prompt = "Versions (Enter=latest): "
+        else:
+            prompt = "Version (Enter=latest): "
+        
+        while True:
+            version_input = input(prompt).strip() or "latest"
+            
+            if version_input == "latest":
+                latest_version = self.data_manager.collection_manager._get_latest_version(collection_name)
+                return [latest_version] if multiple else latest_version
+            elif version_input == "*" and multiple:
+                return versions
+            else:
+                selected = self._parse_input(version_input, versions)
+                if selected:
+                    return selected if multiple else selected[0]
+                
+    def show_collection_info_interactive(self):
+        try:
+            print("\nCollection Information")
+            print("=" * 50)
+        
+            name = self._select_collection(multiple=False)
+            if not name:
+                return False
+            versions = self._select_collection_version(name, multiple=True)
+            if not versions:
+                return False
+            
+            print(f"\nCollection: {name}")
+            print("=" * 60)
+            for version in versions:
+                info = self.data_manager.collection_manager.get_collection_info(name, version)    
+                print(f"Version:     {info['version']}")
+                print(f"Description: {info['description']}")
+                print(f"Created:     {info['created_at']}")
+                print(f"Created by:  {info['created_by']}")
+                print("Data:")
+                print(f"  Samples:   {info['num_samples']:,}")
+                print("=" * 60)
+            return True
+        except Exception as e:
+            print(f"Error: {e}")
+            return False
+        
+    def export_collection_interactive(self):
+        try:
+            print("\nExport Collection")
+            print("=" * 50)
+            
+            name = self._select_collection(multiple=False)
+            if not name:
+                return False
+            version = self._select_collection_version(name, multiple=False)
+            if not version:
+                return False
+            
+            # 4. 출력 경로 입력
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            default_path = f"./exports/{name}_{version}_{timestamp}"
+            output_path = input(f"Output path (default: {default_path}): ").strip() or default_path
+            
+            # 5. 형식 선택
+            print("\nExport format:")
+            print("  1. datasets (folder)")
+            print("  2. parquet (file)")
+            
+            while True:
+                format_choice = input("Format (1-2) [1]: ").strip() or "1"
+                if format_choice == "1":
+                    format_type = "datasets"
+                    break
+                elif format_choice == "2":
+                    format_type = "parquet"
+                    break
+                else:
+                    print("Invalid choice. Enter 1 or 2.")
+            
+            # 6. 미리보기
+            print(f"\nExport summary:")
+            print(f"  Collection: {name}@{version}")
+            print(f"  Output:     {output_path}")
+            print(f"  Format:     {format_type}")
+            
+            choice = self._ask_yes_no(
+                question="Proceed with export?",
+                default=True,
+            )
+            if not choice:
+                print("Export cancelled.")
+                return False
+            
+            # 7. 실행
+            print(f"\nExporting collection...")
+            exported_path = self.data_manager.collection_manager.export_collection(
+                name=name,
+                version=version,
+                output_path=output_path,
+                format=format_type
+            )
+            
+            # 크기 정보
+            if format_type == "datasets":
+                total_size = sum(f.stat().st_size for f in exported_path.rglob('*') if f.is_file()) / 1024 / 1024
+            else:
+                total_size = exported_path.stat().st_size / 1024 / 1024
+                
+            print(f"Export completed: {exported_path}")
+            print(f"Size: {total_size:.1f} MB")
+            
+            # 사용법 안내
+            if format_type == "datasets":
+                print(f"\nUsage:")
+                print(f"  from datasets import load_from_disk")
+                print(f"  dataset = load_from_disk('{exported_path}')")
+            
+            return True
+            
+        except FileNotFoundError:
+            print(f"Collection not found: {name}@{version}")
+            return False
+        except KeyboardInterrupt:
+            print("\nExport cancelled.")
+            return False
+        except Exception as e:
+            print(f"Export failed: {e}")
+            return False
+    
+    def delete_collection_interactive(self):
+        try:
+            print("\nDelete Collection")
+            print("=" * 50)
+            
+            name = self._select_collection(multiple=False)
+            if not name:
+                return False
+            
+            versions_to_delete = self._select_collection_version(name, multiple=True)
+            if not versions_to_delete:
+                return False
+            
+            all_versions = self.data_manager.collection_manager.list_versions(name)
+            if len(versions_to_delete) == len(all_versions):
+                print(f"\nWARNING: This will delete the entire collection '{name}'")
+            else:
+                print(f"\nThis will delete version(s): {', '.join(versions_to_delete)}")
+            
+            choice = self._ask_yes_no(
+                question="Are you sure you want to proceed?",
+                default=False,
+            )
+            
+            if not choice:
+                print("Delete cancelled.")
+                return False
+            
+            print(f"\nDeleting...")
+            success_count = 0
+
+            for version in versions_to_delete:
+                try:
+                    if len(versions_to_delete) == len(all_versions) and version == versions_to_delete[-1]:
+                        success = self.data_manager.collection_manager.delete_collection(name, None)
+                    else:
+                        success = self.data_manager.collection_manager.delete_collection(name, version)
+                        
+                    if success:
+                        success_count += 1
+                        print(f"  Deleted: {name}@{version}")
+                    else:
+                        print(f"  Failed: {name}@{version}")
+                        
+                except Exception as e:
+                    print(f"  Error deleting {version}: {e}")
+            
+            print(f"\nDeleted {success_count}/{len(versions_to_delete)} versions.")
+            
+            remaining = self.data_manager.collection_manager.list_versions(name)
+            if remaining:
+                print(f"Remaining versions: {', '.join(remaining)}")
+            else:
+                print(f"Collection '{name}' completely removed.")
+                
+            return success_count > 0
+            
+        except KeyboardInterrupt:
+            print("\nDelete cancelled.")
+            return False
+        except Exception as e:
+            print(f"Delete failed: {e}")
+            return False
+        
+    def _save_as_collection(self, search_results):
+        while True:
+            name = input("📦 컬렉션 이름을 입력하세요: ").strip()
+            if name:
+                break
+            print("❌ 컬렉션 이름은 필수입니다. 다시 입력해주세요.")
+        
+        version = input("📋 버전 (Enter=자동): ").strip() or None
+        description = input("📄 설명 (선택): ").strip()
+        print(f"\n💾 컬렉션 저장 중...")
+        final_version = self.data_manager.save_collection(
+            search_results=search_results,
+            name=name,
+            version=version,
+            description=description
+        )
+        
+        print(f"✅ 컬렉션 생성 완료: {name}@{final_version}")
+        print(f"💡 'python main.py collections info' 명령으로 확인 가능")
+        return True
+        
     def _generate_validation_report(self, result):
         """검사 보고서 생성"""
         report_path = Path(f"./validation_report_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json")
@@ -857,7 +1199,6 @@ class DataManagerCLI:
                 print(f"⚠️ 보고서 생성 실패: {e}")
         
         print("\n" + "="*50)
-        
         
     def _ask_yes_no(self, question, default=False):
         """y/N 질문 함수"""
@@ -955,12 +1296,15 @@ class DataManagerCLI:
         for i, item in enumerate(items, 1):
             print(f"  {i:2d}. {item}")
         
-        print("\n선택: 번호(1,2,3), 범위(1-5), 전체(Enter)")
+        print("\n선택: 번호(1,2,3), 범위(1-5), 전체(*)")
         while True:  # 🔥 올바른 입력까지 반복
             
             user_input = input(f"{column}: ").strip()
             
             if not user_input: 
+                continue 
+            if user_input == "*":
+                print(f"✅ 전체 {column} 선택됨")
                 return items
             
             selected = self._parse_input(user_input, items)
@@ -994,8 +1338,7 @@ class DataManagerCLI:
                         has_error = True
                 except ValueError:
                     print(f"⚠️ 잘못된 범위: {part}")
-                    has_error = True
-                    
+                    has_error = True                
             elif part.isdigit():
                 # 번호: 1, 2, 3
                 idx = int(part) - 1
@@ -1004,7 +1347,6 @@ class DataManagerCLI:
                 else:
                     print(f"⚠️ 잘못된 번호: {part}")
                     has_error = True
-                    
             else:
                 # 이름: imagenet, coco
                 if part in items:
@@ -1013,10 +1355,12 @@ class DataManagerCLI:
                     print(f"⚠️ 찾을 수 없음: {part}")
                     has_error = True
         
-        if has_error or not selected:  # 🔥 오류가 있거나 선택된 게 없으면 None 반환
-            return None
+        if has_error or not selected:
+            return []
         
-        return list(selected)
+        selected = list(selected)
+        
+        return selected
 
     def _show_matrix(self, partitions_df, level1, level2):
         print(f"\n📊 {level1.title()}-{level2.title()} 조합 매트릭스:")
@@ -1087,7 +1431,7 @@ class DataManagerCLI:
         # 검색 실행
         return self.data_manager.search(text_search=text_search_config)
 
-    def _export_selected_data(self, search_results):
+    def _donwload_selected_data(self, search_results):
         """대화형 다운로드 수행"""
         print("\n💾 다운로드 옵션:")
         print("  1. Parquet (text only)")
@@ -1102,12 +1446,12 @@ class DataManagerCLI:
             else:
                 print("❌ 잘못된 선택입니다. 1, 2, 또는 3을 입력해주세요.")
         timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
-        default_path = f"./exports/export_{timestamp}_{len(search_results)}_items"
+        default_path = f"./downloads/download_{timestamp}_{len(search_results)}_items"
         save_path = input(f"저장 경로 [{default_path}]: ").strip() or default_path
         
         try:
             if choice == "1":
-                output_path = self.data_manager.export(
+                output_path = self.data_manager.download(
                     search_results=search_results, 
                     output_path=save_path, 
                     format='parquet',
@@ -1116,7 +1460,7 @@ class DataManagerCLI:
                 print(f"✅ Parquet 저장 완료: {output_path}")
                 
             elif choice == "2":
-                output_path = self.data_manager.export(
+                output_path = self.data_manager.download(
                     search_results=search_results, 
                     output_path=save_path, 
                     format="dataset",
@@ -1127,7 +1471,7 @@ class DataManagerCLI:
                 self._show_usage_example(output_path)
                 
             elif choice == "3":
-                output_path = self.data_manager.export(
+                output_path = self.data_manager.download(
                     search_results=search_results, 
                     output_path=save_path, 
                     format="dataset",
@@ -1469,10 +1813,19 @@ For more help on subcommands:
     task_remove_parser.add_argument('name', nargs='?', help='제거할 Task 이름 (예: "ocr", "document_conversion", "layout")')
     task_subparsers.add_parser('list', help='Task 목록 확인')
     
-    # 데이터 업로드 및 내보내기
+    # 데이터 업로드 및 다운로드
     subparsers.add_parser('upload', help='데이터 업로드', description='데이터를 업로드합니다.')
-    subparsers.add_parser('export', help='데이터 내보내기', description='업로드된 데이터를 내보냅니다.')
+    download_parser = subparsers.add_parser('download', help='데이터 다운로드', description='업로드된 데이터를 다운로드합니다.')
+    download_parser.add_argument('--as-collection', action='store_true', help='컬렉션으로 저장 (버전 관리)')
     
+    collections_parser = subparsers.add_parser('collections', help='컬렉션 관리', description='컬렉션 관리')
+    collections_subparsers = collections_parser.add_subparsers(dest='collections_action', title='Collections Actions', metavar='<action>')
+    
+    collections_subparsers.add_parser('list', help='전체 컬렉션 목록 확인')
+    collections_subparsers.add_parser('info', help='컬렉션 정보 확인')
+    collections_subparsers.add_parser('import', help='외부 데이터셋 가져오기')
+    collections_subparsers.add_parser('export', help='컬렉션 내보내기')
+    collections_subparsers.add_parser('delete', help='컬렉션 삭제')
     
     # 처리 관리
     process_parser = subparsers.add_parser('process', help='Staging 데이터 처리 관리', description='Staging 데이터 처리 작업을 관리합니다.')
@@ -1553,8 +1906,6 @@ For more help on subcommands:
         
         elif args.command == 'upload':
             cli.upload_interactive()
-        elif args.command == 'export':
-            cli.export_interactive()
         elif args.command == 'process':
             if not args.process_action:
                 process_parser.print_help()
@@ -1565,7 +1916,6 @@ For more help on subcommands:
                 cli.check_job_status(args.job_id)
             elif args.process_action == 'list':
                 cli.list_all_data()
-        
         elif args.command == 'db':
             if not args.db_action:
                 db_parser.print_help()
@@ -1580,6 +1930,23 @@ For more help on subcommands:
                 cli.validate_db_integrity_interactive(
                     report=args.report
                 )
+        elif args.command == 'download':
+            cli.download_interactive(as_collection=args.as_collection)
+        elif args.command == 'collections':
+            if not args.collections_action:
+                collections_parser.print_help()
+                return
+            
+            if args.collections_action == 'list':
+                cli.list_collections()
+            elif args.collections_action == 'info':
+                cli.show_collection_info_interactive()
+            elif args.collections_action == 'import':
+                cli.import_collection_interactive()
+            elif args.collections_action == 'export':
+                cli.export_collection_interactive()
+            elif args.collections_action == 'delete':
+                cli.delete_collection_interactive()
 
     except KeyboardInterrupt:
         print("\n👋 작업이 중단되었습니다.")

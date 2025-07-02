@@ -16,6 +16,7 @@ from typing import Dict, Optional, List, Union
 from PIL import Image
 
 from core.schema import SchemaManager
+from core.collections import CollectionManager
 from utils.logging import setup_logging
 from clients.duckdb_client import DuckDBClient
 
@@ -29,22 +30,23 @@ class DatalakeClient:
         log_level: str = "INFO",
         num_proc: int = 8, # 병렬 처리 프로세스 수
         table_name: str = "catalog",
+        create_dirs: bool = False, # 초기 디렉토리 생성 여부
     ):
         if not user_id:
             raise ValueError("user_id는 필수 입니다. 예: DatalakeClient(user_id='user_123')")
         
         self.user_id = user_id
-        self.base_path = Path(base_path)
         self.server_url = server_url.rstrip('/')
         
-        # 필수 디렉토리 설정
+        self.base_path = Path(base_path)
         self.staging_path = self.base_path / "staging"
         self.staging_pending_path = self.staging_path / "pending"
         self.staging_processing_path = self.staging_path / "processing"
         self.staging_failed_path = self.staging_path / "failed"
         self.catalog_path = self.base_path / "catalog"
         self.assets_path  = self.base_path / "assets"
-
+        self.collections_path = self.base_path / "collections"
+        self.config_path = self.base_path / "config" / "schema.yaml"
         self.duckdb_path = self.base_path / "users" / f"{self.user_id}.duckdb"
         
         self.num_proc = num_proc
@@ -54,14 +56,65 @@ class DatalakeClient:
         self.file_path_candidates = ['image_path', 'file', 'file_path']
         self.file_path_key = 'file_path'  # 기본 파일 경로 컬럼 키
         
-        self._check_path_and_setup_logging(log_level)
+    
+        
+        self._initialize(log_level, create_dirs=create_dirs)
         self._check_server_connection()
-
+               
         self.schema_manager = SchemaManager(
-            base_path=self.base_path, 
+            config_path=self.config_path,
             create_default=True
         )
-          
+        self.collection_manager = CollectionManager(
+            collections_path=self.collections_path,
+        )
+        
+    def _initialize(self, log_level: str, create_dirs: bool = False):
+        required_paths = {
+            'base': self.base_path,
+            'staging': self.staging_path,
+            'staging/pending': self.staging_pending_path,
+            'staging/processing': self.staging_processing_path, 
+            'staging/failed': self.staging_failed_path,
+            'catalog': self.catalog_path,
+            'assets': self.assets_path,
+            'collections': self.collections_path,
+        }
+        if create_dirs:
+            for path_name, path_obj in required_paths.items():
+                if not path_obj.exists():
+                    path_obj.mkdir(mode=0o777, parents=True, exist_ok=True)
+                    self.logger.debug(f"📁 디렉토리 생성: {path_name}")
+        else:
+            missing_paths = []
+            for path_name, path_obj in required_paths.items():
+                if not path_obj.exists():
+                    missing_paths.append(f"  - {path_name}: {path_obj}")
+            
+            if missing_paths:
+                missing_list = '\n'.join(missing_paths)
+                raise FileNotFoundError(f"❌ 필수 디렉토리가 없습니다:\n{missing_list}")
+            
+        setup_logging(
+            user_id=self.user_id,
+            log_level=log_level, 
+            base_path=str(self.base_path)
+        )
+        self.logger = logging.getLogger(__name__)
+        self.logger.debug("✅ 모든 필수 디렉토리 확인 완료")
+
+    def _check_server_connection(self):
+        """서버 연결 확인"""
+        try:
+            response = requests.get(f"{self.server_url}/health", timeout=5)
+            if response.status_code == 200:
+                self.logger.debug(f"✅ 서버 연결 성공: {self.server_url}")
+            else:
+                self.logger.warning(f"⚠️ 서버 응답 이상: {response.status_code}")
+        except requests.exceptions.RequestException as e:
+            self.logger.warning(f"⚠️ 서버 연결 실패: {e}")
+            raise ConnectionError(f"서버 연결 실패: {e}")
+        
     def upload_raw(
         self,
         data_file: Union[str, Path, pd.DataFrame, Dataset],
@@ -69,9 +122,8 @@ class DatalakeClient:
         dataset: str,
         dataset_description: str = "", # 데이터셋 설명
         original_source: str = "", # 원본 소스 URL 
-        auto_process: bool = False, # 자동 처리 여부
         overwrite: bool = False, # 기존 pending 데이터 제거 여부
-    ):
+    ) -> bool:
         task = "raw"
 
         self.logger.info(f"📥 Raw data 업로드 시작: {provider}/{dataset}")
@@ -80,7 +132,9 @@ class DatalakeClient:
             raise ValueError(f"❌ 지원하지 않는 provider입니다: {provider}")
 
         if not self._handle_existing_data(provider, dataset, task, overwrite=overwrite, is_raw=True):
-            return None, None
+            self.logger.warning(f"⚠️ 기존 데이터가 존재합니다: {provider}/{dataset}/{task}")
+            self.logger.info("💡 overwrite=True로 설정하면 기존 데이터를 덮어쓸 수 있습니다")
+            return False
         
         dataset_obj, file_info = self._load_data(data_file)
 
@@ -100,13 +154,7 @@ class DatalakeClient:
         staging_dir = self._save_to_staging(dataset_obj, metadata)
         self.logger.info(f"✅ Task 데이터 업로드 완료: {staging_dir}")
         
-        job_id = None
-        if auto_process:
-            job_id = self.trigger_processing()
-            if job_id:
-                self.logger.info(f"🔄 자동 처리 시작됨: {job_id}")
-        
-        return staging_dir, job_id
+        return True
     
     def upload_task(
         self,
@@ -116,18 +164,14 @@ class DatalakeClient:
         task: str,
         variant: str,
         dataset_description: str = "",
-        auto_process: bool = False,
         overwrite: bool = False,
         meta: Optional[Dict] = None,
-    ) -> str:
+    ) -> bool:
         self.logger.info(f"📥 Task data 업로드 시작: {provider}/{dataset}/{task}/{variant}")
         
         if not self._check_raw_data_exists(provider, dataset):
             self.logger.warning(f"⚠️ Raw 데이터가 없습니다: {provider}/{dataset}")
-            self.logger.info("💡 먼저 upload_raw()로 원본 데이터를 업로드하세요")
-            raise FileNotFoundError(
-                f"❌ Raw 데이터가 존재하지 않습니다: {provider}/{dataset}"
-            )
+            self.logger.info("💡 upload_raw()로 원본 데이터를 먼저 업로드하는 것을 권장합니다.")
 
         if not self.schema_manager.validate_provider(provider):
             raise ValueError(f"❌ 지원하지 않는 provider입니다: {provider}")
@@ -137,7 +181,9 @@ class DatalakeClient:
             raise ValueError(f"❌ Task 메타데이터 검증 실패: {error_msg}")
 
         if not self._handle_existing_data(provider, dataset, task, variant, overwrite=overwrite, is_raw=False):
-            return None, None
+            self.logger.warning(f"⚠️ 기존 데이터가 존재합니다: {provider}/{dataset}/{task}/{variant}")
+            self.logger.info("💡 overwrite=True로 설정하면 기존 데이터를 덮어쓸 수 있습니다")
+            return False
         
         dataset_obj, file_info = self._load_data(data_file)
 
@@ -166,13 +212,7 @@ class DatalakeClient:
         staging_dir = self._save_to_staging(dataset_obj, metadata)
         self.logger.info(f"✅ Task 데이터 업로드 완료: {staging_dir}")
         
-        job_id = None
-        if auto_process:
-            job_id = self.trigger_processing()
-            if job_id:
-                self.logger.info(f"🔄 자동 처리 시작됨: {job_id}")
-        
-        return staging_dir, job_id
+        return True
     
     def get_server_status(self) -> Optional[Dict]:
         """서버 상태 조회"""
@@ -557,7 +597,7 @@ class DatalakeClient:
         self.logger.info(f"✅ Dataset 객체 생성 완료: {len(dataset):,}개 항목") 
         return dataset
     
-    def export(
+    def download(
         self,
         search_results: pd.DataFrame,
         output_path: Union[str, Path],
@@ -597,6 +637,40 @@ class DatalakeClient:
         else:
             raise ValueError(f"지원하지 않는 형식입니다: {format}")
     
+    def save_collection(
+        self,
+        search_results,
+        name,
+        version = None,
+        description: str = "",
+    ):
+        dataset = self.to_dataset(search_results, absolute_paths=True, check_path_exists=True)
+        return self.dataset_manager.save_collection(
+            dataset=dataset,
+            name=name,
+            version=version,
+            description=description,
+            user_id=self.user_id,
+        )
+        
+    def import_collection(
+        self,
+        data_file: Union[str, Path, pd.DataFrame, Dataset],
+        name: str,
+        version: Optional[str] = None,
+        description: str = "",
+    ) -> str:
+        
+        dataset = self._load_to_dataset(data_file)
+        
+        return self.collection_manager.save_collection(
+            collection=dataset,
+            name=name,
+            version=version,
+            description=description,
+            user_id=self.user_id,
+        )
+            
     def request_asset_validation(
         self,
         search_results: pd.DataFrame,
@@ -982,29 +1056,15 @@ class DatalakeClient:
         return valid_dataset
 
     def _check_raw_data_exists(self, provider: str, dataset: str) -> bool:
-        """해당 provider/dataset의 raw 데이터 존재 여부 확인"""
-        raw_task_path = self.catalog_path / f"provider={provider}" / f"dataset={dataset}" / "task=raw"
-        
-        # raw task 디렉토리가 존재하고, 그 안에 variant가 하나 이상 있는지 확인
-        if not raw_task_path.exists():
-            return False
-        
-        # raw 디렉토리 안에 variant 폴더가 있는지 확인 (variant=image, variant=text, variant=mixed 등)
-        variant_dirs = [d for d in raw_task_path.iterdir() 
-                    if d.is_dir() and d.name.startswith("variant=")]
-        return len(variant_dirs) > 0     
-    
-    def _check_server_connection(self):
-        """서버 연결 확인"""
         try:
-            response = requests.get(f"{self.server_url}/health", timeout=5)
-            if response.status_code == 200:
-                self.logger.debug(f"✅ 서버 연결 성공: {self.server_url}")
-            else:
-                self.logger.warning(f"⚠️ 서버 응답 이상: {response.status_code}")
-        except requests.exceptions.RequestException as e:
-            self.logger.warning(f"⚠️ 서버 연결 실패: {e}")
-            raise ConnectionError(f"서버 연결 실패: {e}")
+            results = self.search(
+                providers=[provider],
+                datasets=[dataset], 
+                tasks=["raw"]
+            )
+            return not results.empty
+        except:
+            return False    
     
     def _create_metadata(
         self,
@@ -1109,10 +1169,8 @@ class DatalakeClient:
             raise TypeError(f"❌ 지원하지 않는 데이터 타입: {type(data_file)}. "
                             "Dataset, pandas DataFrame, str 또는 Path 객체만 지원합니다.")
             
-    def _load_data(self, data_file) -> tuple[Dataset, dict]:
-        
+    def _load_to_dataset(self, data_file) -> Dataset:
         data_type = self._get_file_type(data_file)
-
         if data_type == "dataset":
             self.logger.info(f"🤗 Hugging Face Dataset 로드 중: {len(data_file)} 행")
             try:
@@ -1153,6 +1211,16 @@ class DatalakeClient:
                 self.logger.info(f"✅ Parquet 파일 로드 완료: {len(df)} 행")
             except Exception as e:
                 raise ValueError(f"❌ Parquet 파일 로드 실패: {e}")
+        
+        else:            
+            raise ValueError(f"❌ 지원하지 않는 데이터 타입: {data_type}. "
+                "Dataset, pandas DataFrame, datasets 폴더 또는 Parquet 파일만 지원합니다.")
+            
+        return dataset_obj
+        
+    def _load_data(self, data_file) -> tuple[Dataset, dict]:
+        
+        dataset_obj = self._load_to_dataset(data_file)
         
         self.logger.info(f"✅ 데이터 파일 로드 완료: {data_file}")
         column_names = dataset_obj.column_names
@@ -1399,33 +1467,6 @@ class DatalakeClient:
         else:
             self.logger.warning(f"⚠️ 파일 경로 컬럼 '{self.file_path_key}'가 유효하지 않거나 존재하지 않습니다: {sample_value}")
             raise ValueError(f"파일 경로 컬럼 '{self.file_path_key}'가 유효하지 않거나 존재하지 않습니다.")
-    
-    def _check_path_and_setup_logging(self, log_level: str):
-        required_paths = {
-            'base': self.base_path,
-            'staging': self.staging_path,
-            'staging/pending': self.staging_pending_path,
-            'staging/processing': self.staging_processing_path, 
-            'staging/failed': self.staging_failed_path,
-            'catalog': self.catalog_path,
-            'assets': self.assets_path,
-        }
-        
-        missing_paths = []
-        for path_name, path_obj in required_paths.items():
-            if not path_obj.exists():
-                missing_paths.append(f"  - {path_name}: {path_obj}")
-        
-        if missing_paths:
-            missing_list = '\n'.join(missing_paths)
-            raise FileNotFoundError(f"❌ 필수 디렉토리가 없습니다:\n{missing_list}")
-        setup_logging(
-            user_id=self.user_id,
-            log_level=log_level, 
-            base_path=str(self.base_path)
-        )
-        self.logger = logging.getLogger(__name__)
-        self.logger.debug("✅ 모든 필수 디렉토리 확인 완료")
         
     def _add_metadata_columns(self, dataset_obj: Dataset, metadata: Dict):
         """Task 데이터에 메타데이터 컬럼 추가"""

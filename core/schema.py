@@ -6,10 +6,10 @@ class SchemaManager:
     
     def __init__(
         self, 
-        base_path: str = "/mnt/AI_NAS/datalake",
+        config_path: str = "/mnt/AI_NAS/datalake/config/schema.yaml",
         create_default: bool = False
     ):
-        self.config_path = Path(base_path) / "config" / "schema.yaml"
+        self.config_path = Path(config_path)
         if not self.config_path.exists():
             if create_default:
                 self.create_default_schema()
