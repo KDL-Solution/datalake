@@ -1150,8 +1150,7 @@ class DatalakeClient:
             else:
                 raise ValueError(f"❌ 지원하지 않는 파일 형식: {data_path.suffix}")
         else:
-            raise TypeError(f"❌ 지원하지 않는 데이터 타입: {type(data_source)}. "
-                            "Dataset, pandas DataFrame, str 또는 Path 객체만 지원합니다.")
+            raise TypeError(f"❌ 지원하지 않는 데이터 타입: {type(data_source)}.")
             
     def _load_to_dataset(self, data_source) -> Dataset:
         data_type = self._get_file_type(data_source)
@@ -1183,7 +1182,7 @@ class DatalakeClient:
             except Exception as e:
                 raise ValueError(f"❌ datasets 폴더 로드 실패: {e}")
                 
-        elif data_type == "parquet_file":
+        elif data_type == "parquet":
             data_path = Path(data_source).resolve()
             self.logger.info(f"📂 Parquet 파일 로드 중: {data_path}")
             try:
@@ -1194,8 +1193,7 @@ class DatalakeClient:
                 raise ValueError(f"❌ Parquet 파일 로드 실패: {e}")
         
         else:            
-            raise ValueError(f"❌ 지원하지 않는 데이터 타입: {data_type}. "
-                "Dataset, pandas DataFrame, datasets 폴더 또는 Parquet 파일만 지원합니다.")
+            raise ValueError(f"❌ 지원하지 않는 데이터 타입: {data_type}. ")
             
         return dataset_obj
         
