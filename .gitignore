@@ -209,3 +209,6 @@ pyrightconfig.json
 *.ipynb_checkpoints
 # 특정 디렉토리의 ipynb만 무시
 */notebooks/*.ipynb_checkpoints
+
+export/exporter.py
+export/splitter.py
