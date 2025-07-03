@@ -15,7 +15,7 @@ class CollectionManager:
     def __init__(self, collections_path: str = "/mnt/AI_NAS/datalake/collections"):
         self.collections_path = Path(collections_path)
 
-    def load_collection(self, name: str, version: str = "latest") -> Dataset:
+    def load_collection(self, name: str, version: Optional[str] = "latest") -> Dataset:
         """컬렉션 로드"""
         collection_dir = self._get_collection_path(name, version)
         if not collection_dir.exists():
@@ -27,16 +27,17 @@ class CollectionManager:
         self,
         collection: Dataset,
         name: str,
-        version: str = None,
+        version: Optional[str] = None,
         description: str = "",
-        user_id: str = "user",
+        create_by: str = "user",
         auto_version: bool = True
     ) -> str:
         """데이터셋 저장"""
         
         # 자동 버전 관리
-        if version is None or auto_version:
-            version = self._get_next_version(name, version)
+        if auto_version:
+            if version is None or version == "":
+                version = self._get_next_version(name)
             
         collection_dir = self.collections_path / name / version
         collection_dir.mkdir(parents=True, exist_ok=True)
@@ -49,7 +50,7 @@ class CollectionManager:
             name=name,
             version=version,
             description=description,
-            created_by=user_id,
+            created_by=create_by,
             num_samples=len(collection),
         )
         
@@ -63,7 +64,7 @@ class CollectionManager:
         collection_dir.chmod(0o777)
         for path in collection_dir.rglob('*'):
             path.chmod(0o777)
-        return version
+        return str(collection_dir)
   
     def export_collection(
         self, 
@@ -128,7 +129,7 @@ class CollectionManager:
             print(f"Delete error: {e}")
             return False
     
-    def list_collections(self) -> List[str]:
+    def list_collections(self) -> List[Dict]:
         """컬렉션 목록 조회"""
         collections = []
         
@@ -149,14 +150,10 @@ class CollectionManager:
             latest_version = self._get_latest_version(name) if versions else "unknown"
             try:
                 collection_info = self.get_metadata(name, latest_version)
-            except Exception:
-                collection_info = self._create_metadata(
-                    name=name,
-                    version=latest_version,
-                    description="",
-                    created_by="unknown",
-                    num_samples=0,
-                )
+            except FileNotFoundError:
+                # 메타데이터 파일이 없으면 건너뜀
+                continue
+            
             
             collection_info['num_versions'] = len(versions)
             collections.append(collection_info)
@@ -274,9 +271,9 @@ class CollectionManager:
         else:
             return f"{default_version}1"
         
-    def _get_collection_path(self, name: str, version: str) -> Path:
+    def _get_collection_path(self, name: str, version: Optional[str] = "latest") -> Path:
 
-        if version == "latest":
+        if version == "latest" or version is None:
             latest_link = self.collections_path / name / "latest"
             if latest_link.exists() and latest_link.is_symlink():
                 return latest_link.resolve()

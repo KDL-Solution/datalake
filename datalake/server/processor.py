@@ -19,7 +19,7 @@ from datasets import Dataset, load_from_disk
 from datasets.features import Image as ImageFeature
 from functools import partial
 
-from utils.logging import setup_logging
+from datalake.utils import setup_logging
 
 class DatalakeProcessor:
     

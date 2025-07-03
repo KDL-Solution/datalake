@@ -44,6 +44,12 @@ class SchemaManager:
         required_fields = self.get_required_fields(task)
         allowed_values = self.get_allowed_values(task)
         
+        if meta is None:
+            return False, f"{required_fields} 필드의 meta가 필요합니다"
+        if not isinstance(meta, dict):
+            return False, f"meta는 dict 타입이어야 합니다. 현재 타입: {type(meta).__name__}"
+        
+        
         # required_fields에 없는 필드는 모두 차단
         for field in meta.keys():
             if field not in required_fields:

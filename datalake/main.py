@@ -10,7 +10,7 @@ from PIL import Image
 from pathlib import Path
 from datetime import datetime
 
-from core.datalake import DatalakeClient  
+from datalake.core import DatalakeClient  
 
 class DataManagerCLI:
     """Data Manager CLI 인터페이스"""
@@ -1437,7 +1437,7 @@ class DataManagerCLI:
         # 검색 실행
         return self.data_manager.search(text_search=text_search_config)
 
-    def _donwload_selected_data(self, search_results):
+    def _download_selected_data(self, search_results):
         """대화형 다운로드 수행"""
         print("\n💾 다운로드 옵션:")
         print("  1. Parquet (text only)")

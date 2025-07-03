@@ -15,10 +15,10 @@ from datasets import Image as DatasetImage
 from typing import Dict, Optional, List, Union
 from PIL import Image
 
-from core.schema import SchemaManager
-from core.collections import CollectionManager
-from utils.logging import setup_logging
-from clients.duckdb_client import DuckDBClient
+from datalake.core.collections import CollectionManager
+from datalake.core.schema import SchemaManager
+from datalake.utils import setup_logging
+from datalake.clients import DuckDBClient
 
 
 class DatalakeClient:
@@ -429,7 +429,7 @@ class DatalakeClient:
                 'error': str(e)
             }
     
-    def build_db(self, force_rebuild: bool = False) -> bool:
+    def build_db(self, force_rebuild: bool = True) -> bool:
         """DB 구축 또는 재구축"""
         self.logger.info("🔨 DB 구축 시작...")
         
@@ -584,12 +584,9 @@ class DatalakeClient:
         include_images: bool = False,
     ):
         self.logger.info("📥 Dataset 객체 생성 시작...")
-        
         df_copy = self.to_pandas(search_results, absolute_paths)
         dataset = Dataset.from_pandas(df_copy)
-        print(dataset.column_names)
         if check_path_exists and 'path' in dataset.column_names:
-            print("?")
             dataset = self._check_file_exist(dataset)
         if include_images:
             dataset = self._add_images_to_dataset(dataset)
@@ -641,18 +638,55 @@ class DatalakeClient:
         self,
         data_source: Union[str, Path, pd.DataFrame, Dataset],
         name: str,
-        version: Optional[str] = None,
+        version: Optional[str] = 'latest',
         description: str = "",
     ) -> str:
         
         dataset = self._load_to_dataset(data_source)
-        
         return self.collection_manager.save_collection(
             collection=dataset,
             name=name,
             version=version,
             description=description,
-            user_id=self.user_id,
+            create_by=self.user_id,
+        )
+        
+    def list_collections(self) -> pd.DataFrame:
+        return self.collection_manager.list_collections()
+    
+    def load_collection(
+        self,
+        name: str,
+        version: Optional[str] = 'latest',
+    ):  
+        self.logger.info(f"Loading collection: {name}, version: {version}")
+        return self.collection_manager.load_collection(
+            name=name,
+            version=version,
+        )
+    
+    def export_collection(
+        self,
+        name: str, 
+        version: str, 
+        output_path: Union[str, Path],
+        format: str = "datasets"
+    ):
+        return self.collection_manager.export_collection(
+            name=name,
+            version=version,
+            output_path=output_path,
+            format=format,
+        )
+        
+    def delete_collection(
+        self,
+        name: str,
+        version: Optional[str] = 'latest',
+    ) -> bool:
+        return self.collection_manager.delete_collection(
+            name=name,
+            version=version,
         )
             
     def request_asset_validation(
