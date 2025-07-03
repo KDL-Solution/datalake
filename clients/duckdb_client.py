@@ -79,7 +79,6 @@ class DuckDBClient:
     def execute_query(
         self,
         sql: str,
-        output_format: Literal["df", "dataset"] = "df",
     ) -> pd.DataFrame:
         """SQL 쿼리 실행
         
@@ -89,12 +88,7 @@ class DuckDBClient:
             pd.DataFrame: 쿼리 결과
         """
         try:
-            if output_format == "df":
-                return self.connection.execute(sql).df()
-            elif output_format == "dataset":
-                return Dataset(
-                    self.connection.execute(sql).fetch_arrow_table(),
-                )
+            return self.connection.execute(sql).df()
         except Exception as e:
             raise Exception(f"쿼리 실행 실패: {str(e)}\nSQL: {sql}")
 
@@ -229,7 +223,6 @@ class DuckDBClient:
         variants: List = [],
         table: str = "catalog",
         limit: Optional[int] = None,
-        output_format: Literal["df", "dataset"] = "df",
     ) -> pd.DataFrame:
         """존재하는 컬럼만 포함해서 조회"""
         if isinstance(providers, str):
@@ -303,7 +296,6 @@ class DuckDBClient:
             
             return self.execute_query(
                 sql,
-                output_format=output_format,
             )
         except Exception as e:
             print(f"컬럼 조회 실패: {str(e)}")
