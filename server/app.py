@@ -253,7 +253,7 @@ async def run_processing_job(job_id: str):
     await _run_background_job(
         job_id=job_id,
         job_name="처리 작업",
-        job_func=processor.process_pending_data,
+        job_func=processor.process_all_pending,
         job_args=(),
     )
         
