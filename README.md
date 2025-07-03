@@ -199,10 +199,8 @@ datalake/
 │   ├── korean_ocr_train/
 │   │   ├── v1.0/
 │   │   ├── v1.1/
-│   │   └── latest
 │   └── sentiment_data/
-│       ├── v1.0/
-│       └── latest
+│       └── v1.0/
 └── config/
 ```
 
