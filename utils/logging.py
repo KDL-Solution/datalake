@@ -3,7 +3,7 @@ import logging
 import os
 from pathlib import Path
 from datetime import datetime
-
+from uuid import uuid4
 def setup_logging(
     user_id:str,
     log_level: str = "INFO", 
@@ -25,7 +25,8 @@ def setup_logging(
         log_dir = Path(base_path) / "logs"
         log_dir.mkdir(mode=0o777, parents=True, exist_ok=True)
         date_str = datetime.now().strftime("%Y%m%d")
-        log_file = log_dir / f"{date_str}_{user_id}.log"
+        uid = str(uuid4())[:8]
+        log_file = log_dir / f"{date_str}_{user_id}_{uid}.log"
         
         file_handler = logging.FileHandler(log_file, encoding='utf-8')
         file_handler.setFormatter(formatter)
