@@ -1,4 +1,3 @@
-# logging_config.py
 import logging
 import os
 from pathlib import Path
@@ -11,7 +10,7 @@ def setup_logging(
 ):
     """전역 로깅 설정 (한 번만 호출)"""
     if logging.getLogger().handlers:
-        return  # 이미 설정됨
+        return
     
     # 포맷터
     formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')

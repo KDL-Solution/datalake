@@ -31,6 +31,7 @@ install_requires = [
     "fastapi>=0.115.4",
     "uvicorn[standard]>=0.32.0",
     "pydantic>=2.10.3",
+    "requests",
 ]
 
 # Optional dependencies for different use cases
@@ -53,21 +54,18 @@ console_scripts = [
 ]
 
 setup(
-    name="datalake_management",
+    name="datalake",
     version=version,
-    description="Enterprise-grade data lake management system for multimodal data",
+    description="A comprehensive data lake solution for managing datasets, images, and metadata.",
     long_description=long_description,
     long_description_content_type="text/markdown",
-    
     # Author information
-    author="DataTeam",
+    author="KDL-Solution",
     url="https://github.com/KDL-Solution/datalake",
     
     # Package information
     packages=find_packages(exclude=["tests*", "docs*", "examples*"]),
     zip_safe=False,
-
-    # Dependencies
     python_requires=">=3.8",
     install_requires=install_requires,
     extras_require=extras_require,

@@ -1478,8 +1478,6 @@ class DatalakeClient:
     
             
 if __name__ == "__main__":
-    from utils.config import Config
-    config = Config()
     manager = DatalakeClient(
         user_id="user",
         log_level="DEBUG",

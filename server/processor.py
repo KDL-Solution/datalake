@@ -61,7 +61,7 @@ class DatalakeProcessor:
         self.error_messages = []
         
         self.logger.info(f"🚀 DatalakeProcessor 초기화 (병렬: {self.num_proc}, 배치: {batch_size})")
- 
+    
     def get_status(self) -> Dict:
         """간단한 상태 조회"""
         return {

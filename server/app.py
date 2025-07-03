@@ -94,6 +94,36 @@ app = FastAPI(
 )
 
 
+@app.get("/info")
+async def get_server_info():
+    """서버 설정 정보 조회 - 모든 경로 정보 포함"""
+    try:
+        if not processor:
+            raise HTTPException(status_code=503, detail="Processor not initialized")
+        
+        return {
+            "server_status": "running",
+            "version": "1.0.0",
+            "num_proc": processor.num_proc,
+            "batch_size": processor.batch_size,
+            "timestamp": datetime.now().isoformat(),
+            
+            # 모든 경로 정보
+            "paths": {
+                "base_path": str(processor.base_path),
+                "staging_path": str(processor.staging_path),
+                "staging_pending_path": str(processor.staging_pending_path),
+                "staging_processing_path": str(processor.staging_processing_path),
+                "staging_failed_path": str(processor.staging_failed_path),
+                "catalog_path": str(processor.catalog_path),
+                "assets_path": str(processor.assets_path),
+                "collections_path": str(processor.collections_path),
+            }
+        }
+    except Exception as e:
+        logger.error(f"서버 정보 조회 실패: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+    
 @app.get("/health")
 async def health_check():
     """헬스 체크"""
