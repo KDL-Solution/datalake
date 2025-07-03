@@ -50,8 +50,9 @@ class DuckDBClient:
         try:
             if self.database_path:
                 # 디렉토리 생성
-                Path(self.database_path).parent.mkdir(parents=True, exist_ok=True)
+                Path(self.database_path).parent.mkdir(mode=0o777, parents=True, exist_ok=True)
                 self.connection = duckdb.connect(self.database_path, read_only=read_only)
+                os.chmod(self.database_path, 0o777)
             else:
                 # 인메모리 데이터베이스
                 self.connection = duckdb.connect(':memory:', read_only=read_only)

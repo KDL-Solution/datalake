@@ -1668,11 +1668,21 @@ class DataManagerCLI:
             for field in required_fields:
                 if field in allowed_values:
                     print(f"  {field} 허용값: {allowed_values[field]}")
-                value = input(f"  {field}: ").strip()
-                if not value:
-                    print(f"❌ 필수 필드 '{field}'가 누락되었습니다.")
-                    return False
-                meta[field] = value
+                while True:
+                    value = input(f"  {field}: ").strip()
+                    if not value:
+                        print(f"❌ 필수 필드 '{field}'가 누락되었습니다.")
+                        continue
+                    
+                    if field in allowed_values:
+                        if value not in allowed_values[field]:
+                            print(f"❌ '{value}'는 허용되지 않는 값입니다.")
+                            print(f"   허용값: {allowed_values[field]}")
+                            continue
+                    
+                    # 모든 검증 통과
+                    meta[field] = value
+                    break
         
         is_valid, error_msg = self.data_manager.schema_manager.validate_task_metadata(task, meta)
         if not is_valid:
