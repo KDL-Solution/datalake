@@ -6,7 +6,11 @@ from typing import List, Dict
 from PIL import Image
 from tqdm import tqdm
 
+import sys
+sys.path.insert(0, "/home/eric/workspace/datalake/")
 from prep.utils import DATALAKE_DIR, get_safe_image_hash_from_pil
+from core.datalake import DatalakeClient
+from export.recognition_exporter import RecogntionCharExporter
 from export.utils import (
     save_df_as_jsonl,
     denormalize_bboxes,
@@ -66,7 +70,6 @@ class DolphinStage2Exporter(object):
         df: pd.DataFrame,
         jsonl_path: str,
         images_dir: str,
-        datalake_dir: str = DATALAKE_DIR.as_posix(),
         layout_category_dict: Dict[str, str] = layout_category_dict,
         user_prompt_dict: Dict[str, str] = user_prompt_dict,
     ) -> None:
@@ -84,10 +87,6 @@ class DolphinStage2Exporter(object):
         df_copied["label"] = df_copied["label"].apply(
             lambda x: json.loads(x),
         )  # String to Dict.
-
-        df_copied["image_path"] = df_copied["image_path"].apply(
-            lambda x: (Path(datalake_dir) / x).as_posix(),
-        )  # Relative path to absolute path.
 
         df_copied[["image_path", "query", "label"]] = df_copied.progress_apply(
             lambda x: self.crop(
@@ -111,15 +110,33 @@ class DolphinStage2Exporter(object):
         )
 
 
-if __name__ == "__main__":
-    from athena.src.core.athena_client import AthenaClient
-
-    client = AthenaClient()
-    df = client.retrieve_with_existing_cols(
-        datasets=[
-            "office_docs",
-        ],
+def main(
+    user_id: str,
+):
+    client = DatalakeClient(
+        user_id=user_id,
     )
+
+    search_results = client.search(
+        datasets=[
+            "diverse_ocr_char",
+            "diverse_ocr_word",
+        ]
+    )
+    exporter = RecogntionCharExporter()
+
+    search_results = client.search(
+        variants=[
+            "base_layout",
+        ]
+    )
+    search_results.iloc[0]
+
+
+    search_results
+    search_results.iloc[-1]
+
+
 
     exporter = DolphinStage2Exporter()
     ROOT = Path(__file__).resolve().parent
@@ -127,4 +144,12 @@ if __name__ == "__main__":
         df=df,
         jsonl_path=(ROOT / "data/office_docs_stage2.jsonl").as_posix(),
         images_dir=(ROOT / "data/cropped").as_posix(),
+    )
+
+
+if __name__ == "__main__":
+    import fire
+
+    fire.Fire(
+        main
     )
