@@ -638,7 +638,7 @@ class DatalakeClient:
         self,
         data_source: Union[str, Path, pd.DataFrame, Dataset],
         name: str,
-        version: Optional[str] = 'latest',
+        version: Optional[str] = None,
         description: str = "",
     ) -> str:
         
@@ -657,7 +657,7 @@ class DatalakeClient:
     def load_collection(
         self,
         name: str,
-        version: Optional[str] = 'latest',
+        version: Optional[str] = None,
     ):  
         self.logger.info(f"Loading collection: {name}, version: {version}")
         return self.collection_manager.load_collection(
@@ -682,7 +682,7 @@ class DatalakeClient:
     def delete_collection(
         self,
         name: str,
-        version: Optional[str] = 'latest',
+        version: Optional[str] = None,
     ) -> bool:
         return self.collection_manager.delete_collection(
             name=name,

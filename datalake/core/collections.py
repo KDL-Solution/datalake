@@ -34,10 +34,11 @@ class CollectionManager:
     ) -> str:
         """데이터셋 저장"""
         
-        # 자동 버전 관리
-        if auto_version:
-            if version is None or version == "":
-                version = self._get_next_version(name)
+        if version == "latest":
+            version = None
+            
+        if auto_version or version is None or version == "":
+            version = self._get_next_version(name)
             
         collection_dir = self.collections_path / name / version
         collection_dir.mkdir(parents=True, exist_ok=True)
@@ -248,7 +249,7 @@ class CollectionManager:
         """다음 버전 결정"""
         existing_versions = self.list_versions(name)
         
-        if suggested_version:
+        if suggested_version and suggested_version != "latest":
             if suggested_version not in existing_versions:
                 return suggested_version
             else:
