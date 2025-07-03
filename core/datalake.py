@@ -187,7 +187,7 @@ class DatalakeClient:
 
         columns_to_remove = [key for key in meta.keys()
                             if key in dataset_obj.column_names]
-        
+
         if columns_to_remove:
             dataset_obj = dataset_obj.remove_columns(columns_to_remove)
             self.logger.info(f"🗑️ 기존 메타데이터 컬럼 제거: {columns_to_remove}")
@@ -265,7 +265,9 @@ class DatalakeClient:
 
         print("="*60 + "\n")
 
-    def trigger_processing(self) -> Optional[str]:
+    def trigger_processing(
+        self,
+    ) -> Optional[str]:
         """서버 처리 요청"""
         self.logger.info("🔄 서버 처리 요청 중...")
         start_time = time.time()
@@ -1206,11 +1208,10 @@ class DatalakeClient:
             raise ValueError(f"❌ 지원하지 않는 데이터 타입: {data_type}. ")
             
         return dataset_obj
-        
+
     def _load_data(self, data_source) -> tuple[Dataset, dict]:
-        
         dataset_obj = self._load_to_dataset(data_source)
-        
+
         self.logger.info(f"✅ 데이터 파일 로드 완료: {dataset_obj}")
         column_names = dataset_obj.column_names
         self.logger.info(f"데이터셋 컬럼: {column_names}")
@@ -1227,7 +1228,7 @@ class DatalakeClient:
             dataset_obj = dataset_obj.remove_columns(columns_to_remove)
             self.logger.info(f"🗑️ 기존 메타데이터 컬럼 제거: {columns_to_remove}")
             
-       # 통합된 컬럼 타입 변환 처리 (JSON dumps + 이미지)
+        # 통합된 컬럼 타입 변환 처리 (JSON dumps + 이미지)
         
         file_info = self._detect_file_columns_and_type(dataset_obj)
         self.logger.debug(f"📂 파일 정보: {file_info}")

@@ -1,24 +1,16 @@
 # https://swift.readthedocs.io/en/latest/Customization/Custom-dataset.html
 import json
 import swifter
-from pathlib import Path
 import pandas as pd
-from typing import List, Dict
+from typing import List, Dict, Tuple
 from PIL import Image
 from tqdm import tqdm
 from io import BytesIO
 
-import sys
-sys.path.insert(0, "/home/eric/workspace/datalake/")
-from prep.utils import DATALAKE_DIR, get_safe_image_hash_from_pil
 from core.datalake import DatalakeClient
-from export.recognition_exporter import RecogntionCharExporter
-from export.utils import (
-    save_df_as_jsonl,
-    denormalize_bboxes,
-    layout_category_dict,
-    user_prompt_dict,
-)
+from export.utils import denormalize_bboxes
+
+swifter
 
 tqdm.pandas()
 
@@ -28,32 +20,42 @@ class BaseLayoutToText(object):
         self,
         image_path: str,
         elements: List[Dict[str, str]],
-    ):
+        verbose: bool = False,
+    ) -> Tuple[List[bytes], List[str]]:
+        # 1) Try opening the image
         try:
             image = Image.open(image_path).convert("RGB")
-        except OSError:
-            print(f"[ERROR] Cannot open image: {image_path}")
+        except OSError as e:
+            if verbose:
+                print(f"[ERROR] Cannot open image {image_path!r}: {e}")
             return [], []
-        else:
-            image_bytes_ls = []
-            labels = []
-            # queries = []
-            for el in elements:
-                if not el["value"]:
-                    continue
 
-                image_crop = image.crop(el["bbox"])
-                buffer = BytesIO()
-                image_crop.save(
-                    buffer,
-                    format="JPEG",
-                )
-                image_bytes_ls.append(
-                    buffer.getvalue()
-                )
+        image_bytes_ls: List[bytes] = []
+        labels: List[str] = []
 
-                labels.append(el["value"])
-            return image_bytes_ls, labels
+        # 2) Process each element, but isolate errors per-crop
+        for el in elements:
+            value = el.get("value")
+            bbox  = el.get("bbox")
+
+            if not value or not bbox:
+                continue
+
+            try:
+                # 2a) crop
+                crop = image.crop(bbox)
+                # 2b) encode to JPEG bytes
+                buf = BytesIO()
+                crop.save(buf, format="JPEG")
+                image_bytes_ls.append(buf.getvalue())
+                labels.append(value)
+
+            except Exception as e:
+                # log and skip this element
+                if verbose:
+                    print(f"[ERROR] cropping/saving element {el!r} from {image_path!r}: {e}")
+                continue
+        return image_bytes_ls, labels
 
     def convert(
         self,
@@ -83,10 +85,16 @@ class BaseLayoutToText(object):
         )
         df_new = pd.DataFrame(
             results.tolist(),
-            columns=["image", "label"],
+            columns=[
+                "image",
+                "label",
+            ],
         )
         df_new = df_new.explode(
-            ["image", "label",],
+            [
+                "image",
+                "label",
+            ],
             ignore_index=True,
         )
         return df_new
@@ -115,20 +123,17 @@ def main(
 
     df = client.to_pandas(
         search_results,
-        absolute_paths=True,
+        absolute_paths=False,
     )
-    df = df.head(10)
 
     converter = BaseLayoutToText()
     for dataset_name, df_subset in df.groupby("dataset"):
-        # ROOT = Path(__file__).resolve().parent
-        ROOT = Path("/home/eric/workspace/datalake/")
-        df_new = converter.convert(
-            df=df,
+        df_subset_new = converter.convert(
+            df_subset,
         )
 
         _ = client.upload_task(
-            df_new,
+            df_subset_new,
             provider=df_subset["provider"].unique()[0],
             dataset=dataset_name,
             task="document_conversion",
@@ -148,11 +153,6 @@ def main(
         client.build_db(
             force_rebuild=True,
         )
-    
-    # idx = 10
-    # image_bytes = df_new.iloc[idx]["image_bytes"]
-    # print(df_new.iloc[idx]["label"])
-    # Image.open(BytesIO(image_bytes)).save("/home/eric/workspace/sample.jpg")
 
 
 if __name__ == "__main__":
