@@ -1,9 +1,10 @@
 import os
 import sys
-from typing import Optional, Dict, Union, List
+from typing import Optional, Dict, Union, List, Literal
 import pandas as pd
 import duckdb
 from pathlib import Path
+from datasets import Dataset
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..')))
 from clients.queries.sql_queries import SQLQueries
@@ -75,7 +76,10 @@ class DuckDBClient:
         except Exception as e:
             print(f"확장 설치 중 오류: {str(e)}")
 
-    def execute_query(self, sql: str) -> pd.DataFrame:
+    def execute_query(
+        self,
+        sql: str,
+    ) -> pd.DataFrame:
         """SQL 쿼리 실행
         
         Args:
@@ -290,7 +294,9 @@ class DuckDBClient:
             if limit is not None:
                 sql += f" LIMIT {limit}"
             
-            return self.execute_query(sql)
+            return self.execute_query(
+                sql,
+            )
         except Exception as e:
             print(f"컬럼 조회 실패: {str(e)}")
             return pd.DataFrame()

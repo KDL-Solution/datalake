@@ -663,7 +663,7 @@ class DatalakeProcessor:
             build_time = time.time() - start_time
             self.logger.info(f"🔍 기존 이미지 해시 캐시 구축 완료: {len(self.existing_hashes)}개, 시간: {build_time:.2f}초")
             self.cache_built = True
-    
+
     @staticmethod
     def _get_image_hash(pil_image: Image.Image) -> str:
         """이미지 해시 계산"""
@@ -674,6 +674,7 @@ class DatalakeProcessor:
         pil_image.save(img_buffer, format='JPEG', quality=95)
         jpeg_bytes = img_buffer.getvalue()
         return hashlib.sha256(jpeg_bytes).hexdigest()
+
     @staticmethod
     def _get_file_hash(file_path: Path) -> str:
         """파일 해시 계산 (SHA256)"""
@@ -682,9 +683,9 @@ class DatalakeProcessor:
             for chunk in iter(lambda: f.read(4096), b""):
                 hash_sha256.update(chunk)
         return hash_sha256.hexdigest()
+
     @staticmethod
     def _get_shard_config(total_images: int) -> Dict:
-        
         if total_images < 10000:
             # 샤딩 없음
             return {"levels": 0, "dirs": 1}
@@ -694,6 +695,7 @@ class DatalakeProcessor:
         else:
             # 2단계: xx/xx/ (65536개 폴더)  
             return {"levels": 2, "dirs": 65536}
+
     @staticmethod
     def _get_level_path(base_path: Path, shard_config: Dict, image_hash: str) -> Path:
         

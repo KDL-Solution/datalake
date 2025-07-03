@@ -2,13 +2,17 @@ import re
 import json
 import math
 import pandas as pd
+from tqdm import tqdm
 from pathlib import Path
 from typing import List, Dict, Any
 from PIL import Image, ImageDraw
+from datasets import Dataset
 from io import BytesIO
 from docling.backend.html_backend import HTMLDocumentBackend
 from docling.datamodel.base_models import InputFormat
 from docling.datamodel.document import InputDocument
+
+EXPORT_DATA_DIR = Path(__file__).resolve().parent / "data"
 
 
 def to_chat_format(
@@ -55,14 +59,53 @@ def save_df_as_jsonl(
         parents=True,
         exist_ok=True,
     )
+
+    chat_format = False
+    cols = df.columns.tolist()
+    if "messages" in cols and "images" in cols:
+        chat_format = True
     with open(jsonl_path, "w", encoding="utf-8") as f:
         for row in df.itertuples(index=False):
-            json_obj = to_chat_format(
-                image_paths=row.path,
-                user_prompts=row.query,
-                system_prompts=row.label,
-            )
+            if chat_format:
+                json_obj = {
+                    "messages": row.messages,
+                    "images": row.images,
+                }
+            else:
+                json_obj = to_chat_format(
+                    image_paths=row.path,
+                    user_prompts=row.query,
+                    system_prompts=row.label,
+                )
             _ = f.write(json.dumps(json_obj, ensure_ascii=False) + "\n")
+
+
+def save_dataset_as_jsonl(
+    dataset: Dataset,
+    jsonl_path,
+    batch_size: int = 8_192,
+    keep_columns: List[str] = [
+        "path",
+        "query",
+        "label",
+    ],
+):
+    dataset = dataset.remove_columns(
+        [
+            col for col in dataset.column_names
+            if col not in keep_columns
+        ],
+    )
+
+    with open(jsonl_path, "w", encoding="utf-8") as f:
+        batch = []
+        for example in tqdm(dataset, desc="Saving as JSONL..."):
+            batch.append(json.dumps(example, ensure_ascii=False))
+            if len(batch) >= batch_size:
+                f.write("\n".join(batch) + "\n")
+                batch = []
+        if batch:
+            f.write("\n".join(batch) + "\n")
 
 
 def round_by_factor(
@@ -172,20 +215,20 @@ def mask_outside_bboxes(
 
 
 layout_category_dict = {
-    "text_plain": "plain_text",
-    "text_plane": "plain_text",
-    "title": "plain_text",
-    "section_header": "plain_text",
-    "list_item": "plain_text",
-    "caption": "plain_text",
-    "page_header": "plain_text",
-    "page_footer": "plain_text",
-    "abstract": "plain_text",
-    "keywords": "plain_text",
-    "footnote": "plain_text",
-    "handwriting": "plain_text",
-    "table_of_contents_entry": "plain_text",
-    "text_inline_math": "plain_text",
+    "text_plain": "text",
+    "text_plane": "text",
+    "title": "text",
+    "section_header": "text",
+    "list_item": "text",
+    "caption": "text",
+    "page_header": "text",
+    "page_footer": "text",
+    "abstract": "text",
+    "keywords": "text",
+    "footnote": "text",
+    "handwriting": "text",
+    "table_of_contents_entry": "text",
+    "text_inline_math": "text",
     "table": "table",
     "figure": "image",
     "picture": "image",
@@ -213,12 +256,12 @@ layout_category_dict = {
     "diagram_sampling": "image",
     "diagram_functional_register": "image",
     "diagram_marking": "image",
-    "formula": "plain_text",
-    "music_sheet": "plain_text",
-    "chemical_formula_content": "plain_text",
-    "publishing_info": "plain_text",
-    "signature": "plain_text",
-    "stamp": "plain_text",
+    "formula": "text",
+    "music_sheet": "text",
+    "chemical_formula_content": "text",
+    "publishing_info": "text",
+    "signature": "text",
+    "stamp": "text",
 }
 
 user_prompt_dict = {
@@ -228,23 +271,10 @@ user_prompt_dict = {
     "post_handwritten_plain_text": "Extract information from the image. Return the result in the following structured JSON format (formatted with zero-space indentation and without newlines), filling in both <|value|> and <|bbox|>. Read from left to right, top to bottom:",
     "base_layout_reading_order": "Extract all layout elements. Reading order must be preserved.",
     "base_layout_no_reading_order": "Extract all layout elements. Reading order does not matter.",
-    "plain_text": "Read text in the image.",
+    "text": "Read text in the image.",
     "table": "Parse the table in the image.",
     "image": "Read text in the image.",
 }
-
-
-def filter_valid_image_paths(
-    df: pd.DataFrame,
-) -> pd.DataFrame:
-    df_copied = df.copy()
-
-    if "path" in df_copied.columns.tolist():
-        df_copied["exists"] = df_copied["path"].apply(
-            lambda x: Path(x).exists()
-        )
-        df_copied = df_copied[df_copied["exists"]]
-    return df_copied
 
 
 def extract_otsl(

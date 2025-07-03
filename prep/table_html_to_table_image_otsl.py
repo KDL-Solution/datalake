@@ -16,12 +16,13 @@ from export.utils import HTMLToDogTags
 from core.datalake import DatalakeClient
 
 
-class HTMLRenderer(object):
+class HTMLStyler(object):
     def __init__(
         self,
         font_dir: str = "/mnt/AI_NAS/OCR/Font/",
     ) -> None:
-        self.font_paths = [i.as_posix() for i in Path(font_dir).glob("*")]
+        self.font_dir = Path(font_dir).resolve()
+        self.font_paths = [i.as_posix() for i in self.font_dir.glob("*")]
         self.pattern_word_split = regex.compile(
             r"\S+|\s+",
         )
@@ -29,26 +30,15 @@ class HTMLRenderer(object):
             r">(.*?)<",
             flags=re.DOTALL,
         )
-        # self.mathjax_script = """
-        # <script>
-        #     window.MathJax = {
-        #         tex: { inlineMath: [['$', '$'], ['\\(', '\\)']] },
-        #         svg: { fontCache: 'global' }
-        #     };
-        # </script>
-        # <script src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-svg.js" async></script>
-        # """
 
-    def style_table(
+    def style(
         self,
         html: str,
         grid: bool =True,
         header: bool = True,
         padding: bool = True,
-        font_path: str = None,
         style_words: bool = True,
         shadow_prob: float = 0.5,
-        zebra_prob: float = 0.5,
         bold_prop: float = 0.3,
         color_underline_prob: float = 0.3,
     ) -> str:
@@ -109,21 +99,21 @@ class HTMLRenderer(object):
                 border-collapse: collapse;
             }""",
         ]
-        if font_path is not None:
-            font_uri = f"file://{Path(font_path).resolve().as_posix()}"
-            # font_path에 한글이 포함되어 있는지 확인:
-            if any("\uac00" <= ch <= "\ud7a3" for ch in font_path):  # 한글 유니코드 범위
-                font_size = "1.125rem"
-            else:
-                font_size = "1rem"
+        font_path = random.choice(self.font_paths)
+        font_uri = f"file://{font_path}"
+        # font_path에 한글이 포함되어 있는지 확인:
+        if any("\uac00" <= ch <= "\ud7a3" for ch in Path(font_path).name):  # 한글 유니코드 범위
+            font_size = "1.125rem"
+        else:
+            font_size = "1rem"
 
-            styles.append(
-                f"@font-face{{font-family:'CustomFont';src:url('{font_uri}') format('truetype');}}"
-                f"""*{{
-                    font-family:'CustomFont', sans-serif;
-                    font-size: {font_size};
-                }}"""
-            )
+        styles.append(
+            f"@font-face{{font-family:'CustomFont';src:url('{font_uri}') format('truetype');}}"
+            f"""*{{
+                font-family:'CustomFont', sans-serif;
+                font-size: {font_size};
+            }}"""
+        )
 
         if grid:
             styles.append(
@@ -152,12 +142,6 @@ class HTMLRenderer(object):
                 "table { box-shadow: 6px 6px 6px rgba(0,0,0,0.5); }"
             )
 
-        if random.random() < zebra_prob:
-            styles.append(
-                """tr:nth-child(even) {
-                    background-color: rgb(240, 240, 240);
-                }"""
-            )
         styles.append("</style>")
 
         # 스타일 적용:
@@ -167,57 +151,49 @@ class HTMLRenderer(object):
                 lambda x: f">{_randomly_style(x.group(1))}<",
                 html,
             )
-        # return "\n".join(styles) + html + self.mathjax_script
         return "\n".join(styles) + html
 
-    def render(
-        self,
-        html: str,
-        engine: str = "imgkit",
-    ):
-        def _crop(
-            image_bytes: bytes,
-            margin: int = 10,
-        ) -> bytes:
-            image = Image.open(BytesIO(image_bytes)).convert("RGB")
 
-            img = np.array(image)
-            gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-            # Apply binary threshold:
-            _, thresh = cv2.threshold(gray, 200, 255, cv2.THRESH_BINARY_INV)
-            ys, xs = np.where(thresh == 255)
-            left = xs.min() - margin
-            top = xs.max() + margin
-            right = ys.min() - margin
-            bottom = ys.max() + margin
+def render(
+    html: str,
+):
+    def _crop(
+        image_bytes: bytes,
+        margin: int = 10,
+    ) -> bytes:
+        image = Image.open(BytesIO(image_bytes)).convert("RGB")
 
-            image_crop = image.crop(
-                (left, right, top, bottom),
-            )
-            buffer = BytesIO()
-            image_crop.save(
-                buffer,
-                format="JPEG",
-            )
-            return buffer.getvalue()
+        img = np.array(image)
+        gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+        # Apply binary threshold:
+        _, thresh = cv2.threshold(gray, 200, 255, cv2.THRESH_BINARY_INV)
+        ys, xs = np.where(thresh == 255)
+        left = xs.min() - margin
+        top = xs.max() + margin
+        right = ys.min() - margin
+        bottom = ys.max() + margin
 
-        html = self.style_table(
-            html,
-            font_path=random.choice(self.font_paths),
+        image_crop = image.crop(
+            (left, right, top, bottom),
         )
-
-        if engine == "imgkit":
-            image_bytes = imgkit.from_string(
-                html,
-                output_path=False,
-                options={
-                    "enable-local-file-access": "",
-                    "quiet": "",
-                },
-            )
-        return _crop(
-            image_bytes,
+        buffer = BytesIO()
+        image_crop.save(
+            buffer,
+            format="JPEG",
         )
+        return buffer.getvalue()
+
+    image_bytes = imgkit.from_string(
+        html,
+        output_path=False,
+        options={
+            "enable-local-file-access": "",
+            "quiet": "",
+        },
+    )
+    return _crop(
+        image_bytes,
+    )
 
 
 def main(
@@ -225,30 +201,30 @@ def main(
     num_procs: int = 64,
     mod: str = "table",
 ) -> None:
-    manager = DatalakeClient()
+    client = DatalakeClient()
 
-    search_results = manager.search_catalog(
+    search_results = client.search(
         variants=[
             "table_html",
         ],
     )
     print(search_results.groupby(["provider", "dataset"]).size())
 
-    dataset = manager.to_dataset(
+    dataset = client.to_dataset(
         search_results,
         absolute_paths=False,
     )
     # dataset = dataset.filter(
     #     lambda x: x["dataset"] == "tech_sci_mrc",
     # )  # TEMP!
-    # 수식이 포함된 것 제거:
+    # 수식이 포함된 표 제거:
     dataset = dataset.filter(
         lambda example: "\\" not in example["label"]
     )
     # dataset = dataset.shuffle()  # TEMP!
     # dataset = dataset.select(range(16))  # TEMP!
 
-    renderer = HTMLRenderer()
+    renderer = HTMLStyler()
     dataset = dataset.map(
         lambda x: {
             "image_bytes": [
@@ -280,7 +256,7 @@ def main(
         dataset_filter = dataset.filter(
             lambda x: x["dataset"] == dataset_name,
         )
-        _, _ = manager.upload_task_data(
+        _, _ = client.upload_task_data(
             data_file=dataset_filter,
             provider=dataset_filter.unique("provider")[0],
             dataset=dataset_name,
@@ -294,11 +270,11 @@ def main(
             overwrite=True,
         )
 
-    job_id = manager.trigger_nas_processing()
-    manager.wait_for_job_completion(
+    job_id = client.trigger_nas_processing()
+    client.wait_for_job_completion(
         job_id,
     )
-    manager.build_catalog_db(
+    client.build_catalog_db(
         force_rebuild=True,
     )
 

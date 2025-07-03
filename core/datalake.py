@@ -12,7 +12,7 @@ from pathlib import Path
 from datetime import datetime
 from datasets import Dataset, load_from_disk
 from datasets import Image as DatasetImage
-from typing import Dict, Optional, List, Union
+from typing import Dict, Optional, List, Union, Literal
 from PIL import Image
 
 from core.schema import SchemaManager
@@ -55,12 +55,10 @@ class DatalakeClient:
         self.image_data_key = 'image'  # 기본 이미지 컬럼 키
         self.file_path_candidates = ['image_path', 'file', 'file_path']
         self.file_path_key = 'file_path'  # 기본 파일 경로 컬럼 키
-        
-    
-        
+
         self._initialize(log_level, create_dirs=create_dirs)
         self._check_server_connection()
-               
+
         self.schema_manager = SchemaManager(
             config_path=self.config_path,
             create_default=True
@@ -135,7 +133,7 @@ class DatalakeClient:
             self.logger.warning(f"⚠️ 기존 데이터가 존재합니다: {provider}/{dataset}/{task}")
             self.logger.info("💡 overwrite=True로 설정하면 기존 데이터를 덮어쓸 수 있습니다")
             return False
-        
+
         dataset_obj, file_info = self._load_data(data_source)
 
         metadata = self._create_metadata(
@@ -150,12 +148,12 @@ class DatalakeClient:
             dataset_description=dataset_description,
             original_source=original_source,
         )
-        
+
         staging_dir = self._save_to_staging(dataset_obj, metadata)
         self.logger.info(f"✅ Task 데이터 업로드 완료: {staging_dir}")
-        
+
         return staging_dir
-    
+
     def upload_task(
         self,
         data_source: Union[str, Path, pd.DataFrame, Dataset],
@@ -189,7 +187,7 @@ class DatalakeClient:
 
         columns_to_remove = [key for key in meta.keys()
                             if key in dataset_obj.column_names]
-        
+
         if columns_to_remove:
             dataset_obj = dataset_obj.remove_columns(columns_to_remove)
             self.logger.info(f"🗑️ 기존 메타데이터 컬럼 제거: {columns_to_remove}")
@@ -207,13 +205,13 @@ class DatalakeClient:
             data_type='task',
             meta=meta,
         )
-        
+
         # Staging에 저장
         staging_dir = self._save_to_staging(dataset_obj, metadata)
         self.logger.info(f"✅ Task 데이터 업로드 완료: {staging_dir}")
         
         return staging_dir
-    
+
     def get_server_status(self) -> Optional[Dict]:
         """서버 상태 조회"""
         try:
@@ -266,8 +264,10 @@ class DatalakeClient:
                 print(f"  {status_emoji} {job['job_id']} - {job['status']} ({job['started_at']})")
 
         print("="*60 + "\n")
-        
-    def trigger_processing(self) -> Optional[str]:
+
+    def trigger_processing(
+        self,
+    ) -> Optional[str]:
         """서버 처리 요청"""
         self.logger.info("🔄 서버 처리 요청 중...")
         start_time = time.time()
@@ -330,13 +330,18 @@ class DatalakeClient:
         except requests.exceptions.RequestException as e:
             self.logger.error(f"❌ 서버 연결 실패: {e}")
             return None
-    
-    def wait_for_job_completion(self, job_id: str, polling_interval: int = 10, timeout: int = 3600) -> dict:
+
+    def wait_for_job_completion(
+        self,
+        job_id: str,
+        polling_interval: int = 10,
+        timeout: int = 3600,
+    ) -> dict:
         """작업 완료까지 대기 (폴링)"""
         self.logger.info(f"⏳ 작업 완료 대기 중: {job_id}")
-        
+
         start_time = time.time()
-        
+
         while time.time() - start_time < timeout:
             job_status = self.get_job_status(job_id)
             if not job_status:
@@ -349,19 +354,19 @@ class DatalakeClient:
                 self.logger.info(f"✅ 작업 완료: {job_id}")
                 self.logger.info(f"📊 처리 결과: 성공={result.get('success', 0)}, 실패={result.get('failed', 0)}")
                 return job_status
-                
+
             elif status == 'failed':
                 error = job_status.get('error', 'Unknown error')
                 self.logger.error(f"❌ 작업 실패: {job_id}, 오류: {error}")
                 raise RuntimeError(f"작업 실패: {error}")
-                
+
             elif status == 'running':
                 self.logger.debug(f"🔄 작업 진행 중: {job_id}")
                 time.sleep(polling_interval)
             else:
                 self.logger.warning(f"⚠️ 알 수 없는 작업 상태: {status}")
                 time.sleep(polling_interval)
-        
+
         raise TimeoutError(f"작업 완료 대기 시간 초과: {job_id}")    
 
     def get_db_info(self) -> Dict:
@@ -428,8 +433,11 @@ class DatalakeClient:
                 'exists': False,
                 'error': str(e)
             }
-    
-    def build_db(self, force_rebuild: bool = False) -> bool:
+
+    def build_db(
+        self,
+        force_rebuild: bool = False,
+    ) -> bool:
         """DB 구축 또는 재구축"""
         self.logger.info("🔨 DB 구축 시작...")
         
@@ -490,7 +498,7 @@ class DatalakeClient:
                 except:
                     pass
             return False
-    
+
     def get_partitions(self) -> pd.DataFrame:
         """사용 가능한 파티션 목록 조회"""
         self.logger.debug("🔍 파티션 조회 중...")
@@ -517,7 +525,7 @@ class DatalakeClient:
         tasks: Optional[List[str]] = None,
         variants: Optional[List[str]] = None,
         text_search: Optional[Dict] = None,
-        limit: Optional[int] = None
+        limit: Optional[int] = None,
     ) -> pd.DataFrame:
         """
         DB에서 데이터 검색
@@ -548,7 +556,12 @@ class DatalakeClient:
                 else:
                     # 파티션 기반 검색
                     results = self._perform_partition_search(
-                        duck_client, providers, datasets, tasks, variants, limit
+                        duck_client,
+                        providers,
+                        datasets,
+                        tasks,
+                        variants,
+                        limit,
                     )
 
                 self.logger.info(f"📊 검색 결과: {len(results):,}개 항목")
@@ -596,7 +609,7 @@ class DatalakeClient:
 
         self.logger.info(f"✅ Dataset 객체 생성 완료: {len(dataset):,}개 항목") 
         return dataset
-    
+
     def download(
         self,
         search_results: pd.DataFrame,
@@ -636,7 +649,7 @@ class DatalakeClient:
             return self._save_as_dataset(search_results, output_path, include_images, check_path_exists, absolute_paths)
         else:
             raise ValueError(f"지원하지 않는 형식입니다: {format}")
-         
+
     def import_collection(
         self,
         data_source: Union[str, Path, pd.DataFrame, Dataset],
@@ -644,9 +657,8 @@ class DatalakeClient:
         version: Optional[str] = None,
         description: str = "",
     ) -> str:
-        
         dataset = self._load_to_dataset(data_source)
-        
+
         return self.collection_manager.save_collection(
             collection=dataset,
             name=name,
@@ -654,7 +666,7 @@ class DatalakeClient:
             description=description,
             user_id=self.user_id,
         )
-            
+
     def request_asset_validation(
         self,
         search_results: pd.DataFrame,
@@ -799,7 +811,7 @@ class DatalakeClient:
         except Exception as e:
             self.logger.error(f"❌ 프로세스 확인 실패: {e}")
             return {'error': str(e)}
-     
+
     def _check_file_exist(self, dataset):
         """Dataset의 파일 존재 여부를 병렬로 확인"""
         def check_exists(example):
@@ -949,7 +961,7 @@ class DatalakeClient:
         datasets, 
         tasks, 
         variants, 
-        limit
+        limit,
     ):
         """파티션 기반 검색 실행"""
         return duck_client.retrieve_with_existing_cols(
@@ -1196,11 +1208,10 @@ class DatalakeClient:
             raise ValueError(f"❌ 지원하지 않는 데이터 타입: {data_type}. ")
             
         return dataset_obj
-        
+
     def _load_data(self, data_source) -> tuple[Dataset, dict]:
-        
         dataset_obj = self._load_to_dataset(data_source)
-        
+
         self.logger.info(f"✅ 데이터 파일 로드 완료: {dataset_obj}")
         column_names = dataset_obj.column_names
         self.logger.info(f"데이터셋 컬럼: {column_names}")
@@ -1217,7 +1228,7 @@ class DatalakeClient:
             dataset_obj = dataset_obj.remove_columns(columns_to_remove)
             self.logger.info(f"🗑️ 기존 메타데이터 컬럼 제거: {columns_to_remove}")
             
-       # 통합된 컬럼 타입 변환 처리 (JSON dumps + 이미지)
+        # 통합된 컬럼 타입 변환 처리 (JSON dumps + 이미지)
         
         file_info = self._detect_file_columns_and_type(dataset_obj)
         self.logger.debug(f"📂 파일 정보: {file_info}")

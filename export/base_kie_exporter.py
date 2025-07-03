@@ -1,16 +1,18 @@
-# https://swift.readthedocs.io/en/latest/Customization/Custom-dataset.html
+import swifter
 import json
 from pathlib import Path
 import pandas as pd
 from typing import Dict, Any
 from PIL import Image, ImageDraw, ImageFont
+from sklearn.model_selection import train_test_split
 
 from prep.utils import DATALAKE_DIR
+from core.datalake import DatalakeClient
 from export.utils import (
     save_df_as_jsonl,
     denormalize_bboxes,
     smart_resize,
-    filter_valid_image_paths,
+    user_prompt_dict,
 )
 
 
@@ -46,7 +48,7 @@ def truncate_lists(
         return obj
 
 
-class KIEStructExporter(object):
+class BaseKIEExporter(object):
     def __init__(
         self,
         datalake_dir: str = DATALAKE_DIR.as_posix(),
@@ -132,21 +134,16 @@ class KIEStructExporter(object):
     def export(
         self,
         df: pd.DataFrame,
-        user_prompt: str,
         jsonl_path: str,
+        user_prompt: str = user_prompt_dict["base_kie"],
         value_key: str = "<|value|>",
         bbox_key: str = "<|bbox|>",
         indent: int = None,
     ) -> None:
-        df_copied = df.copy()
+        df_copy = df.copy()
 
-        df_copied["path"] = df_copied["path"].apply(
-            lambda x: (Path(self.datalake_dir) / "assets" / x).as_posix(),
-        )
-        df_copied = filter_valid_image_paths(
-            df_copied,
-        )
-        df_copied["query"] = df_copied.apply(
+        # df_copy["label"] = df_copy["label"].str.replace('"', "'")
+        df_copy["query"] = df_copy.swifter.apply(
             lambda x: user_prompt + "\n" + self._make_target_schema(
                 x["label"],
                 indent=indent,
@@ -155,7 +152,7 @@ class KIEStructExporter(object):
             ),
             axis=1,
         )
-        df_copied[["width", "height"]] = df_copied.apply(
+        df_copy[["width", "height"]] = df_copy.swifter.apply(
             lambda x: smart_resize(
                 width=x["width"],
                 height=x["height"],
@@ -163,7 +160,7 @@ class KIEStructExporter(object):
             axis=1,
             result_type="expand",
         )
-        df_copied["label"] = df_copied.apply(
+        df_copy["label"] = df_copy.swifter.apply(
             lambda x: self._process_kie_label(
                 label=x["label"],
                 width=x["width"],
@@ -175,7 +172,7 @@ class KIEStructExporter(object):
         )
 
         save_df_as_jsonl(
-            df=df_copied,
+            df=df_copy,
             jsonl_path=jsonl_path,
         )
 
@@ -215,62 +212,66 @@ def vis_base_kie_gt(
     return image
 
 
+def main(
+    user_id: str,
+    test_size: float = 0.001,  # 1%
+    val_size: float = 0.04,  # 4%
+    user_prompt: str = None,
+) -> None:
+    client = DatalakeClient(
+        user_id=user_id,
+    )
+
+    search_results = client.search(
+        variants=[
+            "base_kie",
+        ]
+    )
+    # search_results = search_results.head(2_000)
+    print(
+        search_results.groupby(
+            [
+                "provider",
+                "dataset",
+            ],
+        ).size()
+    )
+
+    # df = client.to_pandas(
+    #     search_results,
+    #     absolute_paths=True,
+    # )
+    df = search_results.copy()
+
+    df_train_val, df_test = train_test_split(
+        df,
+        test_size=test_size,
+    )
+    df_train, df_val = train_test_split(
+        df_train_val,
+        test_size=val_size,
+    )
+    print(f"Train: {len(df_train)}, Val: {len(df_val)}, Test: {len(df_test)}")
+
+    ROOT = Path("/home/eric/workspace/datalake/export")
+    exporter = BaseKIEExporter()
+    exporter.export(
+        df=df_train,
+        jsonl_path=(ROOT / "data/base_kie-train.jsonl").as_posix(),
+    )
+    exporter.export(
+        df=df_val,
+        jsonl_path=(ROOT / "data/base_kie-train.jsonl").as_posix(),
+    )
+    exporter.export(
+        df=df_test,
+        jsonl_path=(ROOT / "data/base_kie-train.jsonl").as_posix(),
+    )
+
+
 if __name__ == "__main__":
-    import duckdb
-    from sklearn.model_selection import train_test_split
+    import fire
 
-    from export.utils import user_prompt_dict
-
-    exporter = KIEStructExporter()
-    conn = duckdb.connect()
-    ROOT = Path(__file__).resolve().parent
-    seed = 42
-
-    read_parquet = "read_parquet('/mnt/AI_NAS/datalake/catalog/provider=*/dataset=*/task=*/variant=*/data.parquet', union_by_name=True, filename=True, hive_partitioning=True)"
-
-    sql=f"""SELECT *
-    FROM {read_parquet}
-    WHERE dataset = 'post_handwritten_plain_text'
-        AND task != 'raw'"""
-    df = conn.execute(
-        sql,
-    ).fetchdf()
-    df_train, df_test = train_test_split(
-        df,
-        test_size=10,
-        random_state=seed,
-    )
-    exporter.export(
-        df=df_train,
-        user_prompt=user_prompt_dict["post_handwritten_plain_text"],
-        jsonl_path=(ROOT / "data/post_handwritten_plain_text_train.jsonl").as_posix(),
-    )
-    exporter.export(
-        df=df_test,
-        user_prompt=user_prompt_dict["post_handwritten_plain_text"],
-        jsonl_path=(ROOT / "data/post_handwritten_plain_text_test.jsonl").as_posix(),
-    )
-
-
-    sql=f"""SELECT *
-    FROM {read_parquet}
-    WHERE dataset = 'postoffice_label'
-        AND task != 'raw'"""
-    df = conn.execute(
-        sql,
-    ).fetchdf()
-    df_train, df_test = train_test_split(
-        df,
-        test_size=200,
-        random_state=seed,
-    )
-    exporter.export(
-        df=df_train,
-        user_prompt=user_prompt_dict["base_kie_bbox"],
-        jsonl_path=(ROOT / "data/postoffice_label_train.jsonl").as_posix(),
-    )
-    exporter.export(
-        df=df_test,
-        user_prompt=user_prompt_dict["base_kie_bbox"],
-        jsonl_path=(ROOT / "data/postoffice_label_test.jsonl").as_posix(),
+    fire.Fire(
+        main
     )
