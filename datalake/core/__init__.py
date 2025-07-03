@@ -1,4 +1,4 @@
-from .datalake import DatalakeClient
+from .client import DatalakeClient
 from .schema import SchemaManager
 
 __all__ = [
