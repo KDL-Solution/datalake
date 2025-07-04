@@ -1,16 +1,16 @@
 # import sys
 # sys.path.insert(0, '/home/eric/workspace/datalake/')
-from export.utils import HTMLToDogTags
+from prep.utils import HTMLToOTSL
 from core.datalake import DatalakeClient
 
 
 def main(
     batch_size: int = 8,
-    num_procs: int = 32,
+    num_proc: int = 32,
     mod: str = "table",
 ) -> None:
     manager = DatalakeClient()
-    converter = HTMLToDogTags()
+    converter = HTMLToOTSL()
 
     search_results = manager.search_catalog(
         variants=[
@@ -36,14 +36,14 @@ def main(
         },
         batched=True,
         batch_size=batch_size,
-        num_proc=num_procs,
+        num_proc=num_proc,
     )
 
     for dataset_name in dataset.unique("dataset"):
         dataset_filter = dataset.filter(
             lambda x: x["dataset"] == dataset_name,
         )
-        _, _ = manager.upload_task_data(
+        _, _ = manager.upload_task(
             data_file=dataset_filter,
             provider=dataset_filter.unique("provider")[0],
             dataset=dataset_name,

@@ -7,10 +7,6 @@ from pathlib import Path
 from typing import List, Dict, Any
 from PIL import Image, ImageDraw
 from datasets import Dataset
-from io import BytesIO
-from docling.backend.html_backend import HTMLDocumentBackend
-from docling.datamodel.base_models import InputFormat
-from docling.datamodel.document import InputDocument
 
 EXPORT_DATA_DIR = Path(__file__).resolve().parent / "data"
 
@@ -275,44 +271,3 @@ user_prompt_dict = {
     "table": "Parse the table in the image.",
     "image": "Read text in the image.",
 }
-
-
-def extract_otsl(
-    text: str,
-) -> str:
-    # Find the content inside <otsl>...</otsl>:
-    match = re.search(r"<otsl>.*?</otsl>", text, re.DOTALL)
-    if match:
-        return match.group(0).strip()
-    else:
-        return None
-
-
-class HTMLToDogTags:
-    def __init__(
-        self,
-    ):
-        self.backend_class = HTMLDocumentBackend
-        self.format = InputFormat.HTML
-
-    def convert(
-        self,
-        html: str,
-    ) -> str:
-        html_bytes = html.encode("utf-8")
-        bytes_io = BytesIO(html_bytes)
-        in_doc = InputDocument(
-            path_or_stream=bytes_io,
-            format=self.format,
-            backend=self.backend_class,
-            filename="temp.html",
-        )
-        backend = self.backend_class(
-            in_doc=in_doc,
-            path_or_stream=bytes_io,
-        )
-        dl_document = backend.convert()
-        doctags = dl_document.export_to_doctags()
-        return extract_otsl(
-            doctags,
-        )

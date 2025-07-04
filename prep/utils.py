@@ -1,5 +1,7 @@
 import ast
 import json
+import regex
+import hashlib
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
@@ -8,20 +10,14 @@ import ipywidgets as widgets
 from pathlib import Path
 from collections.abc import Iterable
 from PIL import Image
-import hashlib
+from io import BytesIO
+from docling.backend.html_backend import HTMLDocumentBackend
+from docling.datamodel.base_models import InputFormat
+from docling.datamodel.document import InputDocument
 
 # NAS 설정 -------------------------------------------------
 DATALAKE_DIR = Path("/mnt/AI_NAS/datalake")
 STAGING = DATALAKE_DIR / "_staging"
-
-
-def get_safe_image_hash(
-    path: str,
-) -> str:
-    img = Image.open(path).convert("RGB")
-    arr = np.array(img)
-    meta = f"{arr.shape}{arr.dtype}".encode()
-    return hashlib.sha256(arr.tobytes() + meta).hexdigest()
 
 
 def get_safe_image_hash_from_pil(
@@ -206,3 +202,87 @@ class KIEVisualizer(object):
             continuous_update=False,
         )
         widgets.interact(lambda i: self._draw(i), i=slider)
+
+
+class HTMLToOTSL:
+    def __init__(
+        self,
+    ):
+        self.backend_class = HTMLDocumentBackend
+        self.format = InputFormat.HTML
+        self.otsl_pattern = regex.compile(
+            r"<otsl>.*?</otsl>",
+            regex.DOTALL,
+        )
+
+    def extract_otsl(
+        self,
+        text: str,
+    ) -> str:
+        """Find the content <otsl>...</otsl>
+        """
+        if not isinstance(text, str):
+            return None
+        match = regex.search(
+            self.otsl_pattern,
+            text,
+        )
+        if match:
+            return match.group(0).strip()
+        else:
+            return None
+
+    def convert(
+        self,
+        html: str,
+    ) -> str:
+        html_bytes = html.encode("utf-8")
+        bytes_io = BytesIO(html_bytes)
+        in_doc = InputDocument(
+            path_or_stream=bytes_io,
+            format=self.format,
+            backend=self.backend_class,
+            filename="temp.html",
+        )
+        backend = self.backend_class(
+            in_doc=in_doc,
+            path_or_stream=bytes_io,
+        )
+        dl_document = backend.convert()
+        doctags = dl_document.export_to_doctags()
+        return self.extract_otsl(
+            doctags,
+        )
+
+
+def bytes_to_pil(
+    image_bytes: bytes,
+) -> Image.Image:
+    """
+    Convert raw image bytes to a PIL Image at the original resolution.
+    """
+    buf = BytesIO(image_bytes)
+    image = Image.open(buf)
+    image.load()  # ensure it’s read into memory
+    return image
+
+
+def pil_to_bytes(
+    image,
+    fmt="JPEG",
+    **save_kwargs,
+):
+    """
+    Convert a PIL Image to bytes in the given format.
+
+    Args:
+      image      : PIL.Image.Image instance
+      fmt      : format string, e.g. "PNG", "JPEG"
+      save_kwargs: extra Pillow save() args (e.g. quality=85)
+
+    Returns:
+      A bytes object containing the encoded image.
+    """
+    buf = BytesIO()
+    image.save(buf, format=fmt, **save_kwargs)
+    return buf.getvalue()

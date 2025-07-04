@@ -12,7 +12,7 @@ from pathlib import Path
 from datetime import datetime
 from datasets import Dataset, load_from_disk
 from datasets import Image as DatasetImage
-from typing import Dict, Optional, List, Union, Literal
+from typing import Dict, Optional, List, Union
 from PIL import Image
 
 from core.schema import SchemaManager

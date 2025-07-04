@@ -2,9 +2,7 @@ import concurrent.futures
 import asyncio
 import logging
 import uvicorn
-import sys
 import os
-from pathlib import Path
 from typing import Dict, List, Optional
 from datetime import datetime
 from contextlib import asynccontextmanager
@@ -13,6 +11,7 @@ from pydantic import BaseModel
 
 from server.processor import DatalakeProcessor
 from utils.logging import setup_logging
+
 
 class ValidateAssetsRequest(BaseModel):
     """DataFrame 기반 Assets 유효성 검사 요청"""
@@ -27,7 +26,8 @@ class StatusResponse(BaseModel):
     failed: int
     server_status: str
     last_updated: str
-    
+
+
 class StatusResponse(BaseModel):
     """상태 응답 모델"""
     pending: int
@@ -98,6 +98,7 @@ app = FastAPI(
 async def health_check():
     """헬스 체크"""
     return {"status": "healthy", "timestamp": datetime.now().isoformat()}
+
 
 @app.get("/status", response_model=StatusResponse)
 async def get_status():
@@ -196,8 +197,8 @@ async def validate_assets(request: ValidateAssetsRequest, background_tasks: Back
     except Exception as e:
         logger.error(f"유효성 검사 요청 실패: {e}")
         raise HTTPException(status_code=500, detail=str(e))
-    
-    
+
+
 @app.get("/jobs/{job_id}")
 async def get_job_status(job_id: str):
     async with job_lock:
@@ -246,8 +247,8 @@ async def delete_job(job_id: str):
         del current_jobs[job_id]
         logger.info(f"✅ 작업 {job_id} 삭제됨")
         return {"message": f"Job {job_id} deleted"}
-                
-                
+
+
 async def run_processing_job(job_id: str):
     """백그라운드에서 실행할 처리 작업"""
     await _run_background_job(
@@ -256,7 +257,7 @@ async def run_processing_job(job_id: str):
         job_func=processor.process_all_pending,
         job_args=(),
     )
-        
+
 
 async def run_validation_job(job_id: str, request: ValidateAssetsRequest):
     """백그라운드에서 실행할 유효성 검사 작업"""
@@ -293,6 +294,7 @@ async def _run_background_job(
     except Exception as e:
         await _handle_job_error(job_id, e, job_name)
 
+
 async def _update_job_status(
     job_id: str, 
     status: str, 
@@ -319,11 +321,11 @@ async def _handle_job_error(job_id: str, error: Exception, job_type: str):
             current_jobs[job_id].status = "failed"
             current_jobs[job_id].completed_at = datetime.now().isoformat()
             current_jobs[job_id].error = error_msg
-            
+
 
 def main():
     import argparse
-    
+
     parser = argparse.ArgumentParser(description="Datalake Processing API Server")
     parser.add_argument("--host", default="0.0.0.0", help="Host to bind to")
     parser.add_argument("--port", type=int, default=8000, help="Port to bind to")
@@ -332,9 +334,9 @@ def main():
     parser.add_argument("--base-path", default="/mnt/AI_NAS/datalake/", help="Base path for datalake")
     parser.add_argument("--num-proc", type=int, default=16, help="Number of processing threads")
     parser.add_argument("--batch-size", type=int, default=1000, help="Batch size for processing")
-    
+
     args = parser.parse_args()
-    
+
     os.environ["BASE_PATH"] = args.base_path
     os.environ["LOG_LEVEL"] = args.log_level
     os.environ["NUM_PROC"] = str(args.num_proc)

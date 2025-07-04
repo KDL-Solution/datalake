@@ -80,7 +80,7 @@ def upload(
     dataset: Dict[str, Any],
     dataset_name: str,
     batch_size: int = 32,
-    num_procs: int = 16,
+    num_proc: int = 16,
 ) -> None:
     client = DatalakeClient()
     generator = DocTagsGenerator()
@@ -123,7 +123,7 @@ def upload(
         },
         batched=True,
         batch_size=batch_size,
-        num_proc=num_procs,
+        num_proc=num_proc,
         desc="Generating DocTags",
     )
 

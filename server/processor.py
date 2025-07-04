@@ -21,8 +21,8 @@ from functools import partial
 
 from utils.logging import setup_logging
 
+
 class DatalakeProcessor:
-    
     def __init__(
         self,
         base_path: str = "/mnt/AI_NAS/datalake/",

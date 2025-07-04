@@ -80,7 +80,6 @@ def main(
             "table_image_otsl",
         ]
     )
-    # search_results = search_results.head(2_000)
     print(
         search_results.groupby(
             [
