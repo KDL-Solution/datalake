@@ -98,13 +98,13 @@ def main(
     client.build_db(
         force_rebuild=False,
     )
-    search_results = client.search(
+    df_base_layout = client.search(
         variants=[
             "base_layout",
         ],
     )
     print(
-        search_results.groupby(
+        df_base_layout.groupby(
             [
                 "provider",
                 "dataset",
@@ -112,15 +112,15 @@ def main(
         ).size()
     )
 
-    df = client.to_pandas(
-        search_results.head(500),
-        # search_results,
+    df_base_layout = client.to_pandas(
+        df_base_layout.head(500),
+        # df_base_layout,
         absolute_paths=True,
     )
 
     extractor = BaseLayoutImageExtractor()
     images = extractor.extract(
-        df,
+        df_base_layout,
     )
 
 
