@@ -234,7 +234,7 @@ class DataManagerCLI:
         except Exception as e:
             print(f"❌ Provider 목록 조회 중 오류: {e}")
             return False
-         
+
     def create_task(self, name: str):
         try:
             if name in self.schema_manager.get_all_tasks():
@@ -342,7 +342,7 @@ class DataManagerCLI:
                     required_fields = task_config.get('required_fields', [])
                     if required_fields:
                         print(f"    📝 필수 필드: {', '.join(required_fields)}")
-                    
+
                     allowed_values = task_config.get('allowed_values', {})
                     if allowed_values:
                         print(f"    🔧 허용 값:")

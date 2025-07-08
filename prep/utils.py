@@ -1,6 +1,5 @@
 import ast
 import json
-import regex
 import hashlib
 import pandas as pd
 import numpy as np
@@ -11,10 +10,6 @@ from pathlib import Path
 from collections.abc import Iterable
 from PIL import Image
 from io import BytesIO
-from bs4 import BeautifulSoup, NavigableString
-from docling.backend.html_backend import HTMLDocumentBackend
-from docling.datamodel.base_models import InputFormat
-from docling.datamodel.document import InputDocument
 
 # NAS 설정 -------------------------------------------------
 DATALAKE_DIR = Path("/mnt/AI_NAS/datalake")
@@ -203,96 +198,6 @@ class KIEVisualizer(object):
             continuous_update=False,
         )
         widgets.interact(lambda i: self._draw(i), i=slider)
-
-
-class HTMLProcessor(object):
-    def __init__(
-        self,
-        replace_with_bullet_symbol: bool = False,
-    ) -> None:
-        self.unify_bullet_symbol = replace_with_bullet_symbol
-
-    def remove_ws_between_tags(
-        self,
-        html: str,
-    ) -> str:
-        """
-        HTML 문자열에서 태그 사이에 있는, 공백 문자(\s)만으로 이루어진 텍스트 노드를 모두 제거한다.
-        """
-        soup = BeautifulSoup(html, "html.parser")
-
-        # 모든 텍스트 노드를 순회
-        for text_node in soup.find_all(
-            string=True,
-        ):
-            if isinstance(text_node, NavigableString) and text_node.strip() == "":
-                text_node.extract()  # 노드 자체를 트리에서 제거
-        return soup.decode(
-            formatter=None,
-        )
-
-    def process(
-        self,
-        html: str,
-    ) -> str:
-        if self.unify_bullet_symbol:
-            html = html.replace("·", "•")
-
-        html = self.remove_ws_between_tags(
-            html,
-        )
-        return html
-
-
-class HTMLToOTSL:
-    def __init__(
-        self,
-    ):
-        self.backend_class = HTMLDocumentBackend
-        self.format = InputFormat.HTML
-        self.otsl_pattern = regex.compile(
-            r"<otsl>.*?</otsl>",
-            regex.DOTALL,
-        )
-
-    def extract_otsl(
-        self,
-        text: str,
-    ) -> str:
-        """Find the content <otsl>...</otsl>
-        """
-        if not isinstance(text, str):
-            return None
-        match = regex.search(
-            self.otsl_pattern,
-            text,
-        )
-        if match:
-            return match.group(0).strip()
-        else:
-            return None
-
-    def convert(
-        self,
-        html: str,
-    ) -> str:
-        html_bytes = html.encode("utf-8")
-        bytes_io = BytesIO(html_bytes)
-        in_doc = InputDocument(
-            path_or_stream=bytes_io,
-            format=self.format,
-            backend=self.backend_class,
-            filename="temp.html",
-        )
-        backend = self.backend_class(
-            in_doc=in_doc,
-            path_or_stream=bytes_io,
-        )
-        dl_document = backend.convert()
-        doctags = dl_document.export_to_doctags()
-        return self.extract_otsl(
-            doctags,
-        )
 
 
 def bytes_to_pil(

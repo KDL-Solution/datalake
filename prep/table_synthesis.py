@@ -2,16 +2,18 @@ import random
 import pandas as pd
 import math
 from PIL import Image
-from io import BytesIO
 import pandas as pd
 from tqdm import tqdm
 from multiprocessing import Pool, current_process, cpu_count
 
 from core.datalake import DatalakeClient
-from prep.table_nester import TableNester
 from prep.utils import pil_to_bytes
-from prep.html_styler import HTMLStyler
-from prep.html_renderer import HTMLRenderer
+from prep.utils_html import (
+    TableNester,
+    HTMLStyler,
+    HTMLRenderer,
+    HTMLToOTSL,
+)
 
 
 def generate_random_white_images(
@@ -51,21 +53,16 @@ def generate_random_white_images(
     return images
 
 
-# def init_worker(_nester, _styler, _renderer):
-#     global nester, styler, renderer
-#     nester = _nester
-#     styler = _styler
-#     renderer = _renderer
 def init_worker(
     htmls,
     images,
-    # seed,
     start_seed,
+    _converter,
 ):
     worker_idx = current_process()._identity[0] - 1
     seed = start_seed + worker_idx
 
-    global nester, styler, renderer
+    global nester, styler, renderer, converter
     nester = TableNester(
         outer_htmls=htmls,
         inner_htmls=htmls,
@@ -78,16 +75,25 @@ def init_worker(
     renderer = HTMLRenderer(
         seed=seed,
     )
+    converter = _converter
 
 
 # 3) 실제 워커 함수는 모듈 최상단에, 전역 변수에 의존
 def _worker(_):
     out = nester.synthesize()
-    styled = styler.style(out["html_for_rendering"])
-    img_bytes = renderer.render(styled)
+    html_for_rendering_style = styler.style(
+        out["html_for_rendering"],
+    )
+    image_bytes = renderer.render(
+        html_for_rendering_style,
+    )
+    label_html = out["html_for_gt"]
+    label = converter.convert(
+        label_html,
+    )
     return {
-        "label": out["html_for_gt"],
-        "image": img_bytes,
+        "label": label,
+        "image": image_bytes,
     }
 
 
@@ -124,59 +130,59 @@ def main(
     )
     images = [pil_to_bytes(i) for i in images]
 
-    # nester = TableNester(
-    #     outer_htmls=htmls,
-    #     inner_htmls=htmls,
-    #     inner_images=images,
-    #     mask=True,
-    # )
-    # styler = HTMLStyler()
-    # renderer = HTMLRenderer()
+    converter = HTMLToOTSL()
 
     with Pool(
         processes=num_workers,
         initializer=init_worker,
-        # initargs=(nester, styler, renderer),
-        initargs=(htmls, images, start_seed),
+        initargs=(
+            htmls,
+            images,
+            start_seed,
+            converter,
+        ),
     ) as pool:
-        results = pool.map(_worker, range(num_samples))
+        results = []
+        for result in tqdm(
+            pool.imap(
+                _worker,
+                range(num_samples),
+            ),
+            total=num_samples,
+            desc="Generating tables",
+        ):
+            results.append(result)
 
-    df = pd.DataFrame(results, columns=["label", "image"])
-    print(len(df))
-    dup = df[df.duplicated(subset=["label"], keep=False)]
+    df_new = pd.DataFrame(results, columns=["label", "image"])
+    # print(len(df))
+    dup = df_new[df_new.duplicated(subset=["label"], keep=False)]
     print(dup)
-    # for _ in tqdm(range(num_samples)):
-    #     out = nester.synthesize()
-    #     html_new_style = styler.style(
-    #         out["html_for_rendering"],
-    #     )
 
-    #     html_for_gt = out["html_for_gt"]
-    #     image_bytes = renderer.render(
-    #         html_new_style,
-    #     )
+    langs = df["lang"].unique().tolist()
+    lang = "multi" if len(langs) > 1 else langs[0]
+    srcs = df["src"].unique().tolist()
+    src = "multi" if len(srcs) > 1 else srcs[0]
+    _ = client.upload_task(
+        df_new,
+        provider="inhouse",
+        dataset=f"complex_table_start_seed_{start_seed}_num_workers_{num_workers}",
+        task="document_conversion",
+        variant="table_image_otsl",
+        meta={
+            "lang": lang,
+            "src": src,
+            "mod": "table",
+        },
+        overwrite=True,
+    )
 
-    # _ = client.upload_task(
-    #     df_subset_new,
-    #     provider="inhouse",
-    #     dataset=dataset_name,
-    #     task="document_conversion",
-    #     variant="table_image_otsl",
-    #     meta={
-    #         "lang": df_subset["lang"].unique()[0],
-    #         "src": df_subset["src"].unique()[0],
-    #         "mod": "table",
-    #     },
-    #     overwrite=True,
-    # )
-
-    # job_id = client.trigger_processing()
-    # client.wait_for_job_completion(
-    #     job_id,
-    # )
-    # client.build_db(
-    #     force_rebuild=True,
-    # )
+    job_id = client.trigger_processing()
+    client.wait_for_job_completion(
+        job_id,
+    )
+    client.build_db(
+        force_rebuild=True,
+    )
 
 
 if __name__ == "__main__":

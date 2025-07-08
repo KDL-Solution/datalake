@@ -166,7 +166,7 @@ class DatalakeClient:
         meta: Optional[Dict] = None,
     ) -> str:
         self.logger.info(f"📥 Task data 업로드 시작: {provider}/{dataset}/{task}/{variant}")
-        
+
         if not self._check_raw_data_exists(provider, dataset):
             self.logger.warning(f"⚠️ Raw 데이터가 없습니다: {provider}/{dataset}")
             self.logger.info("💡 upload_raw()로 원본 데이터를 먼저 업로드하는 것을 권장합니다.")
@@ -600,9 +600,7 @@ class DatalakeClient:
         
         df_copy = self.to_pandas(search_results, absolute_paths)
         dataset = Dataset.from_pandas(df_copy)
-        print(dataset.column_names)
         if check_path_exists and 'path' in dataset.column_names:
-            print("?")
             dataset = self._check_file_exist(dataset)
         if include_images:
             dataset = self._add_images_to_dataset(dataset)
@@ -1235,10 +1233,12 @@ class DatalakeClient:
         if file_info['process_assets']:
             dataset_obj = self._normalize_column_names(dataset_obj, file_info)
 
-            self.logger.info(f"📄 파일 분석 결과: variant={file_info['type']}, "
-                           f"이미지컬럼={file_info['image_columns']}, "
-                           f"파일컬럼={file_info['file_columns']}, "
-                           f"확장자={file_info['extensions']}")
+            self.logger.info(
+                f"📄 파일 분석 결과: variant={file_info['type']}, "
+                f"이미지컬럼={file_info['image_columns']}, "
+                f"파일컬럼={file_info['file_columns']}, "
+                f"확장자={file_info['extensions']}"
+            )
         else:
             self.logger.debug("📄 Assets 컬럼 처리 생략")
             
@@ -1457,7 +1457,7 @@ class DatalakeClient:
         else:
             self.logger.warning(f"⚠️ 파일 경로 컬럼 '{self.file_path_key}'가 유효하지 않거나 존재하지 않습니다: {sample_value}")
             raise ValueError(f"파일 경로 컬럼 '{self.file_path_key}'가 유효하지 않거나 존재하지 않습니다.")
-        
+
     def _add_metadata_columns(self, dataset_obj: Dataset, metadata: Dict):
         """Task 데이터에 메타데이터 컬럼 추가"""
         self.logger.info("📝 Task 메타데이터 컬럼 추가 중")

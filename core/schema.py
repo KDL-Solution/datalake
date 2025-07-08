@@ -1,9 +1,9 @@
 import yaml
 from pathlib import Path
 
+
 class SchemaManager:
     """스키마 검증 및 설정 관리"""
-    
     def __init__(
         self, 
         config_path: str = "/mnt/AI_NAS/datalake/config/schema.yaml",

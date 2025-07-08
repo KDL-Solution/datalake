@@ -1,6 +1,6 @@
 # import sys
 # sys.path.insert(0, '/home/eric/workspace/datalake/')
-from prep.utils import HTMLToOTSL
+from prep.utils_html import HTMLToOTSL
 from core.datalake import DatalakeClient
 
 
