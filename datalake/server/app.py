@@ -9,8 +9,8 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI, HTTPException, BackgroundTasks
 from pydantic import BaseModel
 
-from server.processor import DatalakeProcessor
-from utils.logging import setup_logging
+from datalake.server.app import DatalakeProcessor
+from datalake.utils import setup_logging
 
 
 class ValidateAssetsRequest(BaseModel):
@@ -59,7 +59,8 @@ async def lifespan(app: FastAPI):
     BASE_PATH = os.environ["BASE_PATH"]
     LOG_LEVEL = os.environ.get("LOG_LEVEL", "INFO").upper()
     BATCH_SIZE = int(os.environ.get("BATCH_SIZE", 1000))
-    NUM_PROC = int(os.environ.get("NUM_PROC", 4))    
+    NUM_PROC = int(os.environ.get("NUM_PROC", 4))
+    CREATE_DIRS = os.environ.get("CREATE_DIRS", "false").lower() == "true"
     
     try:
         processor = DatalakeProcessor(
@@ -67,6 +68,7 @@ async def lifespan(app: FastAPI):
             log_level=LOG_LEVEL,
             num_proc=NUM_PROC,
             batch_size=BATCH_SIZE,
+            create_dirs=CREATE_DIRS
         )
         setup_logging(
             user_id="server",
@@ -94,6 +96,36 @@ app = FastAPI(
 )
 
 
+@app.get("/info")
+async def get_server_info():
+    """서버 설정 정보 조회 - 모든 경로 정보 포함"""
+    try:
+        if not processor:
+            raise HTTPException(status_code=503, detail="Processor not initialized")
+        
+        return {
+            "server_status": "running",
+            "version": "1.0.0",
+            "num_proc": processor.num_proc,
+            "batch_size": processor.batch_size,
+            "timestamp": datetime.now().isoformat(),
+            
+            # 모든 경로 정보
+            "paths": {
+                "base_path": str(processor.base_path),
+                "staging_path": str(processor.staging_path),
+                "staging_pending_path": str(processor.staging_pending_path),
+                "staging_processing_path": str(processor.staging_processing_path),
+                "staging_failed_path": str(processor.staging_failed_path),
+                "catalog_path": str(processor.catalog_path),
+                "assets_path": str(processor.assets_path),
+                "collections_path": str(processor.collections_path),
+            }
+        }
+    except Exception as e:
+        logger.error(f"서버 정보 조회 실패: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+    
 @app.get("/health")
 async def health_check():
     """헬스 체크"""
@@ -334,6 +366,7 @@ def main():
     parser.add_argument("--base-path", default="/mnt/AI_NAS/datalake/", help="Base path for datalake")
     parser.add_argument("--num-proc", type=int, default=16, help="Number of processing threads")
     parser.add_argument("--batch-size", type=int, default=1000, help="Batch size for processing")
+    parser.add_argument("--create-dirs", action="store_true", help="Create necessary directories if they do not exist")
 
     args = parser.parse_args()
 
@@ -341,6 +374,7 @@ def main():
     os.environ["LOG_LEVEL"] = args.log_level
     os.environ["NUM_PROC"] = str(args.num_proc)
     os.environ["BATCH_SIZE"] = str(args.batch_size)
+    os.environ["CREATE_DIRS"] = str(args.create_dirs).lower()
     print(f"🚀 Starting Datalake Processing API Server on {args.host}:{args.port}")
 
     uvicorn.run(

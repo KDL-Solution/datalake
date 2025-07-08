@@ -10,7 +10,7 @@ from PIL import Image
 from pathlib import Path
 from datetime import datetime
 
-from core.datalake import DatalakeClient  
+from datalake.core import DatalakeClient  
 
 class DataManagerCLI:
     """Data Manager CLI 인터페이스"""
@@ -1437,7 +1437,7 @@ class DataManagerCLI:
         # 검색 실행
         return self.data_manager.search(text_search=text_search_config)
 
-    def _donwload_selected_data(self, search_results):
+    def _download_selected_data(self, search_results):
         """대화형 다운로드 수행"""
         print("\n💾 다운로드 옵션:")
         print("  1. Parquet (text only)")
@@ -1751,9 +1751,7 @@ class DataManagerCLI:
             print(f"meta: {meta}")
             
 def main():
-    from utils.config import Config
 
-    config = Config.load()
     parser = argparse.ArgumentParser(
         description="Data Manager CLI",
         formatter_class=argparse.RawDescriptionHelpFormatter,
@@ -1768,13 +1766,13 @@ For more help on subcommands:
   %(prog)s <command> --help
         '''.strip()
     )
-    parser.add_argument("--base-path", default=config.base_path,
+    parser.add_argument("--base-path", default= "/mnt/AI_NAS/datalake/",
                        help="데이터 저장 기본 경로 (default: %(default)s)")
-    parser.add_argument("--server-url", default=config.server_url,
+    parser.add_argument("--server-url", default= "http://192.168.20.62:8091",
                        help="Processing 서버 URL (default: %(default)s)")
-    parser.add_argument("--log-level", default=config.log_level.upper(),
+    parser.add_argument("--log-level", default= "INFO",
                        help="로깅 레벨 (default: %(default)s)")
-    parser.add_argument("--num-proc", type=int, default=config.num_proc,
+    parser.add_argument("--num-proc", type=int, default= 8,
                        help="병렬 처리 프로세스 수 (default: %(default)s)")
     
     subparsers = parser.add_subparsers(dest='command', title='commands', description='사용 가능한 명령어', help='명령어 설명', metavar='<command>')

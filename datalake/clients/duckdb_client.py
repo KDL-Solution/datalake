@@ -6,8 +6,7 @@ import duckdb
 from pathlib import Path
 from datasets import Dataset
 
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..')))
-from clients.queries.sql_queries import SQLQueries
+from datalake.clients.queries import SQLQueries
 
 
 class DuckDBClient:

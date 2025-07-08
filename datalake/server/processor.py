@@ -19,7 +19,7 @@ from datasets import Dataset, load_from_disk
 from datasets.features import Image as ImageFeature
 from functools import partial
 
-from utils.logging import setup_logging
+from datalake.utils import setup_logging
 
 
 class DatalakeProcessor:
@@ -61,7 +61,7 @@ class DatalakeProcessor:
         self.error_messages = []
         
         self.logger.info(f"🚀 DatalakeProcessor 초기화 (병렬: {self.num_proc}, 배치: {batch_size})")
- 
+    
     def get_status(self) -> Dict:
         """간단한 상태 조회"""
         return {

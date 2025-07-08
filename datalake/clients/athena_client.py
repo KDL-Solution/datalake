@@ -4,7 +4,7 @@ import pandas as pd
 import boto3
 
 from typing import Optional, Dict, Union, List
-from clients.queries.sql_queries import SQLQueries
+from datalake.clients.queries import SQLQueries
 
 class AthenaClient:
     """Athena 쿼리 실행을 위한 클라이언트

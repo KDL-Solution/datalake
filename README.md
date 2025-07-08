@@ -15,20 +15,18 @@ git clone https://github.com/KDL-Solution/datalake.git
 cd datalake
 pip install -e .
 
-# Create directories (admin only)
-mkdir -p /mnt/AI_NAS/datalake/{staging/{pending,processing,failed},catalog,assets,collections,config,logs}
 ```
 
 ### Start Server (Admin)
 
 ```bash
-datalake-server --port 8000 --num-proc 16
+datalake-server --port 8000 --num-proc 16 --create-dirs
 ```
 
 ### Basic Usage
 
 ```python
-from core.datalake import DatalakeClient
+from datalake import DatalakeClient
 
 # Initialize
 client = DatalakeClient(
@@ -58,12 +56,14 @@ job_id = client.trigger_processing()
 result = client.wait_for_job_completion(job_id)
 client.build_db()
 
+partitions = client.get_partitions()
+
 # Search and download
 results = client.search(
     providers=["huggingface"],
     datasets=["coco_2017"],
     # tasks=["ocr"],
-    # variant=["*"],
+    # variant=[],
 )
 
 client.download(results, "./output", format="dataset", include_images=True)
@@ -134,7 +134,7 @@ client.import_collection(
 ### Use Collections
 ```python
 # List all collections
-collections = client.collection_manager.list_collections()
+collections = client.list_collections()
 
 # Load collection (get as dataset object directly)
 dataset = client.load_collection("my_training_set", "v1.0")
@@ -181,15 +181,6 @@ tasks:
       lang: ['ko', 'en', 'ja']
       src: ['real', 'synthetic']
 ```
-
-### Server Config (`config.yaml`)
-
-```yaml
-base_path: "/mnt/AI_NAS/datalake"
-server_url: "http://192.168.20.62:8091"
-num_proc: 16
-```
-
 ## Data Structure
 
 ```
@@ -208,10 +199,8 @@ datalake/
 │   ├── korean_ocr_train/
 │   │   ├── v1.0/
 │   │   ├── v1.1/
-│   │   └── latest
 │   └── sentiment_data/
-│       ├── v1.0/
-│       └── latest
+│       └── v1.0/
 └── config/
 ```
 
