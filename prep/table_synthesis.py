@@ -1,19 +1,26 @@
+import swifter
 import random
 import pandas as pd
 import math
 from PIL import Image
 import pandas as pd
 from tqdm import tqdm
-from multiprocessing import Pool, current_process, cpu_count
+from typing import Dict, Any
+from multiprocessing import Pool, current_process
 
-from core.datalake import DatalakeClient
+import sys
+sys.path.insert(0, "/home/eric/workspace/datalake/")
+from datalake.core.client import DatalakeClient
 from prep.utils import pil_to_bytes
-from prep.utils_html import (
+from prep.html_utils import (
+    HTMLProcessor,
     TableNester,
     HTMLStyler,
     HTMLRenderer,
-    HTMLToOTSL,
+    HTMLDocTagsConverter,
 )
+
+_ = swifter
 
 
 def generate_random_white_images(
@@ -32,16 +39,12 @@ def generate_random_white_images(
 
     images = []
     for _ in range(count):
-        # while True:
         aspect = rng.uniform(min_aspect, max_aspect)
         area = rng.uniform(min_area, max_area)
         height = math.sqrt(area / aspect)
         width = aspect * height
         width = max(1, int(width))
         height = max(1, int(height))
-        # actual_aspect = width / height
-        # actual_area = width * height
-        # if min_aspect <= actual_aspect <= max_aspect and min_area <= actual_area <= max_area:
         images.append(
             Image.new(
                 "RGB",
@@ -49,7 +52,6 @@ def generate_random_white_images(
                 (255, 255, 255),
             )
         )
-            # break
     return images
 
 
@@ -57,12 +59,11 @@ def init_worker(
     htmls,
     images,
     start_seed,
-    _converter,
 ):
     worker_idx = current_process()._identity[0] - 1
     seed = start_seed + worker_idx
 
-    global nester, styler, renderer, converter
+    global nester, styler, renderer
     nester = TableNester(
         outer_htmls=htmls,
         inner_htmls=htmls,
@@ -75,71 +76,127 @@ def init_worker(
     renderer = HTMLRenderer(
         seed=seed,
     )
-    converter = _converter
 
 
 # 3) 실제 워커 함수는 모듈 최상단에, 전역 변수에 의존
 def _worker(_):
     out = nester.synthesize()
-    html_for_rendering_style = styler.style(
-        out["html_for_rendering"],
+    html_style = styler.style(
+        out["html"],
     )
     image_bytes = renderer.render(
-        html_for_rendering_style,
+        html=html_style,
     )
-    label_html = out["html_for_gt"]
-    label = converter.convert(
-        label_html,
-    )
+    doctags = out["label_doctags"]
     return {
-        "label": label,
         "image": image_bytes,
+        "label": doctags,
     }
+
+
+# def _to_html_batch(
+#     batch,
+# ) -> Dict[str, Any]:
+#     converter = HTMLDocTagsConverter()
+#     return {
+#         "html": [
+#             converter.to_html(
+#                 i,
+#             ) for i in batch["label_doctags"]
+#         ],
+#     }
 
 
 def main(
     user_id: str,
     num_samples: int,
-    num_workers: int = cpu_count(),
+    batch_size: int = 64,
+    num_proc: int = 64,
+    upload: bool = True,
     start_seed: int = 42,
+    use_table_image_otsl: bool = False,
 ):
+    # user_id="eric"
+    # num_samples=20
+    # num_proc=4
+    # start_seed = 42
+    # use_table_image_otsl=False
     client = DatalakeClient(
-        user_id=user_id
+        user_id=user_id,
     )
-    client.build_db(
-        force_rebuild=False,
-    )
-    search_results = client.search(
-        variants=[
+    if use_table_image_otsl:
+        variants = [
+            "table_image_otsl",
+        ]
+    else:
+        variants = [
             "table_html",
             "table_image_html",
-        ],
-    )
+        ]
+    try:
+        search_results = client.search(
+            variants=variants,
+        )
+    except FileNotFoundError:
+        client.build_db(
+            force_rebuild=True,
+        )
+        search_results = client.search(
+            variants=variants,
+        )
     print(search_results.groupby(["provider", "dataset"]).size())
-
-    # processor = HTMLProcessor()
+    search_results = search_results.head(num_proc)  # TEMP!
 
     df = client.to_pandas(
         search_results,
         absolute_paths=False,
     )
-    df = df[(df["label"].notna())]
-    htmls = df["label"].tolist()
+    if use_table_image_otsl:
+        df = df[(df["provider"] != "inhouse")]  # 합성 데이터 제외.
+
+    if use_table_image_otsl:
+        # DocTags -> HTML:
+        df.rename(
+            columns={
+                "label": "label_doctags",
+            },
+            inplace=True,
+        )
+        converter = HTMLDocTagsConverter()
+        df["html"] = df["label_doctags"].apply(
+            converter.to_html,
+        )
+    else:
+        df.rename(
+            columns={
+                "label": "html",
+            },
+            inplace=True,
+        )
+
+    processor = HTMLProcessor()
+    df["html"] = df["html"].swifter.apply(
+        processor.extract_table,
+    )
+    df["html"] = df["html"].swifter.apply(
+        processor.remove_whitespaces,
+    )
+    df = df[(df["html"].notna())]
+    df = df.head(num_proc)
+
+    htmls = df["html"].tolist()
     images = generate_random_white_images(
-        count=num_workers // 10,
+        count=num_samples // 10,
     )
     images = [pil_to_bytes(i) for i in images]
 
-    converter = HTMLToOTSL()
-
     with Pool(
-        processes=num_workers,
+        processes=num_proc,
         initializer=init_worker,
         initargs=(
             htmls,
             images,
             start_seed,
-            converter,
         ),
     ) as pool:
         results = []
@@ -149,40 +206,43 @@ def main(
                 range(num_samples),
             ),
             total=num_samples,
-            desc="Generating tables",
+            desc="Synthesizing tables",
         ):
             results.append(result)
-
-    df_new = pd.DataFrame(results, columns=["label", "image"])
-    # print(len(df))
-    dup = df_new[df_new.duplicated(subset=["label"], keep=False)]
-    print(dup)
-
-    langs = df["lang"].unique().tolist()
-    lang = "multi" if len(langs) > 1 else langs[0]
-    srcs = df["src"].unique().tolist()
-    src = "multi" if len(srcs) > 1 else srcs[0]
-    _ = client.upload_task(
-        df_new,
-        provider="inhouse",
-        dataset=f"complex_table_start_seed_{start_seed}_num_workers_{num_workers}",
-        task="document_conversion",
-        variant="table_image_otsl",
-        meta={
-            "lang": lang,
-            "src": src,
-            "mod": "table",
-        },
-        overwrite=True,
+    df_task = pd.DataFrame(
+        results,
+        columns=[
+            "image",
+            "label",
+        ],
     )
 
-    job_id = client.trigger_processing()
-    client.wait_for_job_completion(
-        job_id,
-    )
-    client.build_db(
-        force_rebuild=True,
-    )
+    if upload:
+        langs = df["lang"].unique().tolist()
+        lang = "multi" if len(langs) > 1 else langs[0]
+        srcs = df["src"].unique().tolist()
+        src = "multi" if len(srcs) > 1 else srcs[0]
+        _ = client.upload_task(
+            df_task,
+            provider="inhouse",
+            dataset=f"complex_table_start_seed_{start_seed}_num_proc_{num_proc}",
+            task="document_conversion",
+            variant="table_image_otsl",
+            meta={
+                "lang": lang,
+                "src": src,
+                "mod": "table",
+            },
+            overwrite=True,
+        )
+
+        job_id = client.trigger_processing()
+        _ = client.wait_for_job_completion(
+            job_id,
+        )
+        client.build_db(
+            force_rebuild=True,
+        )
 
 
 if __name__ == "__main__":

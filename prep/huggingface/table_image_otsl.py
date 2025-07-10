@@ -4,8 +4,7 @@ from pathlib import Path
 from typing import Dict, Any
 
 from prep.utils import DATALAKE_DIR
-from core.datalake import DatalakeClient
-
+from datalake.core.client import DatalakeClient
 
 
 class DocTagsGenerator(object):
@@ -77,14 +76,13 @@ class DocTagsGenerator(object):
 
 
 def upload(
+    client: DatalakeClient,
+    generator: DocTagsGenerator,
     dataset: Dict[str, Any],
     dataset_name: str,
     batch_size: int = 32,
     num_proc: int = 16,
 ) -> None:
-    client = DatalakeClient()
-    generator = DocTagsGenerator()
-
     # task=raw가 업로드되어 있지 않다면 업로드.
     search_results = client.search(
         datasets=[
@@ -95,18 +93,17 @@ def upload(
         ],
     )
     if search_results.empty:
-        _, _ = client.upload_raw_data(
-            data_file=dataset,
+        _ = client.upload_raw(
+            dataset,
             provider="huggingface",
             dataset=dataset_name,
+            original_source="https://huggingface.co/datasets/ds4sd/PubTabNet_OTSL",
+            overwrite=True,
         )
 
-        job_id = client.trigger_nas_processing()
-        client.wait_for_job_completion(
+        job_id = client.trigger_processing()
+        _ = client.wait_for_job_completion(
             job_id,
-        )
-        client.build_catalog_db(
-            force_rebuild=True,
         )
 
     dataset = dataset.map(
@@ -127,7 +124,7 @@ def upload(
         desc="Generating DocTags",
     )
 
-    _, _ = client.upload_task_data(
+    _, _ = client.upload_task(
         data_file=dataset,
         provider="huggingface",
         dataset=dataset_name,
@@ -141,37 +138,50 @@ def upload(
         overwrite=True,
     )
 
-    job_id = client.trigger_nas_processing()
-    client.wait_for_job_completion(
+    job_id = client.trigger_processing()
+    _ = client.wait_for_job_completion(
         job_id,
-    )
-    client.build_catalog_db(
-        force_rebuild=True,
     )
 
 
 def main(
+    user_id: str,
     dataset_name: str,
     datalake_dir: str = DATALAKE_DIR,
 ) -> None:
-    data_dir = Path(datalake_dir) / f"archive/source/provider=huggingface/dataset={dataset_name}"
+    # data_dir = Path(datalake_dir) / f"archive/source/provider=huggingface/dataset={dataset_name}"
+    # train_dataset, val_dataset = load_dataset(
+    #     "parquet",
+    #     data_files={
+    #         "train": (data_dir / "data/train-*.parquet").as_posix(),
+    #         "val": (data_dir / "data/val-*.parquet").as_posix(),
+    #     },
+    #     split=[
+    #         "train",
+    #         "val",
+    #     ],
+    # )
     train_dataset, val_dataset = load_dataset(
-        "parquet",
-        data_files={
-            "train": (data_dir / "data/train-*.parquet").as_posix(),
-            "val": (data_dir / "data/val-*.parquet").as_posix(),
-        },
+        "ds4sd/PubTabNet_OTSL",
         split=[
             "train",
             "val",
         ],
     )
 
+    client = DatalakeClient(
+        user_id=user_id
+    )
+    generator = DocTagsGenerator()
     upload(
+        client=client,
+        generator=generator,
         dataset=train_dataset,
         dataset_name=f"{dataset_name}_train",
     )
     upload(
+        client=client,
+        generator=generator,
         dataset=val_dataset,
         dataset_name=f"{dataset_name}_val",
     )

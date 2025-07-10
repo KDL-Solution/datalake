@@ -214,7 +214,7 @@ def bytes_to_pil(
 
 def pil_to_bytes(
     image,
-    fmt="JPEG",
+    format="JPEG",
     **save_kwargs,
 ):
     """
@@ -228,6 +228,7 @@ def pil_to_bytes(
     Returns:
       A bytes object containing the encoded image.
     """
-    buf = BytesIO()
-    image.save(buf, format=fmt, **save_kwargs)
-    return buf.getvalue()
+    buffer = BytesIO()
+    image.save(buffer, format=format, **save_kwargs)
+    buffer.seek(0)
+    return buffer.read()

@@ -276,16 +276,13 @@ def export_to_parquet(
     dataset = dataset.filter(
         lambda example: example["label"].strip() != "",
     )
-    dataset = dataset.remove_columns(
+    dataset = dataset.select_columns(
         [
-            col for col in dataset.column_names
-            if col not in [
-                "image_path",
-                "width",
-                "height",
-                "label",
-            ]
-        ]
+            "image_path",
+            "width",
+            "height",
+            "label",
+        ],
     )
     Path(parquet_path).parent.mkdir(
         parents=True,

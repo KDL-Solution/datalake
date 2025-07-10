@@ -86,11 +86,8 @@ def save_dataset_as_jsonl(
         "label",
     ],
 ):
-    dataset = dataset.remove_columns(
-        [
-            col for col in dataset.column_names
-            if col not in keep_columns
-        ],
+    dataset = dataset.select_columns(
+        keep_columns,
     )
 
     with open(jsonl_path, "w", encoding="utf-8") as f:

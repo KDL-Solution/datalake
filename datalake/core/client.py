@@ -1,3 +1,4 @@
+import swifter
 import logging
 import os
 import uuid
@@ -19,6 +20,8 @@ from datalake.core.collections import CollectionManager
 from datalake.core.schema import SchemaManager
 from datalake.utils import setup_logging
 from datalake.clients import DuckDBClient
+
+_ = swifter
 
 
 class DatalakeClient:
@@ -182,7 +185,7 @@ class DatalakeClient:
             self.logger.warning(f"⚠️ 기존 데이터가 존재합니다: {provider}/{dataset}/{task}/{variant}")
             self.logger.info("💡 overwrite=True로 설정하면 기존 데이터를 덮어쓸 수 있습니다")
             return False
-        
+
         dataset_obj, file_info = self._load_data(data_source)
 
         columns_to_remove = [key for key in meta.keys()
@@ -191,7 +194,7 @@ class DatalakeClient:
         if columns_to_remove:
             dataset_obj = dataset_obj.remove_columns(columns_to_remove)
             self.logger.info(f"🗑️ 기존 메타데이터 컬럼 제거: {columns_to_remove}")
-        
+
         # 메타데이터 생성
         metadata = self._create_metadata(
             provider=provider,
@@ -212,7 +215,9 @@ class DatalakeClient:
         
         return staging_dir
 
-    def get_server_status(self) -> Optional[Dict]:
+    def get_server_status(
+        self,
+    ) -> Optional[Dict]:
         """서버 상태 조회"""
         try:
             response = requests.get(f"{self.server_url}/status", timeout=10)
@@ -346,9 +351,9 @@ class DatalakeClient:
             job_status = self.get_job_status(job_id)
             if not job_status:
                 raise RuntimeError(f"작업 상태 조회 실패: {job_id}")
-            
+
             status = job_status.get('status')
-            
+
             if status == 'completed':
                 result = job_status.get('result', {})
                 self.logger.info(f"✅ 작업 완료: {job_id}")
@@ -573,19 +578,44 @@ class DatalakeClient:
 
     def to_pandas(
         self, 
-        search_results: pd.DataFrame, 
+        search_results: pd.DataFrame,
         absolute_paths: bool = True,
+        check_path_exists: bool = True,
     ) -> pd.DataFrame:
         self.logger.info("📊 Pandas DataFrame 변환 시작...")
-        
+
         df_copy = search_results.copy()
-        
-        if absolute_paths and 'path' in df_copy.columns.tolist():
-            df_copy['path'] = df_copy['path'].apply(
-                lambda x: (self.assets_path / x).as_posix() if isinstance(x, str) and x else x
+
+        if absolute_paths and "path" in df_copy.columns.tolist():
+            # df_copy["path"] = df_copy["path"].swifter.apply(
+            #     lambda x: (self.assets_path / x).as_posix() if isinstance(x, str) and x else x
+            # )
+            # df_copy["path"] = df_copy.swifter.apply(
+            #     lambda x: self.assets_path / x["path"]
+            #     if isinstance(x["path"], str) and x["path"]
+            #     else Path(x["path"]),
+            #     axis=1,
+            # )
+            df_copy["path"] = df_copy["path"].swifter.apply(
+                lambda x: (self.assets_path / x).resolve()
+                if isinstance(x, str) and x
+                else Path(x)
             )
+            if check_path_exists:
+                df_copy["exists"] = df_copy["path"].swifter.apply(
+                    lambda x: Path(x).exists()
+                )
+                df_copy = df_copy[(df_copy["exists"])]
+                df_copy.drop(
+                    columns=[
+                        "exists",
+                    ],
+                    inplace=True,
+                )
+                df_copy["path"] = df_copy["path"].swifter.apply(
+                    lambda x: x.as_posix() if isinstance(x, Path) else x,
+                )
             self.logger.debug("📁 경로를 절대경로로 변환")
-            
         self.logger.info(f"✅ DataFrame 변환 완료: {len(df_copy):,}개 항목")
         return df_copy
 
@@ -597,10 +627,14 @@ class DatalakeClient:
         include_images: bool = False,
     ):
         self.logger.info("📥 Dataset 객체 생성 시작...")
-        df_copy = self.to_pandas(search_results, absolute_paths)
+        df_copy = self.to_pandas(
+            search_results,
+            absolute_paths=absolute_paths,
+            check_path_exists=check_path_exists,
+        )
         dataset = Dataset.from_pandas(df_copy)
-        if check_path_exists and 'path' in dataset.column_names:
-            dataset = self._check_file_exist(dataset)
+        # if check_path_exists and "path" in dataset.column_names:
+        #     dataset = self._check_file_exist(dataset)
         if include_images:
             dataset = self._add_images_to_dataset(dataset)
 
@@ -846,44 +880,47 @@ class DatalakeClient:
             self.logger.error(f"❌ 프로세스 확인 실패: {e}")
             return {'error': str(e)}
 
-    def _check_file_exist(self, dataset):
-        """Dataset의 파일 존재 여부를 병렬로 확인"""
-        def check_exists(example):
-            try:
-                if example.get('path'):
-                    file_path = Path(example['path'])
-                    example['exists'] = file_path.exists()
-                else:
-                    example['exists'] = False
-            except Exception as e:
-                self.logger.warning(f"파일 존재 확인 실패: {example.get('path', 'unknown')} - {e}")
-                example['exists'] = False
-            return example
+    # def _check_file_exist(
+    #     self,
+    #     dataset,
+    # ):
+    #     """Dataset의 파일 존재 여부를 병렬로 확인"""
+    #     def check_exists(example):
+    #         try:
+    #             if example.get('path'):
+    #                 file_path = Path(example['path'])
+    #                 example['exists'] = file_path.exists()
+    #             else:
+    #                 example['exists'] = False
+    #         except Exception as e:
+    #             self.logger.warning(f"파일 존재 확인 실패: {example.get('path', 'unknown')} - {e}")
+    #             example['exists'] = False
+    #         return example
 
-        self.logger.info("📁 파일 존재 여부 확인 중...")
-        dataset_with_exists = dataset.map(
-            check_exists,
-            desc="파일 존재 확인",
-            num_proc=self.num_proc
-        )
+    #     self.logger.info("📁 파일 존재 여부 확인 중...")
+    #     dataset_with_exists = dataset.map(
+    #         check_exists,
+    #         desc="파일 존재 확인",
+    #         num_proc=self.num_proc
+    #     )
 
-        # 존재하는 파일만 필터링
-        valid_dataset = dataset_with_exists.filter(
-            lambda x: x,
-            input_columns=['exists'],
-            desc="존재하는 파일 필터링",
-            num_proc=self.num_proc
-        )
+    #     # 존재하는 파일만 필터링
+    #     valid_dataset = dataset_with_exists.filter(
+    #         lambda x: x,
+    #         input_columns=['exists'],
+    #         desc="존재하는 파일 필터링",
+    #         num_proc=self.num_proc
+    #     )
 
-        # exists 컬럼 제거
-        valid_dataset = valid_dataset.remove_columns(['exists'])
+    #     # exists 컬럼 제거
+    #     valid_dataset = valid_dataset.remove_columns(['exists'])
 
-        total_items = len(dataset)
-        valid_items = len(valid_dataset)
-        self.logger.info(f"📊 파일 존재 확인 결과: {valid_items:,}/{total_items:,} 존재")
+    #     total_items = len(dataset)
+    #     valid_items = len(valid_dataset)
+    #     self.logger.info(f"📊 파일 존재 확인 결과: {valid_items:,}/{total_items:,} 존재")
 
-        return valid_dataset
-    
+    #     return valid_dataset
+
     def _save_as_parquet(
         self, 
         search_results: pd.DataFrame, 
@@ -1437,18 +1474,18 @@ class DatalakeClient:
             metadata_file = staging_dir / "upload_metadata.json"
             with open(metadata_file, 'w', encoding='utf-8') as f:
                 json.dump(metadata, f, ensure_ascii=False, indent=4)
-                
+
             self.logger.info(f"📦 datasets 저장 완료: {staging_dir}")
             return str(staging_dir)
         except Exception as e:
             if staging_dir.exists():
                 shutil.rmtree(staging_dir)
             raise 
-    
+
     def _copy_file_path_to_staging(self, dataset_obj: Dataset, staging_assets_dir: Path):
         """파일 경로를 staging으로 복사"""
         sample_value = dataset_obj[0][self.file_path_key]
-        
+
         if isinstance(sample_value, str) and Path(sample_value).exists():
             sample_path = Path(sample_value).resolve()
             staging_device = os.stat(staging_assets_dir.parent).st_dev
@@ -1457,12 +1494,13 @@ class DatalakeClient:
             
             copy_method = "OS 레벨 cp" if same_device else "Python copy2"
             self.logger.debug(f"📤 파일 복사 모드: {copy_method} (device: {source_device}→{staging_device})")
+
             def copy_file(example, idx):
                 original_path = Path(example[self.file_path_key]).resolve()
                 if original_path.exists():
                     ext = original_path.suffix or ""
                     prefix = "file"
-                    
+
                     folder_num = idx // 1000
                     folder_name = f"batch_{folder_num:04d}"
                     new_filename = f"{prefix}_{idx:06d}{ext}"
@@ -1481,9 +1519,8 @@ class DatalakeClient:
                         shutil.copy2(original_path, target_path)
                     relative_path = target_path.relative_to(self.staging_pending_path)
                     example[self.file_path_key] = str(relative_path)
-                    
                 return example
-            
+
             dataset_obj = dataset_obj.map(
                 copy_file, 
                 with_indices=True,
