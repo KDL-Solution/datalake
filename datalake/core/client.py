@@ -289,7 +289,7 @@ class DatalakeClient:
                 job_id = result.get('job_id')
                 status = result.get('status')
                 message = result.get('message', '')
-                
+
                 if status == 'already_running':
                     self.logger.info("🔄 이미 처리 중인 작업이 있습니다")
                     return job_id
@@ -299,7 +299,7 @@ class DatalakeClient:
                 else:
                     self.logger.warning(f"⚠️ 알 수 없는 상태: {status}, 메시지: {message}")
                     return job_id
-            else:                    
+            else:
                 self.logger.error(f"❌ 처리 시작 실패: {response.status_code}")
                 try:
                     error_detail = response.json().get('detail', response.text)
@@ -307,7 +307,7 @@ class DatalakeClient:
                 except:
                     self.logger.error(f"응답 내용: {response.text}")
                 return None
-            
+
         except requests.exceptions.Timeout:
             elapsed = time.time() - start_time
             self.logger.error(f"❌ API 요청 타임아웃 ({elapsed:.2f}초)")
@@ -319,8 +319,11 @@ class DatalakeClient:
             elapsed = time.time() - start_time
             self.logger.error(f"❌ 요청 실패: {e} ({elapsed:.2f}초)")
             return None
-    
-    def get_job_status(self, job_id: str) -> Optional[dict]:
+
+    def get_job_status(
+        self,
+        job_id: str,
+    ) -> Optional[dict]:
         """작업 상태 조회"""
         try:
             response = requests.get(f"{self.server_url}/jobs/{job_id}", timeout=10)
@@ -377,18 +380,18 @@ class DatalakeClient:
     def get_db_info(self) -> Dict:
         """DB 정보 조회"""
         self.logger.info("📊 DB 정보 조회 중...")
-        
+
         try:
             if not self.duckdb_path.exists():
                 return {
                     'exists': False,
                     'message': 'DB 파일이 없습니다. build_db()로 생성하세요.'
                 }
-            
+
             # DB 기본 정보
             db_size = self.duckdb_path.stat().st_size / 1024 / 1024
             db_mtime = datetime.fromtimestamp(self.duckdb_path.stat().st_mtime)
-            
+
             info = {
                 'user_id': self.user_id,
                 'exists': True,

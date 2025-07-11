@@ -58,10 +58,10 @@ def generate_random_white_images(
 def init_worker(
     htmls,
     images,
-    start_seed,
+    seed,
 ):
     worker_idx = current_process()._identity[0] - 1
-    seed = start_seed + worker_idx
+    seed = seed + worker_idx
 
     global nester, styler, renderer
     nester = TableNester(
@@ -113,13 +113,13 @@ def main(
     batch_size: int = 64,
     num_proc: int = 64,
     upload: bool = True,
-    start_seed: int = 42,
+    seed: int = 42,
     use_table_image_otsl: bool = False,
 ):
     # user_id="eric"
     # num_samples=20
     # num_proc=4
-    # start_seed = 42
+    # seed = 42
     # use_table_image_otsl=False
     client = DatalakeClient(
         user_id=user_id,
@@ -145,7 +145,6 @@ def main(
             variants=variants,
         )
     print(search_results.groupby(["provider", "dataset"]).size())
-    search_results = search_results.head(num_proc)  # TEMP!
 
     df = client.to_pandas(
         search_results,
@@ -163,7 +162,7 @@ def main(
             inplace=True,
         )
         converter = HTMLDocTagsConverter()
-        df["html"] = df["label_doctags"].apply(
+        df["html"] = df["label_doctags"].swifter.apply(
             converter.to_html,
         )
     else:
@@ -196,7 +195,7 @@ def main(
         initargs=(
             htmls,
             images,
-            start_seed,
+            seed,
         ),
     ) as pool:
         results = []
@@ -225,7 +224,7 @@ def main(
         _ = client.upload_task(
             df_task,
             provider="inhouse",
-            dataset=f"complex_table_start_seed_{start_seed}_num_proc_{num_proc}",
+            dataset=f"nested_table_seed_{seed}_{seed + num_proc - 1}_num_samples_{num_samples}",
             task="document_conversion",
             variant="table_image_otsl",
             meta={

@@ -154,7 +154,9 @@ async def get_status():
 
 
 @app.post("/process", response_model=Dict)
-async def process_pending_data(background_tasks: BackgroundTasks):
+async def process_pending_data(
+    background_tasks: BackgroundTasks,
+):
     """Pending 데이터 처리 (비동기)"""
     try:
         job_id = f"process_{datetime.now().strftime('%Y%m%d_%H%M%S_%f')[:19]}"
@@ -162,29 +164,28 @@ async def process_pending_data(background_tasks: BackgroundTasks):
         # 현재 실행 중인 작업이 있는지 확인
         async with job_lock:
             running_jobs = [job for job in current_jobs.values() if job.status == "running"]
-            
             if running_jobs:
                 return {
                     "job_id": running_jobs[0].job_id,
                     "status": "already_running",
                     "message": "이미 처리 중인 작업이 있습니다"
                 }
-        
+
             job = ProcessingJob(
                 job_id=job_id,
                 status="running",
                 started_at=datetime.now().isoformat()
             )
             current_jobs[job_id] = job
-        
+
         asyncio.create_task(run_processing_job(job_id))
-        
+
         return {
             "job_id": job_id,
             "status": "started",
             "message": "처리 작업이 시작되었습니다"
         }
-        
+
     except Exception as e:
         logger.error(f"처리 요청 실패: {e}")
         raise HTTPException(status_code=500, detail=str(e))

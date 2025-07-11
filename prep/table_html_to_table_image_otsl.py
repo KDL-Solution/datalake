@@ -51,11 +51,7 @@ def _render_batch(
         "image": [
             renderer.render(
                 html=i,
-                pad_html=j,
-            ) for i, j in zip(
-                batch["label_html_style"],
-                batch["label_html"]
-            )
+            ) for i in batch["label_html_style"]
         ],
     }
 
@@ -105,7 +101,7 @@ def main(
         lambda example: "\\" not in example["label_html"],
         desc="Filtering out math formula...",
     )
-    dataset = dataset.select(range(num_proc))
+    # dataset = dataset.select(range(num_proc))
 
     dataset = dataset.map(
         partial(
@@ -148,7 +144,7 @@ def main(
             "dataset",
             "lang",
             "src",
-            "path",
+            "image",
             "label",
         ]
     )
