@@ -5,16 +5,13 @@ import math
 from PIL import Image
 import pandas as pd
 from tqdm import tqdm
-from typing import Dict, Any
 from multiprocessing import Pool, current_process
 
-import sys
-sys.path.insert(0, "/home/eric/workspace/datalake/")
 from datalake.core.client import DatalakeClient
 from prep.utils import pil_to_bytes
 from prep.html_utils import (
     HTMLProcessor,
-    TableNester,
+    HTMLNester,
     HTMLStyler,
     HTMLRenderer,
     HTMLDocTagsConverter,
@@ -25,8 +22,8 @@ _ = swifter
 
 def generate_random_white_images(
     count: int = 1,
-    min_area: int = 500 * 500,
-    max_area: int = 100 * 100,
+    min_area: int = (2 ** 8) ** 2,
+    max_area: int = (2 ** 6) ** 2,
     min_aspect: float = 0.5,
     max_aspect: float = 2.,
     seed: int = 42,
@@ -63,8 +60,8 @@ def init_worker(
     worker_idx = current_process()._identity[0] - 1
     seed = seed + worker_idx
 
-    global nester, styler, renderer
-    nester = TableNester(
+    global html_nester, styler, renderer
+    html_nester = HTMLNester(
         outer_htmls=htmls,
         inner_htmls=htmls,
         inner_images=images,
@@ -80,9 +77,9 @@ def init_worker(
 
 # 3) 실제 워커 함수는 모듈 최상단에, 전역 변수에 의존
 def _worker(_):
-    out = nester.synthesize()
+    out = html_nester.synthesize()
     html_style = styler.style(
-        out["html"],
+        out["label_html"],
     )
     image_bytes = renderer.render(
         html=html_style,
@@ -94,33 +91,14 @@ def _worker(_):
     }
 
 
-# def _to_html_batch(
-#     batch,
-# ) -> Dict[str, Any]:
-#     converter = HTMLDocTagsConverter()
-#     return {
-#         "html": [
-#             converter.to_html(
-#                 i,
-#             ) for i in batch["label_doctags"]
-#         ],
-#     }
-
-
 def main(
     user_id: str,
     num_samples: int,
-    batch_size: int = 64,
     num_proc: int = 64,
     upload: bool = True,
     seed: int = 42,
     use_table_image_otsl: bool = False,
 ):
-    # user_id="eric"
-    # num_samples=20
-    # num_proc=4
-    # seed = 42
-    # use_table_image_otsl=False
     client = DatalakeClient(
         user_id=user_id,
     )
@@ -173,17 +151,17 @@ def main(
             inplace=True,
         )
 
-    processor = HTMLProcessor()
+    html_processor = HTMLProcessor()
     df["html"] = df["html"].swifter.apply(
-        processor.extract_table,
+        html_processor.extract_table,
     )
     df["html"] = df["html"].swifter.apply(
-        processor.remove_whitespaces,
+        html_processor.remove_whitespaces,
     )
     df = df[(df["html"].notna())]
-    df = df.head(num_proc)
-
+    df = df[(~df["html"].str.contains("\\\\", regex=True))]
     htmls = df["html"].tolist()
+
     images = generate_random_white_images(
         count=num_samples // 10,
     )

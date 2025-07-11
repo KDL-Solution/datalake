@@ -212,3 +212,4 @@ pyrightconfig.json
 
 export/exporter.py
 export/splitter.py
+nested_table_synthesis2.py

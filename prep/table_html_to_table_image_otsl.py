@@ -4,7 +4,7 @@ from functools import partial
 # import sys
 # sys.path.insert(0, '/home/eric/workspace/datalake/')
 from datalake.core.client import DatalakeClient
-from prep.html_utils import (
+from datalake.prep.html_utils.html_processor import (
     HTMLDocTagsConverter,
     HTMLStyler,
     HTMLRenderer,
@@ -129,7 +129,7 @@ def main(
             _render_batch,
             seed=seed,
         ),
-        desc="Rendering HTML...",
+        desc="Rendering HTMLs...",
         batched=True,
         batch_size=batch_size,
         num_proc=num_proc,

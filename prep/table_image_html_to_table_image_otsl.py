@@ -1,5 +1,5 @@
 from datalake.core.client import DatalakeClient
-from prep.html_utils import HTMLDocTagsConverter
+from datalake.prep.html_utils.html_processor import HTMLDocTagsConverter
 
 
 def _to_doctags_batch(
