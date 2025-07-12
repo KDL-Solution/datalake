@@ -11,8 +11,9 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI, HTTPException, BackgroundTasks
 from pydantic import BaseModel
 
-from datalake.server.app import DatalakeProcessor
+from datalake.server import DatalakeProcessor
 from datalake.utils import setup_logging
+
 
 class ValidateAssetsRequest(BaseModel):
     """DataFrame 기반 Assets 유효성 검사 요청"""
