@@ -5,10 +5,8 @@ from tqdm import tqdm
 from multiprocessing import Pool, current_process
 
 from datalake.core.client import DatalakeClient
-from prep.utils import pil_to_bytes
 from prep.html_utils import (
     HTMLProcessor,
-    generate_random_white_images,
     HTMLNester,
     HTMLStyler,
     HTMLRenderer,
@@ -18,9 +16,8 @@ from prep.html_utils import (
 _ = swifter
 
 
-def init_worker(
+def _init_worker(
     htmls,
-    images,
     seed,
 ):
     worker_idx = current_process()._identity[0] - 1
@@ -30,9 +27,8 @@ def init_worker(
     html_nester = HTMLNester(
         outer_htmls=htmls,
         inner_htmls=htmls,
-        inner_images=images,
+        inner_images=[],
         seed=seed,
-        mask_images=True,
     )
     styler = HTMLStyler(
         seed=seed,
@@ -42,7 +38,6 @@ def init_worker(
     )
 
 
-# 3) 실제 워커 함수는 모듈 최상단에, 전역 변수에 의존
 def _worker(_):
     out = html_nester.synthesize()
 
@@ -130,17 +125,11 @@ def main(
     df = df[(~df["html"].str.contains("\\\\", regex=True))]
     htmls = df["html"].tolist()
 
-    images = generate_random_white_images(
-        count=num_samples // 10,
-    )
-    images = [pil_to_bytes(i) for i in images]
-
     with Pool(
         processes=num_proc,
-        initializer=init_worker,
+        initializer=_init_worker,
         initargs=(
             htmls,
-            images,
             seed,
         ),
     ) as pool:
@@ -161,6 +150,9 @@ def main(
             "label",
         ],
     )
+    df_task = df_task.dropna(
+        how="any",
+    )
 
     if upload:
         langs = df["lang"].unique().tolist()
@@ -170,9 +162,9 @@ def main(
         _ = client.upload_task(
             df_task,
             provider="inhouse",
-            dataset=f"nested_table_seed_{seed}_{seed + num_proc - 1}_num_samples_{num_samples}",
+            dataset=f"table_containing_table_seed_{seed}_{seed + num_proc - 1}_num_samples_{num_samples}",
             task="document_conversion",
-            variant="table_image_otsl",
+            variant="nested_table_image_otsl",
             meta={
                 "lang": lang,
                 "src": src,
@@ -184,7 +176,7 @@ def main(
         job_id = client.trigger_processing()
         _ = client.wait_for_job_completion(
             job_id,
-            3600 * 4,
+            timeout=3_600 * 6,
         )
         client.build_db(
             force_rebuild=True,

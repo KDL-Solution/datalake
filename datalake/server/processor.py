@@ -372,12 +372,11 @@ class DatalakeProcessor:
                 self.logger.error(f"❌ 처리 중 디렉토리 정리 실패: {remain_dir.name} - {str(e)}")
                 
     def _initialize(self, log_level: str = "INFO", create_dirs: bool = True):
-        
         required_paths = {
             'base': self.base_path,
             'staging': self.staging_path,
             'staging/pending': self.staging_pending_path,
-            'staging/processing': self.staging_processing_path, 
+            'staging/processing': self.staging_processing_path,
             'staging/failed': self.staging_failed_path,
             'catalog': self.catalog_path,
             'assets': self.assets_path,
@@ -739,8 +738,8 @@ class DatalakeProcessor:
 if __name__ == "__main__":
     # datasets.map() 활용 버전
     processor = DatalakeProcessor(
-        batch_size=1000,    # map()의 배치 크기
-        num_proc=4         # 병렬 처리 수
+        batch_size=512,    # map()의 배치 크기
+        num_proc=16,         # 병렬 처리 수
     )
     
     # 상태 확인

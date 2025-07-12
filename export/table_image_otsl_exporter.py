@@ -3,7 +3,7 @@ import pandas as pd
 from typing import List
 from sklearn.model_selection import train_test_split
 
-from core.datalake import DatalakeClient
+from datalake.core.client import DatalakeClient
 # import sys
 # sys.path.insert(0, "/home/eric/workspace/datalake/")
 from export.utils import (
@@ -77,8 +77,9 @@ def main(
 
     search_results = client.search(
         variants=[
-            "table_image_otsl",
-        ]
+            # "table_image_otsl",
+            "nested_table_image_otsl",
+        ],
     )
     print(
         search_results.groupby(
@@ -107,15 +108,15 @@ def main(
     exporter = TableImageOTSLExporter()
     exporter.export(
         df=df_train,
-        save_path="/home/eric/workspace/datalake/export/data/table_image_otsl-train.jsonl",
+        save_path="/home/eric/workspace/datalake/export/data/nested_table_image_otsl-train.jsonl",
     )
     exporter.export(
         df=df_val,
-        save_path="/home/eric/workspace/datalake/export/data/table_image_otsl-val.jsonl",
+        save_path="/home/eric/workspace/datalake/export/data/nested_table_image_otsl-val.jsonl",
     )
     exporter.export(
         df=df_test,
-        save_path="/home/eric/workspace/datalake/export/data/table_image_otsl-test.jsonl",
+        save_path="/home/eric/workspace/datalake/export/data/nested_table_image_otsl-test.jsonl",
     )
 
 

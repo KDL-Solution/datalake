@@ -1,7 +1,10 @@
+import math
 import random
 import base64
 import imghdr
 from bs4 import BeautifulSoup
+from typing import List, Union, Tuple
+from PIL import Image, ImageDraw, ImageFont
 from copy import deepcopy
 
 from prep.utils import (
@@ -23,6 +26,38 @@ def remove_img_tags(
     return html_new.replace("<br/>", "<br>")
 
 
+def generate_random_white_images(
+    count: int = 1,
+    min_area: int = (2 ** 8) ** 2,
+    max_area: int = (2 ** 6) ** 2,
+    min_aspect: float = 0.5,
+    max_aspect: float = 2.,
+    seed: int = 42,
+) -> List[Image.Image]:
+    """
+    주어진 종횡비(aspect ratio) 범위와 면적(area) 범위, 시드, 개수를 받아
+    흰색(RGB: 255,255,255) 픽셀로만 이루어진 PIL 이미지를 리스트로 생성합니다.
+    """
+    rng = random.Random(seed)
+
+    images = []
+    for _ in range(count):
+        aspect = rng.uniform(min_aspect, max_aspect)
+        area = rng.uniform(min_area, max_area)
+        height = math.sqrt(area / aspect)
+        width = aspect * height
+        width = max(1, int(width))
+        height = max(1, int(height))
+        images.append(
+            Image.new(
+                "RGB",
+                (width, height),
+                (255, 255, 255),
+            )
+        )
+    return images
+
+
 class HTMLNester(object):
     def __init__(
         self,
@@ -30,7 +65,7 @@ class HTMLNester(object):
         inner_htmls: List[str],
         inner_images: List[bytes],
         seed: int = 42,
-        mask: bool = True,
+        image_mask_color: Tuple[int, int, int] = (0, 0, 255),
         image_size_factor: float = 0.5,
         min_num_inner_tables: int = 1,
         max_num_inner_tables: int = 3,
@@ -43,7 +78,7 @@ class HTMLNester(object):
         self.outer_htmls = outer_htmls
         self.inner_htmls = inner_htmls
         self.inner_images = inner_images
-        self.mask = mask
+        self.image_mask_color = image_mask_color
         self.image_size_factor = image_size_factor
         self.min_font_size = min_font_size
         self.max_font_size = max_font_size
@@ -68,7 +103,7 @@ class HTMLNester(object):
         Return a new white PIL image (same size as image) with `text` centered.
         """
         w, h = image.size
-        image_new = Image.new("RGB", (w, h), "white")
+        image_new = Image.new("RGB", (w, h), self.image_mask_color)
         draw = ImageDraw.Draw(image_new)
 
         # Load font
@@ -97,6 +132,7 @@ class HTMLNester(object):
         self,
         outer_html: str,
         inner_items: List[Union[str, bytes]],
+        # mask_images: bool = True,
     ) -> str:
         outer_soup = BeautifulSoup(
             outer_html,
@@ -130,19 +166,19 @@ class HTMLNester(object):
                 )
                 width, height = image.size
 
-                if self.mask:
-                    trg_td.append(
-                        f"{self.br_tag}[|IMG-{mask_idx:02d}|]{self.br_tag}"
-                    )
-                    mask_idx += 1
+                # if mask_images:
+                #     trg_td.append(
+                #         f"{self.br_tag}[|IMG-{mask_idx:02d}|]{self.br_tag}"
+                #     )
+                #     mask_idx += 1
 
-                    image_new = self._mask(
-                        image,
-                        text="",
-                    )
-                    item = pil_to_bytes(
-                        image_new,
-                    )
+                #     image_new = self._mask(
+                #         image,
+                #         text="",
+                #     )
+                #     item = pil_to_bytes(
+                #         image_new,
+                #     )
 
                 img_type = imghdr.what(None, h=item) or "png"
                 b64 = base64.b64encode(item).decode("ascii")
@@ -172,23 +208,24 @@ class HTMLNester(object):
         html = outer_table.decode(
             formatter=None,
         )
-        html = remove_img_tags(
-            html,
-        )
-
         html = html.replace(
             self.br_tag * 4,
             self.br_tag * 2,
         )
-        label_html = html.replace(
+        html = html.replace(
             self.br_tag,
             "\n",
+        )
+
+        label_html = remove_img_tags(
+            html,
         )
 
         label_doctags = self.converter.to_doctags(
             label_html,
         )
         return {
+            "html_for_rendering": html,
             "label_html": label_html,
             "label_doctags": label_doctags,
         }
@@ -225,17 +262,25 @@ class HTMLNester(object):
                 return self.nest(
                     outer_html=outer_html,
                     inner_items=inner_items,
+                    # mask_images=True,
                 )
             except ValueError:
                 continue
 
 
 if __name__ == "__main__":
-    html_nester = HTMLNester(
-        [], [], []
+    html = "<table><caption>참여기업 리스트 (종합)</caption><tbody><tr><td>분야</td><td>참여기업수</td><td>비고</td></tr><tr><td>호텔업</td><td>40</td><td><br/></td></tr><tr><td>여행업</td><td>12</td><td><br/></td></tr><tr><td>휴양콘도미니엄업</td><td>10</td><td><br/></td></tr><tr><td>국제회의업</td><td>9</td><td><br/></td></tr><tr><td>카지노업</td><td>2</td><td><br/></td></tr><tr><td>융·복합 관광</td><td>18</td><td><br/></td></tr><tr><td>유원시설</td><td>1</td><td><br/></td></tr><tr><td>해외취업관</td><td>9</td><td><br/></td></tr><tr><td>미래일자리관</td><td>6</td><td><br/></td></tr><tr><td>관광벤처관</td><td>13</td><td><br/></td></tr><tr><td>계</td><td>120</td><td><br/></td></tr></tbody></table>"
+
+    images = generate_random_white_images(
+        count=1,
     )
-    outer_html = "<table><caption>참여기업 리스트 (종합)</caption><tbody><tr><td>분야</td><td>참여기업수</td><td>비고</td></tr><tr><td>호텔업</td><td>40</td><td><br/></td></tr><tr><td>여행업</td><td>12</td><td><br/></td></tr><tr><td>휴양콘도미니엄업</td><td>10</td><td><br/></td></tr><tr><td>국제회의업</td><td>9</td><td><br/></td></tr><tr><td>카지노업</td><td>2</td><td><br/></td></tr><tr><td>융·복합 관광</td><td>18</td><td><br/></td></tr><tr><td>유원시설</td><td>1</td><td><br/></td></tr><tr><td>해외취업관</td><td>9</td><td><br/></td></tr><tr><td>미래일자리관</td><td>6</td><td><br/></td></tr><tr><td>관광벤처관</td><td>13</td><td><br/></td></tr><tr><td>계</td><td>120</td><td><br/></td></tr></tbody></table>"
-    inner_items = [outer_html]
-    out = html_nester.nest(outer_html, inner_items)
-    print(out["label_html"])
-    print(out["label_doctags"])
+    images = [pil_to_bytes(i) for i in images]
+    html_nester = HTMLNester(
+        outer_htmls=[html],
+        inner_htmls=[html],
+        inner_images=images,
+    )
+
+    out = html_nester.synthesize()
+    # print(out["label_html"])
+    # print(out["html_for_rendering"])

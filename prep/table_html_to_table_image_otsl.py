@@ -4,10 +4,10 @@ from functools import partial
 # import sys
 # sys.path.insert(0, '/home/eric/workspace/datalake/')
 from datalake.core.client import DatalakeClient
-from datalake.prep.html_utils.html_processor import (
-    HTMLDocTagsConverter,
+from prep.html_utils import (
     HTMLStyler,
     HTMLRenderer,
+    HTMLDocTagsConverter,
 )
 
 
@@ -101,7 +101,6 @@ def main(
         lambda example: "\\" not in example["label_html"],
         desc="Filtering out math formula...",
     )
-    # dataset = dataset.select(range(num_proc))
 
     dataset = dataset.map(
         partial(

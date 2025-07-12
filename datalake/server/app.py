@@ -19,14 +19,6 @@ class ValidateAssetsRequest(BaseModel):
     search_data: List[Dict] 
     sample_percent: Optional[float] = None
 
-class StatusResponse(BaseModel):
-    """상태 응답 모델"""
-    pending: int
-    processing: int
-    failed: int
-    server_status: str
-    last_updated: str
-
 
 class StatusResponse(BaseModel):
     """상태 응답 모델"""
@@ -35,6 +27,7 @@ class StatusResponse(BaseModel):
     failed: int
     server_status: str
     last_updated: str
+
 
 class ProcessingJob(BaseModel):
     """처리 작업 상태"""

@@ -160,7 +160,8 @@ class HTMLRenderer(object):
         self,
         html: str,
     ) -> str:
-        style = self.style_pat.search(html).group(0)
+        match = self.style_pat.search(html)
+        style = match.group(0) if match else ""
 
         html = self.style_pat.sub("", html)
         text_nodes = self.tag_pat.split(html)
@@ -241,3 +242,16 @@ class HTMLRenderer(object):
             # import traceback
             # traceback.print_exc()
             return
+
+
+if __name__ == "__main__":
+    renderer = HTMLRenderer()
+    styler = HTMLStyler()
+    
+    html = out["html_for_rendering"]
+    
+    html_style = styler.style(html)
+    image_bytes = renderer.render(
+        html_style,
+    )
+    BytesIO(image_bytes)

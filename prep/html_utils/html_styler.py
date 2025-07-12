@@ -1,26 +1,7 @@
 import regex
 import random
-import imgkit
-import textwrap
-import base64
-import imghdr
 import latex2mathml.converter
-import numpy as np
 from pathlib import Path
-from io import BytesIO, StringIO
-from bs4 import BeautifulSoup
-from docling_core.types.doc.document import DocTagsDocument, DoclingDocument
-from docling.backend.html_backend import HTMLDocumentBackend
-from docling.datamodel.base_models import InputFormat
-from docling.datamodel.document import InputDocument
-from typing import List, Union, Tuple, Callable, Pattern
-from PIL import Image, ImageDraw, ImageFont, ImageOps
-from copy import deepcopy
-
-from prep.utils import (
-    bytes_to_pil,
-    pil_to_bytes,
-)
 
 
 class HTMLStyler(object):
