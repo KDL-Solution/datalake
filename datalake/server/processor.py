@@ -11,9 +11,8 @@ import random
 
 from collections import Counter
 from datetime import datetime
-from tqdm import tqdm
 from pathlib import Path
-from typing import Dict, List, Union, Optional
+from typing import Dict, List, Optional
 from PIL import Image
 from datasets import Dataset, load_from_disk
 from datasets.features import Image as ImageFeature
@@ -21,8 +20,8 @@ from functools import partial
 
 from datalake.utils import setup_logging
 
+
 class DatalakeProcessor:
-    
     def __init__(
         self,
         base_path: str = "/mnt/AI_NAS/datalake/",

@@ -11,7 +11,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI, HTTPException, BackgroundTasks
 from pydantic import BaseModel
 
-from datalake.server import DatalakeProcessor
+from datalake.server.processor import DatalakeProcessor
 from datalake.utils import setup_logging
 
 
@@ -21,6 +21,7 @@ class ValidateAssetsRequest(BaseModel):
     search_data: List[Dict] 
     sample_percent: Optional[float] = None
 
+
 class StatusResponse(BaseModel):
     """상태 응답 모델"""
     pending: int
@@ -28,7 +29,8 @@ class StatusResponse(BaseModel):
     failed: int
     server_status: str
     last_updated: str
-    
+
+
 class StatusResponse(BaseModel):
     """상태 응답 모델"""
     pending: int
@@ -36,6 +38,7 @@ class StatusResponse(BaseModel):
     failed: int
     server_status: str
     last_updated: str
+
 
 class ProcessingJob(BaseModel):
     """처리 작업 상태"""
@@ -62,7 +65,6 @@ async def lifespan(app: FastAPI):
     BATCH_SIZE = int(os.environ.get("BATCH_SIZE", 1000))
     NUM_PROC = int(os.environ.get("NUM_PROC", 4))
     CREATE_DIRS = os.environ.get("CREATE_DIRS", "false").lower() == "true"
-    
     try:
         processor = DatalakeProcessor(
             base_path=BASE_PATH,
