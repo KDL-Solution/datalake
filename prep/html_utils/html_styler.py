@@ -2,7 +2,7 @@ import regex
 import random
 import latex2mathml.converter
 from pathlib import Path
-
+import base64
 
 class HTMLStyler(object):
     def __init__(
@@ -28,7 +28,17 @@ class HTMLStyler(object):
         self.pre_white_space_prob = pre_white_space_prob
 
         self.font_dir = Path(font_dir).resolve()
-        self.font_paths = [i.as_posix() for i in self.font_dir.glob("*")]
+
+        excluded_fonts = ['NanumGothic', 'NanumGothicExtraBold', 'NanumGothicBold']
+        self.font_paths = [
+            i.as_posix()
+            for i in self.font_dir.glob("*")
+            if not any(excluded in i.name for excluded in excluded_fonts)
+        ]       
+                
+        if not self.font_paths:
+            raise RuntimeError("No fonts found in font_dir after applying exclusion list.")
+
         self.pat_word_split = regex.compile(
             r"\S+|\s+",
         )
@@ -130,10 +140,22 @@ class HTMLStyler(object):
             style,
         ]
 
+        
+        #폰트 제거 리스트: ['NanumGothic', 'NanumGothicExtraBold', 'NanumGothicBold',  ]
         font_path = self.rng.choice(self.font_paths)
-        font_uri = f"file://{font_path}"
+
+        if not self.font_paths:
+            raise RuntimeError("No fonts found in font_dir.")
+
+        with open(font_path, 'rb') as f:
+            font_data = f.read()
+            font_base64 = base64.b64encode(font_data).decode('utf-8').replace('\n', '')
+
+
+        font_uri=f'data:font/ttf;base64,{font_base64}'
 
         styles.append(
+            f"/* {font_path} */"
             f"@font-face{{font-family:'CustomFont'; src:url('{font_uri}') format('truetype');}}"
             f"*{{font-family:'CustomFont', sans-serif; font-size:{self.font_size};}}"
         )

@@ -1,10 +1,14 @@
 import regex
 import random
-import imgkit
+#import imgkit
 import textwrap
 import numpy as np
+import re
 from typing import Tuple
 from PIL import Image, ImageOps
+from playwright.sync_api import sync_playwright
+import imgkit
+
 
 from prep.utils import (
     bytes_to_pil,
@@ -15,15 +19,16 @@ from prep.utils import (
 class HTMLRenderer(object):
     def __init__(
         self,
-        min_pad: int = 20,
-        max_pad: int = 50,
-        min_margin: int = 50,
-        max_margin: int = 80,
+        min_pad: int = 0,
+        max_pad: int = 0,
+        min_margin: int = 0,
+        max_margin: int = 0,
         max_pixels: int = 2_048 * 2_048,
         width: int = 6,
         zoom: float = 0.5,
         seed: int = 42,
         bg_color: Tuple[int, int, int] = (255, 255, 255),
+        renderer_type: str = 'playwright'
     ) -> None:
         Image.MAX_IMAGE_PIXELS = None
 
@@ -35,6 +40,8 @@ class HTMLRenderer(object):
         self.width = width
         self.zoom = zoom
         self.bg_color = bg_color
+        self.renderer_type=renderer_type
+
 
         self.rng = random.Random(seed)
 
@@ -155,6 +162,99 @@ class HTMLRenderer(object):
         final.paste(vert, (left_margin, 0))
         final.paste(right_pad, (left_margin + W, 0))
         return final
+    
+
+
+    def render_html_with_playwright(self, html: str, zoom: float = 1.0) -> Tuple[bytes, list, float, float, list]:
+        with sync_playwright() as p:
+            browser = p.chromium.launch(headless=True)
+            page = browser.new_page()
+            page.set_content(html)
+
+            body_size = page.evaluate("() => ({ width: document.body.scrollWidth, height: document.body.scrollHeight })")
+            body_w = body_size['width']
+            body_h = body_size['height']
+
+            page.set_viewport_size({"width": int(body_w), "height": int(body_h)})
+
+            inner_tables = page.query_selector_all("table table")
+            raw_bboxes = []
+            norm_bboxes = []
+            inner_tables_html = []
+
+            for inner in inner_tables:
+                bbox = inner.bounding_box()
+                raw_bboxes.append(bbox)
+
+                if bbox:
+                    xmin = bbox['x'] / body_w
+                    ymin = bbox['y'] / body_h
+                    xmax = (bbox['x'] + bbox['width']) / body_w
+                    ymax = (bbox['y'] + bbox['height']) / body_h
+                    norm_bboxes.append([xmin, ymin, xmax, ymax])
+
+                # inner HTML (내용만)
+                html_snippet = inner.inner_html()
+                inner_tables_html.append(html_snippet)
+
+            # ✅ 전체 이미지 bbox 추가
+            norm_bboxes.insert(0, [0.0, 0.0, 1.0, 1.0])
+
+            # ✅ 전체 html에서 <style> 제거 후 추가
+            clean_html = self.style_pat.sub('', html)
+            inner_tables_html.insert(0, clean_html)
+
+            screenshot = page.screenshot(full_page=True)
+            browser.close()
+
+            return screenshot, norm_bboxes, body_w, body_h, inner_tables_html
+        
+
+    def render_html_with_imgkit(self, html: str, zoom: float = 1.0) -> Tuple[bytes, list, float, float, list]:
+        with sync_playwright() as p:
+            browser = p.chromium.launch(headless=True)
+            page = browser.new_page()
+            page.set_content(html)
+
+            body_size = page.evaluate("() => ({ width: document.body.scrollWidth, height: document.body.scrollHeight })")
+            body_w = body_size['width']
+            body_h = body_size['height']
+
+            page.set_viewport_size({"width": int(body_w), "height": int(body_h)})
+
+            inner_tables = page.query_selector_all("table table")
+            raw_bboxes = []
+            norm_bboxes = []
+            inner_tables_html = []
+
+            for inner in inner_tables:
+                bbox = inner.bounding_box()
+                raw_bboxes.append(bbox)
+
+                if bbox:
+                    xmin = bbox['x'] / body_w
+                    ymin = bbox['y'] / body_h
+                    xmax = (bbox['x'] + bbox['width']) / body_w
+                    ymax = (bbox['y'] + bbox['height']) / body_h
+                    norm_bboxes.append([xmin, ymin, xmax, ymax])
+
+                # inner HTML (내용만)
+                html_snippet = inner.inner_html()
+                inner_tables_html.append(html_snippet)
+
+            # ✅ 전체 이미지 bbox 추가
+            norm_bboxes.insert(0, [0.0, 0.0, 1.0, 1.0])
+
+            # ✅ 전체 html에서 <style> 제거 후 추가
+            clean_html = self.style_pat.sub('', html)
+            inner_tables_html.insert(0, clean_html)
+
+            screenshot = page.screenshot(full_page=True)
+            browser.close()
+
+            return screenshot, norm_bboxes, body_w, body_h, inner_tables_html
+
+
 
     def _get_margin_images(
         self,
@@ -168,49 +268,62 @@ class HTMLRenderer(object):
         text_nodes = [i.strip() for i in text_nodes if i.strip()]
         text = " ".join(text_nodes)
 
-        hor_margin_text = textwrap.fill(text, width=self.width)
-        try:
-            hor_bytes = imgkit.from_string(
-                style + hor_margin_text,
-                output_path=False,
-                options={
-                    "enable-local-file-access": "",
-                    "quiet": "",
-                },
-            )
-            ver_bytes = imgkit.from_string(
-                style + text,
-                output_path=False,
-                options={
-                    "enable-local-file-access": "",
-                    "quiet": "",
-                },
-            )
-            hor_image = bytes_to_pil(hor_bytes)
-            ver_image = bytes_to_pil(ver_bytes)
-            return hor_image, ver_image
-        except OSError:
-            raise OSError("Too large image.")
+        if self.renderer_type == 'playwright':
+            try:
+                hor_bytes, _, _, _, _ = self.render_html_with_playwright(html, zoom=self.zoom)
+                ver_bytes, _, _, _, _ = self.render_html_with_playwright(html, zoom=self.zoom)
+                hor_image = bytes_to_pil(hor_bytes)
+                ver_image = bytes_to_pil(ver_bytes)
+                return hor_image, ver_image
+            except OSError:
+                raise OSError("Too large image.")
 
-    def render(
-        self,
-        html: str,
-    ) -> bytes:
+        elif self.renderer_type == 'imgkit':  #수정 필요
+            hor_margin_text = textwrap.fill(text, width=self.width)
+            try:
+                hor_bytes = imgkit.from_string(
+                    style + hor_margin_text,
+                    output_path=False,
+                    options={
+                        "enable-local-file-access": "",
+                        "quiet": "",
+                    },
+                )
+                ver_bytes = imgkit.from_string(
+                    style + text,
+                    output_path=False,
+                    options={
+                        "enable-local-file-access": "",
+                        "quiet": "",
+                    },
+                )
+                hor_image = bytes_to_pil(hor_bytes)
+                ver_image = bytes_to_pil(ver_bytes)
+                return hor_image, ver_image
+            except OSError:
+                raise OSError("Too large image.")
+
+
+
+
+    def render(self, html: str) -> Tuple:
         try:
-            image_bytes = imgkit.from_string(
-                html,
-                output_path=False,
-                options={
-                    "enable-local-file-access": "",
-                    "quiet": "",
-                },
-            )
+            if self.renderer_type == 'playwright':
+                image_bytes, norm_bboxes, _, _, inner_tables_html = self.render_html_with_playwright(html, zoom=self.zoom)
+            elif self.renderer_type == 'imgkit':  #수정 필요
+                raise ValueError(f"Not Supported renderer type in this version: {self.renderer_type}")
+                # image_bytes, norm_bboxes, _, _, inner_tables_html = self.render_html_with_imgkit(html, zoom=self.zoom)
+            else:
+                raise ValueError(f"Unknown renderer_type: {self.renderer_type}")
+
+            #image_bytes, norm_bboxes, _ , _, inner_tables_html = self.render_html_with_playwright(html, zoom=self.zoom)
+
             if image_bytes is None:
-                raise RuntimeError("imgkit.from_string returned None")
+                raise RuntimeError(f"{self.renderer_type} from_string returned None")
 
-            hor_image, ver_image = self._get_margin_images(
-                html,
-            )
+            image_temp = bytes_to_pil(image_bytes)
+
+            hor_image, ver_image = self._get_margin_images(html)
             hor_image = hor_image.resize(
                 (int(hor_image.width * self.zoom), int(hor_image.height * self.zoom)),
                 resample=Image.LANCZOS,
@@ -220,9 +333,8 @@ class HTMLRenderer(object):
                 resample=Image.LANCZOS,
             )
 
-            image = bytes_to_pil(image_bytes)
-            image = image.resize(
-                (int(image.width * self.zoom), int(image.height * self.zoom)),
+            image = image_temp.resize(
+                (int(image_temp.width * self.zoom), int(image_temp.height * self.zoom)),
                 resample=Image.LANCZOS,
             )
             image = self._crop_pad_add_margin(
@@ -230,18 +342,17 @@ class HTMLRenderer(object):
                 margin_image1=hor_image,
                 margin_image2=ver_image,
             )
-            width, height = image.size
-            if (width * height) > self.max_pixels:
-                return
 
-            return pil_to_bytes(
-                image,
-            )
+            final_width, final_height = image.size
+            if (final_width * final_height) > self.max_pixels:
+                return None, None, None, None, None
+
+            return pil_to_bytes(image), norm_bboxes, final_width, final_height, inner_tables_html
 
         except Exception:
-            # import traceback
-            # traceback.print_exc()
-            return
+            import traceback
+            traceback.print_exc()
+            return None, None, None, None, None
 
 
 if __name__ == "__main__":

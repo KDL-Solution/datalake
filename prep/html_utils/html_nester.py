@@ -167,10 +167,10 @@ class HTMLNester(object):
                 width, height = image.size
 
                 # if mask_images:
-                #     trg_td.append(
-                #         f"{self.br_tag}[|IMG-{mask_idx:02d}|]{self.br_tag}"
-                #     )
-                #     mask_idx += 1
+                # #     trg_td.append(
+                # #         f"{self.br_tag}[|IMG-{mask_idx:02d}|]{self.br_tag}"
+                # #     )
+                # #     mask_idx += 1
 
                 #     image_new = self._mask(
                 #         image,
