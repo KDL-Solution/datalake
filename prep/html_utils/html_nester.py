@@ -2,11 +2,14 @@ import math
 import random
 import base64
 import imghdr
+import regex
 from bs4 import BeautifulSoup
 from typing import List, Union, Tuple
 from PIL import Image, ImageDraw, ImageFont
 from copy import deepcopy
 
+# import sys
+# sys.path.insert(0, "/home/eric/workspace/datalake/")
 from prep.utils import (
     bytes_to_pil,
     pil_to_bytes,
@@ -28,8 +31,8 @@ def remove_img_tags(
 
 def generate_random_white_images(
     count: int = 1,
-    min_area: int = (2 ** 8) ** 2,
-    max_area: int = (2 ** 6) ** 2,
+    min_area: int = (2 ** 6) ** 2,
+    max_area: int = (2 ** 8) ** 2,
     min_aspect: float = 0.5,
     max_aspect: float = 2.,
     seed: int = 42,
@@ -52,7 +55,9 @@ def generate_random_white_images(
             Image.new(
                 "RGB",
                 (width, height),
-                (255, 255, 255),
+                # (255, 255, 255),
+                # (255, 0, 0),
+                (0, 0, 0),
             )
         )
     return images
@@ -65,7 +70,8 @@ class HTMLNester(object):
         inner_htmls: List[str],
         inner_images: List[bytes],
         seed: int = 42,
-        image_mask_color: Tuple[int, int, int] = (0, 0, 255),
+        mask_image_color: Tuple[int, int, int] = (255, 0, 0),
+        mask_text_color: Tuple[int, int, int] = (255, 255, 255),
         image_size_factor: float = 0.5,
         min_num_inner_tables: int = 1,
         max_num_inner_tables: int = 3,
@@ -78,7 +84,8 @@ class HTMLNester(object):
         self.outer_htmls = outer_htmls
         self.inner_htmls = inner_htmls
         self.inner_images = inner_images
-        self.image_mask_color = image_mask_color
+        self.mask_image_color = mask_image_color
+        self.mask_text_color = mask_text_color
         self.image_size_factor = image_size_factor
         self.min_font_size = min_font_size
         self.max_font_size = max_font_size
@@ -92,47 +99,93 @@ class HTMLNester(object):
 
         self.converter = HTMLDocTagsConverter()
 
-    def _mask(
+        # self.multi_newlines_pat = regex.compile(r"\n{3,}")
+        self.multi_newlines_pat = regex.compile(r"\n+")
+
+    # def _mask(
+    #     self,
+    #     image: Image.Image,
+    #     text: str,
+    #     font_path: str = "DejaVuSans.ttf",
+    # ) -> Image.Image:
+    #     """
+    #     Return a new white PIL image (same size as image) with `text` centered.
+    #     """
+    #     w, h = image.size
+    #     image_new = Image.new("RGB", (w, h), self.mask_image_color)
+    #     draw = ImageDraw.Draw(image_new)
+
+    #     # Load font
+    #     if font_path:
+    #         font_size = max(self.min_font_size, int(min(w, h) * 0.05))
+    #         font_size = min(self.max_font_size, font_size)
+    #         font = ImageFont.truetype(font_path, font_size)
+    #     else:
+    #         font = ImageFont.load_default()
+
+    #     # Compute text bounding box
+    #     # textbbox returns (x0, y0, x1, y1)
+    #     bbox = draw.textbbox((0, 0), text, font=font)
+    #     text_w = bbox[2] - bbox[0]
+    #     text_h = bbox[3] - bbox[1]
+
+    #     # Center coordinates
+    #     x = (w - text_w) / 2 - bbox[0]
+    #     y = (h - text_h) / 2 - bbox[1]
+
+    #     # Draw centered text
+    #     draw.text(
+    #         (x, y),
+    #         text,
+    #         fill=self.mask_text_color,
+    #         font=font,
+    #     )
+    #     return image_new
+
+    def _replace_inner_tables_and_images(
         self,
-        image: Image.Image,
-        text: str,
-        font_path: str = "DejaVuSans.ttf",
-        text_color: Tuple[int, int, int] = (0, 0, 0),
-    ) -> Image.Image:
-        """
-        Return a new white PIL image (same size as image) with `text` centered.
-        """
-        w, h = image.size
-        image_new = Image.new("RGB", (w, h), self.image_mask_color)
-        draw = ImageDraw.Draw(image_new)
+        html: str,
+    ) -> str:
+        soup = BeautifulSoup(html, "html.parser")
 
-        # Load font
-        if font_path:
-            font_size = max(self.min_font_size, int(min(w, h) * 0.05))
-            font_size = min(self.max_font_size, font_size)
-            font = ImageFont.truetype(font_path, font_size)
-        else:
-            font = ImageFont.load_default()
+        # 가장 바깥쪽 <table>
+        outer_table = soup.find("table")
+        if outer_table is None:
+            return html  # table이 없다면 그대로 반환
 
-        # Compute text bounding box
-        # textbbox returns (x0, y0, x1, y1)
-        bbox = draw.textbbox((0, 0), text, font=font)
-        text_w = bbox[2] - bbox[0]
-        text_h = bbox[3] - bbox[1]
+        replacements = []
+        count = 1
 
-        # Center coordinates
-        x = (w - text_w) / 2 - bbox[0]
-        y = (h - text_h) / 2 - bbox[1]
+        # 중첩 <table>과 <img>만 대상 (가장 바깥쪽은 제외)
+        def __replace_targets(tag):
+            nonlocal count
+            for target in tag.find_all(["table", "img"]):
+                if target.name == "table":
+                    if target is outer_table:
+                        continue  # 가장 바깥쪽 <table>은 건너뜀
+                    else:
+                        continue
+                    #     placeholder = f"[|TABLE-{count:02}|]"
+                        # count += 1
+                elif target.name == "img":
+                    placeholder = f"[|IMAGE-{count:02}|]"
+                    count += 1
+                else:
+                    continue
 
-        # Draw centered text
-        draw.text((x, y), text, fill=text_color, font=font)
-        return image_new
+                replacements.append((str(target), placeholder))
+                target.replace_with(placeholder)
+
+        __replace_targets(outer_table)
+        # return str(soup)
+        return soup.decode(
+            formatter=None,
+        )
 
     def nest(
         self,
         outer_html: str,
         inner_items: List[Union[str, bytes]],
-        # mask_images: bool = True,
     ) -> str:
         outer_soup = BeautifulSoup(
             outer_html,
@@ -156,8 +209,11 @@ class HTMLNester(object):
         if not candidate_tds:
             raise ValueError("No eligible td tag found")
 
-        mask_idx = 1
-        for item in inner_items:
+        # mask_idx = 1
+        for idx, item in enumerate(
+            inner_items,
+            start=1,
+        ):
             trg_td = self.rng.choice(candidate_tds)
 
             if isinstance(item, bytes):
@@ -166,19 +222,15 @@ class HTMLNester(object):
                 )
                 width, height = image.size
 
-                # if mask_images:
-                # #     trg_td.append(
-                # #         f"{self.br_tag}[|IMG-{mask_idx:02d}|]{self.br_tag}"
-                # #     )
-                # #     mask_idx += 1
+                    # image_mask = self._mask(
+                    #     image,
+                    #     text="",
+                    # )
+                    # item = pil_to_bytes(
+                    #     image_mask,
+                    # )
 
-                #     image_new = self._mask(
-                #         image,
-                #         text="",
-                #     )
-                #     item = pil_to_bytes(
-                #         image_new,
-                #     )
+                    # mask_idx += 1
 
                 img_type = imghdr.what(None, h=item) or "png"
                 b64 = base64.b64encode(item).decode("ascii")
@@ -188,9 +240,10 @@ class HTMLNester(object):
                     src=data_uri,
                     width=f"{int(width * self.image_size_factor)}",
                     height=f"{int(height * self.image_size_factor)}",
+                    style="display:block; margin:0 auto;",
                 )
                 trg_td.append(
-                    img_tag
+                    f"{self.br_tag}{img_tag}{self.br_tag}"
                 )
             else:
                 inner_soup = BeautifulSoup(
@@ -202,32 +255,57 @@ class HTMLNester(object):
                     inner_table,
                 )
                 trg_td.append(
-                    f"{self.br_tag}{self.br_tag}{inner_table_copy}{self.br_tag}{self.br_tag}"
+                    f"{self.br_tag}{inner_table_copy}{self.br_tag}"
                 )
 
         html = outer_table.decode(
             formatter=None,
         )
-        html = html.replace(
-            self.br_tag * 4,
-            self.br_tag * 2,
+
+        label_html_masked = self._replace_inner_tables_and_images(
+            html,
         )
-        html = html.replace(
+        label_html_masked = label_html_masked.replace(
             self.br_tag,
             "\n",
         )
-
-        label_html = remove_img_tags(
-            html,
+        label_html_masked = self.multi_newlines_pat.sub(
+            # "\n\n",
+            "\n",
+            label_html_masked,
         )
 
-        label_doctags = self.converter.to_doctags(
+        # HTML label:
+        label_html = html.replace(
+            self.br_tag,
+            "\n",
+        )
+        label_html = self.multi_newlines_pat.sub(
+            # "\n\n",
+            "\n",
             label_html,
+        )
+
+        # DocTags label:
+        label_doctags = self.converter.to_doctags(
+            # label_html,
+            label_html_masked
+        )
+        label_doctags = label_doctags.replace(
+            self.br_tag,
+            "\n",
+        )
+        label_doctags = self.multi_newlines_pat.sub(
+            # "\n\n",
+            "\n",
+            label_doctags,
         )
         return {
             "html_for_rendering": html,
             "label_html": label_html,
-            "label_doctags": label_doctags,
+            "label_html_masked": label_html_masked,
+            # "label_doctags": label_doctags,
+            "label_doctags_masked": label_doctags,
         }
 
     def synthesize(
@@ -262,7 +340,6 @@ class HTMLNester(object):
                 return self.nest(
                     outer_html=outer_html,
                     inner_items=inner_items,
-                    # mask_images=True,
                 )
             except ValueError:
                 continue

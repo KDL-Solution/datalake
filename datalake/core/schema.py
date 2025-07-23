@@ -25,8 +25,11 @@ class SchemaManager:
         """Task 유효성 검증"""
         config = self._read_config()
         return task in config.get('tasks', {})
-    
-    def get_required_fields(self, task: str) -> list:
+
+    def get_required_fields(
+        self,
+        task: str,
+    ) -> list:
         """Task별 필수 필드 조회"""
         config = self._read_config()
         return config.get('tasks', {}).get(task, {}).get('required_fields', [])
@@ -35,21 +38,24 @@ class SchemaManager:
         """Task별 허용 값 조회"""
         config = self._read_config()
         return config.get('tasks', {}).get(task, {}).get('allowed_values', {})
-    
-    def validate_task_metadata(self, task: str, meta: dict) -> tuple[bool, str]:
+
+    def validate_task_metadata(
+        self,
+        task: str,
+        meta: dict,
+    ) -> tuple[bool, str]:
         """Task 메타데이터 검증"""
         if not self.validate_task(task):
             return False, f"지원하지 않는 task입니다: {task}"
-        
+
         required_fields = self.get_required_fields(task)
         allowed_values = self.get_allowed_values(task)
-        
+
         if meta is None:
             return False, f"{required_fields} 필드의 meta가 필요합니다"
         if not isinstance(meta, dict):
             return False, f"meta는 dict 타입이어야 합니다. 현재 타입: {type(meta).__name__}"
-        
-        
+
         # required_fields에 없는 필드는 모두 차단
         for field in meta.keys():
             if field not in required_fields:
@@ -142,12 +148,12 @@ class SchemaManager:
         config['tasks'].pop(task, None)
         self._write_config(config)
         return True
-    
+
     def _read_config(self):
         """파일락으로 안전하게 설정 읽기"""
         with open(self.config_path, 'r', encoding='utf-8') as f:
             return yaml.safe_load(f)
-    
+
     def _write_config(self, config):
         """파일락으로 안전하게 설정 쓰기"""
         with open(self.config_path, 'w', encoding='utf-8') as f:

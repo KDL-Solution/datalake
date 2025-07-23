@@ -1,8 +1,9 @@
 import regex
 import random
 import latex2mathml.converter
-from pathlib import Path
 import base64
+from pathlib import Path
+from typing import List
 
 class HTMLStyler(object):
     def __init__(
@@ -17,6 +18,11 @@ class HTMLStyler(object):
         pre_white_space_prob: float = 0.8,
         seed: int = 42,
         font_size: str = "1.35rem",
+        excluded_fonts: List[str] = [
+            'NanumGothic',
+            'NanumGothicExtraBold',
+            'NanumGothicBold',
+        ]
     ) -> None:
         self.font_size = font_size
         self.header = header
@@ -26,16 +32,16 @@ class HTMLStyler(object):
         self.bold_prob = bold_prob
         self.color_underline_prob = color_underline_prob
         self.pre_white_space_prob = pre_white_space_prob
+        self.exclude_fonts = excluded_fonts
 
         self.font_dir = Path(font_dir).resolve()
 
-        excluded_fonts = ['NanumGothic', 'NanumGothicExtraBold', 'NanumGothicBold']
         self.font_paths = [
             i.as_posix()
             for i in self.font_dir.glob("*")
             if not any(excluded in i.name for excluded in excluded_fonts)
         ]       
-                
+
         if not self.font_paths:
             raise RuntimeError("No fonts found in font_dir after applying exclusion list.")
 
@@ -140,8 +146,6 @@ class HTMLStyler(object):
             style,
         ]
 
-        
-        #폰트 제거 리스트: ['NanumGothic', 'NanumGothicExtraBold', 'NanumGothicBold',  ]
         font_path = self.rng.choice(self.font_paths)
 
         if not self.font_paths:
@@ -150,8 +154,6 @@ class HTMLStyler(object):
         with open(font_path, 'rb') as f:
             font_data = f.read()
             font_base64 = base64.b64encode(font_data).decode('utf-8').replace('\n', '')
-
-
         font_uri=f'data:font/ttf;base64,{font_base64}'
 
         styles.append(

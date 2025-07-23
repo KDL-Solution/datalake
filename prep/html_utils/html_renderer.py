@@ -1,19 +1,11 @@
 import regex
 import random
-#import imgkit
-import textwrap
 import numpy as np
-import re
-from typing import Tuple
+from typing import Tuple, List
 from PIL import Image, ImageOps
 from playwright.sync_api import sync_playwright
-import imgkit
 
-
-from prep.utils import (
-    bytes_to_pil,
-    pil_to_bytes,
-)
+from prep.utils import bytes_to_pil
 
 
 class HTMLRenderer(object):
@@ -25,10 +17,8 @@ class HTMLRenderer(object):
         max_margin: int = 0,
         max_pixels: int = 2_048 * 2_048,
         width: int = 6,
-        zoom: float = 0.5,
         seed: int = 42,
         bg_color: Tuple[int, int, int] = (255, 255, 255),
-        renderer_type: str = 'playwright'
     ) -> None:
         Image.MAX_IMAGE_PIXELS = None
 
@@ -38,10 +28,7 @@ class HTMLRenderer(object):
         self.max_margin = max_margin
         self.max_pixels = max_pixels
         self.width = width
-        self.zoom = zoom
         self.bg_color = bg_color
-        self.renderer_type=renderer_type
-
 
         self.rng = random.Random(seed)
 
@@ -82,17 +69,15 @@ class HTMLRenderer(object):
         else:
             raise ValueError(f"Invalid origin: {origin}")
 
-    def _crop_pad_add_margin(
+    def _crop(
         self,
-        center_image: Image.Image,
-        margin_image1: Image.Image,
-        margin_image2: Image.Image,
+        image: Image.Image,
     ) -> Image.Image:
         # RGB가 아니면 변환
-        if center_image.mode != "RGB":
-            center_image = center_image.convert("RGB")
+        if image.mode != "RGB":
+            image = image.convert("RGB")
 
-        arr = np.array(center_image)              # shape: (H, W, 3)
+        arr = np.array(image)              # shape: (H, W, 3)
         bg  = np.array(self.bg_color)           # shape: (3,)
 
         # 배경색과 다른 픽셀 마스크: shape (H, W)
@@ -108,18 +93,39 @@ class HTMLRenderer(object):
 
         # 전부 배경이면 원본 반환
         if non_bg_rows.size == 0 or non_bg_cols.size == 0:
-            return center_image
+            return image
 
-        left_pad = self.rng.randint(self.min_pad, self.max_pad)
-        left = max(non_bg_cols[0] - left_pad, 0)
-        top_pad = self.rng.randint(self.min_pad, self.max_pad)
-        top = max(non_bg_rows[0] - top_pad, 0)
-        right_pad = self.rng.randint(self.min_pad, self.max_pad)
-        right = min(non_bg_cols[-1] + right_pad + 1, center_image.width)
-        bottom_pad = self.rng.randint(self.min_pad, self.max_pad)
-        bottom = min(non_bg_rows[-1] + bottom_pad + 1, center_image.height)
-        center_image = center_image.crop((left, top, right, bottom))
+        left = max(non_bg_cols[0], 0)
+        top = max(non_bg_rows[0], 0)
+        right = min(non_bg_cols[-1] + 1, image.width)
+        bottom = min(non_bg_rows[-1] + 1, image.height)
+        return image.crop((left, top, right, bottom))
 
+    def _pad_and_add_margin(
+        self,
+        center_image: Image.Image,
+        hor_margin_image: Image.Image,
+        ver_margin_image: Image.Image,
+    ) -> Image.Image:
+        center_image = self._crop(
+            center_image,
+        )
+        hor_margin_image = self._crop(
+            hor_margin_image,
+        )
+        ver_margin_image = self._crop(
+            ver_margin_image,
+        )
+
+        (
+            left_pad,
+            top_pad,
+            right_pad,
+            bottom_pad,
+        ) = self.rng.choices(
+            range(self.min_pad, self.max_pad + 1),
+            k=4,
+        )
         center_image = ImageOps.expand(
             center_image,
             border=(left_pad, top_pad, right_pad, bottom_pad),
@@ -139,127 +145,92 @@ class HTMLRenderer(object):
         left_margin = max(0, left_margin - left_pad)
         top_margin = max(0, top_margin - top_pad)
         right_margin = max(0, right_margin - right_pad)
-        bottom_margin = max(0, bottom_margin - bottom_pad)        
+        bottom_margin = max(0, bottom_margin - bottom_pad)
 
-        # 1. Top padding (좌하단 기준 crop)
-        top_pad = self._tile_or_crop_from(margin_image2, (W, top_margin), origin="bottom-left")
-        # 2. Bottom padding (좌상단 기준 crop)
-        bottom_pad = self._tile_or_crop_from(margin_image2, (W, bottom_margin), origin="top-left")
-        # 3. Left padding (우상단 기준 crop)
-        left_pad = self._tile_or_crop_from(margin_image1, (left_margin, H), origin="top-right")
-        # 4. Right padding (좌상단 기준 crop)
-        right_pad = self._tile_or_crop_from(margin_image1, (right_margin, H), origin="top-left")
+        top_pad_image = self._tile_or_crop_from(
+            ver_margin_image,
+            (W, top_margin),
+            origin="bottom-left",
+        )
+        bottom_pad_image = self._tile_or_crop_from(
+            ver_margin_image,
+            (W, bottom_margin),
+            origin="top-left",
+        )
+        left_pad_image = self._tile_or_crop_from(
+            hor_margin_image,
+            (left_margin, H),
+            origin="top-right",
+        )
+        right_pad_image = self._tile_or_crop_from(
+            hor_margin_image,
+            (right_margin, H),
+            origin="top-left",
+        )
 
         # 5. 수직 병합
         vert = Image.new("RGB", (W, top_margin + H + bottom_margin), self.bg_color)
-        vert.paste(top_pad, (0, 0))
+        vert.paste(top_pad_image, (0, 0))
         vert.paste(center_image, (0, top_margin))
-        vert.paste(bottom_pad, (0, top_margin + H))
+        vert.paste(bottom_pad_image, (0, top_margin + H))
 
         # 6. 수평 병합
         final = Image.new("RGB", (left_margin + W + right_margin, vert.height), self.bg_color)
-        final.paste(left_pad, (0, 0))
+        final.paste(left_pad_image, (0, 0))
         final.paste(vert, (left_margin, 0))
-        final.paste(right_pad, (left_margin + W, 0))
-        return final
-    
+        final.paste(right_pad_image, (left_margin + W, 0))
+        return final, left_pad + left_margin, top_pad + top_margin
 
-
-    def render_html_with_playwright(self, html: str, zoom: float = 1.0) -> Tuple[bytes, list, float, float, list]:
+    def _render(
+        self,
+        html: str,
+        tags: List[str] = [
+            "table",
+            "table table",
+            "img",
+        ],
+    ) -> Tuple[bytes, list, float, float, list]:
         with sync_playwright() as p:
-            browser = p.chromium.launch(headless=True)
+            browser = p.chromium.launch(
+                headless=True,
+            )
             page = browser.new_page()
             page.set_content(html)
 
-            body_size = page.evaluate("() => ({ width: document.body.scrollWidth, height: document.body.scrollHeight })")
-            body_w = body_size['width']
-            body_h = body_size['height']
+            body_size = page.evaluate(
+                "() => ({ width: document.body.scrollWidth, height: document.body.scrollHeight })",
+            )
+            body_w = body_size["width"]
+            body_h = body_size["height"]
 
-            page.set_viewport_size({"width": int(body_w), "height": int(body_h)})
+            page.set_viewport_size(
+                {
+                    "width": int(body_w),
+                    "height": int(body_h),
+                },
+            )
 
-            inner_tables = page.query_selector_all("table table")
-            raw_bboxes = []
-            norm_bboxes = []
-            inner_tables_html = []
-
-            for inner in inner_tables:
+            inner_items = page.query_selector_all(
+                ", ".join(tags),
+            )
+            bboxes = []
+            for inner in inner_items:
                 bbox = inner.bounding_box()
-                raw_bboxes.append(bbox)
-
-                if bbox:
-                    xmin = bbox['x'] / body_w
-                    ymin = bbox['y'] / body_h
-                    xmax = (bbox['x'] + bbox['width']) / body_w
-                    ymax = (bbox['y'] + bbox['height']) / body_h
-                    norm_bboxes.append([xmin, ymin, xmax, ymax])
-
-                # inner HTML (내용만)
-                html_snippet = inner.inner_html()
-                inner_tables_html.append(html_snippet)
-
-            # ✅ 전체 이미지 bbox 추가
-            norm_bboxes.insert(0, [0.0, 0.0, 1.0, 1.0])
-
-            # ✅ 전체 html에서 <style> 제거 후 추가
-            clean_html = self.style_pat.sub('', html)
-            inner_tables_html.insert(0, clean_html)
+                xmin = bbox["x"]
+                ymin = bbox["y"]
+                xmax = bbox["x"] + bbox["width"]
+                ymax = bbox["y"] + bbox["height"]
+                bboxes.append([xmin, ymin, xmax, ymax])
 
             screenshot = page.screenshot(full_page=True)
             browser.close()
-
-            return screenshot, norm_bboxes, body_w, body_h, inner_tables_html
-        
-
-    def render_html_with_imgkit(self, html: str, zoom: float = 1.0) -> Tuple[bytes, list, float, float, list]:
-        with sync_playwright() as p:
-            browser = p.chromium.launch(headless=True)
-            page = browser.new_page()
-            page.set_content(html)
-
-            body_size = page.evaluate("() => ({ width: document.body.scrollWidth, height: document.body.scrollHeight })")
-            body_w = body_size['width']
-            body_h = body_size['height']
-
-            page.set_viewport_size({"width": int(body_w), "height": int(body_h)})
-
-            inner_tables = page.query_selector_all("table table")
-            raw_bboxes = []
-            norm_bboxes = []
-            inner_tables_html = []
-
-            for inner in inner_tables:
-                bbox = inner.bounding_box()
-                raw_bboxes.append(bbox)
-
-                if bbox:
-                    xmin = bbox['x'] / body_w
-                    ymin = bbox['y'] / body_h
-                    xmax = (bbox['x'] + bbox['width']) / body_w
-                    ymax = (bbox['y'] + bbox['height']) / body_h
-                    norm_bboxes.append([xmin, ymin, xmax, ymax])
-
-                # inner HTML (내용만)
-                html_snippet = inner.inner_html()
-                inner_tables_html.append(html_snippet)
-
-            # ✅ 전체 이미지 bbox 추가
-            norm_bboxes.insert(0, [0.0, 0.0, 1.0, 1.0])
-
-            # ✅ 전체 html에서 <style> 제거 후 추가
-            clean_html = self.style_pat.sub('', html)
-            inner_tables_html.insert(0, clean_html)
-
-            screenshot = page.screenshot(full_page=True)
-            browser.close()
-
-            return screenshot, norm_bboxes, body_w, body_h, inner_tables_html
-
-
+            return screenshot, bboxes
 
     def _get_margin_images(
         self,
         html: str,
-    ) -> str:
+        div_style: str = """<div style="text-align:justify; text-justify:inter-word;">""",
+    ) -> Tuple[Image.Image, Image.Image]:
         match = self.style_pat.search(html)
         style = match.group(0) if match else ""
 
@@ -267,102 +238,110 @@ class HTMLRenderer(object):
         text_nodes = self.tag_pat.split(html)
         text_nodes = [i.strip() for i in text_nodes if i.strip()]
         text = " ".join(text_nodes)
-
-        if self.renderer_type == 'playwright':
-            try:
-                hor_bytes, _, _, _, _ = self.render_html_with_playwright(html, zoom=self.zoom)
-                ver_bytes, _, _, _, _ = self.render_html_with_playwright(html, zoom=self.zoom)
-                hor_image = bytes_to_pil(hor_bytes)
-                ver_image = bytes_to_pil(ver_bytes)
-                return hor_image, ver_image
-            except OSError:
-                raise OSError("Too large image.")
-
-        elif self.renderer_type == 'imgkit':  #수정 필요
-            hor_margin_text = textwrap.fill(text, width=self.width)
-            try:
-                hor_bytes = imgkit.from_string(
-                    style + hor_margin_text,
-                    output_path=False,
-                    options={
-                        "enable-local-file-access": "",
-                        "quiet": "",
-                    },
-                )
-                ver_bytes = imgkit.from_string(
-                    style + text,
-                    output_path=False,
-                    options={
-                        "enable-local-file-access": "",
-                        "quiet": "",
-                    },
-                )
-                hor_image = bytes_to_pil(hor_bytes)
-                ver_image = bytes_to_pil(ver_bytes)
-                return hor_image, ver_image
-            except OSError:
-                raise OSError("Too large image.")
-
-
-
-
-    def render(self, html: str) -> Tuple:
         try:
-            if self.renderer_type == 'playwright':
-                image_bytes, norm_bboxes, _, _, inner_tables_html = self.render_html_with_playwright(html, zoom=self.zoom)
-            elif self.renderer_type == 'imgkit':  #수정 필요
-                raise ValueError(f"Not Supported renderer type in this version: {self.renderer_type}")
-                # image_bytes, norm_bboxes, _, _, inner_tables_html = self.render_html_with_imgkit(html, zoom=self.zoom)
-            else:
-                raise ValueError(f"Unknown renderer_type: {self.renderer_type}")
+            hor_bytes, _ = self._render(
+                style + div_style + text + "</div>"
+            )
+            ver_bytes, _ = self._render(
+                style + div_style + text + "</div>"
+            )
+            hor_image = bytes_to_pil(hor_bytes)
+            ver_image = bytes_to_pil(ver_bytes)
+            return hor_image, ver_image
+        except OSError:
+            raise OSError("Too large image.")
 
-            #image_bytes, norm_bboxes, _ , _, inner_tables_html = self.render_html_with_playwright(html, zoom=self.zoom)
+    def render(
+        self,
+        html: str,
+        tags: List[str] = [
+            "img",
+        ],
+        zoom: float = 0.3,
+    ) -> Tuple:
+        try:
+            image_bytes, bboxes = self._render(
+                html,
+                tags=tags,
+            )
 
             if image_bytes is None:
-                raise RuntimeError(f"{self.renderer_type} from_string returned None")
+                raise RuntimeError(f"{self.engine} from_string returned None")
 
-            image_temp = bytes_to_pil(image_bytes)
+            center_image = bytes_to_pil(image_bytes)
 
-            hor_image, ver_image = self._get_margin_images(html)
-            hor_image = hor_image.resize(
-                (int(hor_image.width * self.zoom), int(hor_image.height * self.zoom)),
-                resample=Image.LANCZOS,
+            hor_image, ver_image = self._get_margin_images(
+                html,
             )
-            ver_image = ver_image.resize(
-                (int(ver_image.width * self.zoom), int(ver_image.height * self.zoom)),
-                resample=Image.LANCZOS,
+            image, left, top = self._pad_and_add_margin(
+                center_image=center_image,
+                hor_margin_image=hor_image,
+                ver_margin_image=ver_image,
             )
+            for bbox in bboxes:
+                bbox[0] += left
+                bbox[1] += top
+                bbox[2] += left
+                bbox[3] += top
 
-            image = image_temp.resize(
-                (int(image_temp.width * self.zoom), int(image_temp.height * self.zoom)),
-                resample=Image.LANCZOS,
-            )
-            image = self._crop_pad_add_margin(
-                center_image=image,
-                margin_image1=hor_image,
-                margin_image2=ver_image,
-            )
-
-            final_width, final_height = image.size
-            if (final_width * final_height) > self.max_pixels:
-                return None, None, None, None, None
-
-            return pil_to_bytes(image), norm_bboxes, final_width, final_height, inner_tables_html
+            # norm_bboxes = [
+            #     [
+            #         i[0] / image.width,
+            #         i[1] / image.height,
+            #         i[2] / image.width,
+            #         i[3] / image.height,
+            #     ]
+            #     for i in bboxes
+            # ]
+            old_size = image.size
+            new_size = (int(old_size[0] * zoom), int(old_size[1] * zoom))
+            # print(old_size, new_size)
+            image = image.resize(new_size, Image.LANCZOS)
+            # print(image.size)
+            # print(bboxes)
+            bboxes = [[int(j * zoom) for j in i] for i in bboxes]
+            # print(bboxes)
+            # for bbox in bboxes:
+            #     bbox[0] = int(bbox[0] * new_size[0] / old_size[0])
+            #     bbox[1] = int(bbox[1] * new_size[1] / old_size[1])
+            #     bbox[2] = int(bbox[2] * new_size[0] / old_size[0])
+            #     bbox[3] = int(bbox[3] * new_size[1] / old_size[1])
+            return {
+                "image": image,
+                # "normalized_bboxes": norm_bboxes,
+                "bboxes": bboxes,
+                # "hor_image": hor_image,
+                # "ver_image": ver_image,
+            }
 
         except Exception:
             import traceback
             traceback.print_exc()
-            return None, None, None, None, None
+            return {
+                "image": None,
+                # "normalized_bboxes": None,
+                "bboxes": None,
+            }
 
 
 if __name__ == "__main__":
-    renderer = HTMLRenderer()
-    styler = HTMLStyler()
-    
-    html = out["html_for_rendering"]
-    
-    html_style = styler.style(html)
-    image_bytes = renderer.render(
-        html_style,
+    html_style = """<style>table{table-layout:fixed;border-collapse:collapse;white-space:break-spaces;overflow-wrap:break-word;width:auto;}td,th{white-space:break-spaces;}table table{display:inline-table;width:auto!important;max-width:none!important;}table table td,table table th{white-space:pre!important;}td img{display:block;max-width:none;height:auto;}\n/* /mnt/AI_NAS/OCR/Font/나눔손글씨 미니 손글씨.ttf */*{font-family:\'CustomFont\', sans-serif; font-size:1.35rem;}\ntd, th {border:0.5px solid #333;}\nth {background-color:rgb(200, 175, 159); color:black; font-weight:bold;}\ntd, th {padding:0.5em; text-align:center;}\n</style><table><tbody><tr><td>표제</td><td>저자</td><td>ISBN</td><td>부가기호</td><td><b>바코드</b></td></tr><tr><td><span style=\'color:red\'>서울시</span> <b>우수건축자산</b> 제11호, 샘터사옥 <span style=\'color:blue;text-decoration:underline\'>&</span> 공공일호</td><td rowspan="2"><b>서울특별시</b> 한옥건축자산과 ; <b>하나</b></td><td><span style=\'color:red\'>979-11-6599-305-4</span></td><td><b>93540</b></td><td rowspan="2">「붙임 <b>2」</b> <b>참고(ai,</b> eps, pdf <span style=\'color:blue;text-decoration:underline\'><b>file)</b></span></td></tr><tr><td><b>서울시</b> 우수건축자산 제2호, 대선제분 <b>영등포</b> 공장</td><td>979-11-6599-304-7</td><td>93540\n\n<table><tbody><tr><td>구분</td><td>점검일자</td><td><span style=\'color:blue;text-decoration:underline\'><b>점검자</b></span></td><td>점검대상</td><td>점검내용</td><td><b>비고</b></td></tr><tr><td><b>1차</b></td><td>‘21.03.05.</td><td>****************</td><td><b>공무</b> 지하1층(기계실, <span style=\'color:blue;text-decoration:underline\'><b>보일러실)(이동식</b></span> 사다리,고압가스용기)</td><td><b>추락,</b> 화제‧폭발 위험요인</td><td></td></tr><tr><td><span style=\'color:blue;text-decoration:underline\'>2차</span></td><td><b>‘21.03.19.</b></td><td><span style=\'color:red\'><b>****************</b></span></td><td><b>공무</b> <span style=\'color:red\'><b>지하1층(기계실,</b></span> <b>보일러실)(안전모,</b> 청관제 플라스틱용기)</td><td>감전, 충돌 위험요인</td><td></td></tr></tbody></table>\n\n<table><tbody><tr><td colspan="5"><span style=\'color:blue;text-decoration:underline\'>제</span> 1 <b>정</b> <span style=\'color:blue;text-decoration:underline\'><b>수</b></span> <b>장</b></td></tr><tr><td>기종별</td><td><b>일일</b> <b>점검사항</b></td><td><b>공정별</b></td><td><b>점검결과</b></td><td>작업사항 <span style=\'color:blue;text-decoration:underline\'><b>및</b></span> 수리조치 <span style=\'color:blue;text-decoration:underline\'>내역</span></td></tr><tr><td rowspan="5">탁도계</td><td rowspan="5">: 광원램프및 Lense오염상태점검: <b>세정장치</b> 동작상태 점검: <span style=\'color:blue;text-decoration:underline\'>시료의</span> 적정유입량 점검: 측정조내(Cell) <span style=\'color:blue;text-decoration:underline\'><b>침전물,오물,</b></span> 기포발생여부 <span style=\'color:red\'>점검</span></td><td>착수정</td><td><b>양</b> 호</td><td rowspan="10">❍1정수장 착수정 수질측정기기 점검(04/09) - 쳄버, 센서부, 수조: <span style=\'color:red\'>수시</span> 세정❍1정수장 <span style=\'color:red\'>Auto</span> Jar Tester <b>점검(04/09)</b> - <b>응집제</b> <span style=\'color:blue;text-decoration:underline\'>변경:</span> <span style=\'color:blue;text-decoration:underline\'>PAC→PAHCS</span> </td></tr><tr><td>침전지</td><td>양 호</td></tr><tr><td><b>여과지별(12대)</b></td><td>양 호</td></tr><tr><td>여과 배출수</td><td>양 호</td></tr><tr><td><b>여과</b> 통합수</td><td><b>양</b> 호</td></tr><tr><td rowspan="3">pH계</td><td rowspan="3"><span style=\'color:blue;text-decoration:underline\'>:</span> 시료의 <span style=\'color:red\'>적정유입량</span> 점검: 전극내 및 <span style=\'color:red\'>홀더</span> 오염상태</td><td>착수정</td><td>양 호</td></tr><tr><td><b>응집지</b></td><td>양 호</td></tr><tr><td>침전지</td><td>양 호</td></tr><tr><td rowspan="2">알카리도계</td><td rowspan="2"><span style=\'color:red\'><b>:</b></span> 측정치와실험치 <span style=\'color:blue;text-decoration:underline\'>비교분석:</span> 전극 <span style=\'color:blue;text-decoration:underline\'>및</span> <b>측정부</b> <b>상태점검</b></td><td>착수정</td><td><span style=\'color:red\'><b>양</b></span> 호</td></tr><tr><td><span style=\'color:red\'>침전지</span></td><td>양 호</td></tr><tr><td>AUTO쟈-테스터</td><td><span style=\'color:red\'>:</span> 시료,시약,펌프,유닛 상태점검</td><td>착수정</td><td>양 <b>호</b></td><td rowspan="10">❍공정별 <span style=\'color:red\'>수질측정기</span> <b>일일점검.</b> ❍1정수장 <b>잔류염소계</b> 점검(04/09) <b>-</b> 스트레이너 및 드레인 배관 수시 세정 ❍1정수장 <span style=\'color:red\'>샘플링</span> 펌프 <b>점검(01/18∼)</b> 여과수: 샘플링 <b>펌프(3지)소음</b> 발생 <b>점검</b> * <b>양수량</b> <b>부족할</b> 때 교체</td></tr><tr><td><b>전기전도도</b></td><td><span style=\'color:red\'><b>:</b></span> 시료유입량,전극,오염상태</td><td>착수정</td><td><span style=\'color:blue;text-decoration:underline\'>양</span> 호</td></tr><tr><td>수 온</td><td>: 시료유입량,전극,전송,기타</td><td><span style=\'color:blue;text-decoration:underline\'><b>착수정</b></span></td><td>양 <b>호</b></td></tr><tr><td><b>입자계수기</b></td><td>: 시료유입량,센서,전송,기타</td><td><span style=\'color:red\'>여과지,침전지</span></td><td>양 호</td></tr><tr><td rowspan="5"><b>잔류염소계</b></td><td rowspan="5"><b>:</b> <b>시료의</b> 적정유입량 점검: <b>시약조</b> 시약량 <span style=\'color:blue;text-decoration:underline\'>점검:</span> 측정치와 <b>실험치</b> <span style=\'color:blue;text-decoration:underline\'><b>비교분석</b></span></td><td><b>착수정</b></td><td><b>양</b> 호</td></tr><tr><td> <b>착수정(Total)</b></td><td><b>양</b> <span style=\'color:red\'><b>호</b></span></td></tr><tr><td><span style=\'color:blue;text-decoration:underline\'>침전지</span></td><td><b>양</b> 호</td></tr><tr><td><b>여과지</b></td><td><b>양</b> <span style=\'color:red\'><b>호</b></span></td></tr><tr><td>정수지(A,B)</td><td><b>양</b> <span style=\'color:red\'>호</span></td></tr><tr><td>시료수펌프</td><td><b>:</b> 과전류,소음,과열,급수상태</td><td>각 <span style=\'color:blue;text-decoration:underline\'><b>공정별</b></span></td><td><b>양</b> 호</td></tr></tbody></table>\n\n</td></tr></tbody></table>"""
+
+    renderer = HTMLRenderer(
+        min_pad = 20,
+        max_pad = 50,
+        # min_margin = 100,
+        # max_margin = 140,
+        min_margin = 0,
+        max_margin = 0,
     )
-    BytesIO(image_bytes)
+
+    render_out = renderer.render(
+        html=html_style,
+    )
+    image = draw_texts_and_bboxes_on_red_image(
+        render_out["image"],
+        norm_bboxes=render_out["normalized_bboxes"][1:],
+    )
+    # render_out["image"].save("/home/eric/workspace/sample.jpg")
+    image.save("/home/eric/workspace/sample.jpg")

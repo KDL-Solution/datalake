@@ -532,6 +532,7 @@ class DatalakeClient:
         datasets: Optional[List[str]] = None,
         tasks: Optional[List[str]] = None,
         variants: Optional[List[str]] = None,
+        mods: Optional[List[str]] = None,
         text_search: Optional[Dict] = None,
         limit: Optional[int] = None,
     ) -> pd.DataFrame:
@@ -569,6 +570,7 @@ class DatalakeClient:
                         datasets,
                         tasks,
                         variants,
+                        mods,
                         limit,
                     )
 
@@ -883,47 +885,6 @@ class DatalakeClient:
             self.logger.error(f"❌ 프로세스 확인 실패: {e}")
             return {'error': str(e)}
 
-    # def _check_file_exist(
-    #     self,
-    #     dataset,
-    # ):
-    #     """Dataset의 파일 존재 여부를 병렬로 확인"""
-    #     def check_exists(example):
-    #         try:
-    #             if example.get('path'):
-    #                 file_path = Path(example['path'])
-    #                 example['exists'] = file_path.exists()
-    #             else:
-    #                 example['exists'] = False
-    #         except Exception as e:
-    #             self.logger.warning(f"파일 존재 확인 실패: {example.get('path', 'unknown')} - {e}")
-    #             example['exists'] = False
-    #         return example
-
-    #     self.logger.info("📁 파일 존재 여부 확인 중...")
-    #     dataset_with_exists = dataset.map(
-    #         check_exists,
-    #         desc="파일 존재 확인",
-    #         num_proc=self.num_proc
-    #     )
-
-    #     # 존재하는 파일만 필터링
-    #     valid_dataset = dataset_with_exists.filter(
-    #         lambda x: x,
-    #         input_columns=['exists'],
-    #         desc="존재하는 파일 필터링",
-    #         num_proc=self.num_proc
-    #     )
-
-    #     # exists 컬럼 제거
-    #     valid_dataset = valid_dataset.remove_columns(['exists'])
-
-    #     total_items = len(dataset)
-    #     valid_items = len(valid_dataset)
-    #     self.logger.info(f"📊 파일 존재 확인 결과: {valid_items:,}/{total_items:,} 존재")
-
-    #     return valid_dataset
-
     def _save_as_parquet(
         self, 
         search_results: pd.DataFrame, 
@@ -1030,11 +991,12 @@ class DatalakeClient:
 
     def _perform_partition_search(
         self, 
-        duck_client, 
-        providers, 
-        datasets, 
-        tasks, 
-        variants, 
+        duck_client,
+        providers,
+        datasets,
+        tasks,
+        variants,
+        mods,
         limit,
     ):
         """파티션 기반 검색 실행"""
@@ -1043,6 +1005,7 @@ class DatalakeClient:
             datasets=datasets, 
             tasks=tasks,
             variants=variants,
+            mods=mods,
             table=self.table_name,
             limit=limit
         )

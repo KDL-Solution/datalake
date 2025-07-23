@@ -220,6 +220,7 @@ class DuckDBClient:
         datasets: List = [],
         tasks: List = [],
         variants: List = [],
+        mods: List = [],  # <-- 수정된 부분
         table: str = "catalog",
         limit: Optional[int] = None,
     ) -> pd.DataFrame:
@@ -232,7 +233,9 @@ class DuckDBClient:
             tasks = [tasks]
         if isinstance(variants, str):
             variants = [variants]
-        
+        if isinstance(mods, str):  # <-- 수정된 부분
+            mods = [mods]
+
         if providers is None:
             providers = []
         if datasets is None:
@@ -241,15 +244,18 @@ class DuckDBClient:
             tasks = []
         if variants is None:
             variants = []
-            
+        if mods is None:  # <-- 수정된 부분
+            mods = []
+
         providers = [i for i in providers if i]
         datasets = [i for i in datasets if i]
         tasks = [i for i in tasks if i]
         variants = [i for i in variants if i]
-            
+        mods = [i for i in mods if i]  # <-- 수정된 부분
+
         # WHERE 조건 구성
         conditions = []
-        
+
         if providers:
             provider_condition = " OR ".join([f"provider = '{i}'" for i in providers])
             conditions.append(f"({provider_condition})")
@@ -261,10 +267,14 @@ class DuckDBClient:
         if tasks:
             task_condition = " OR ".join([f"task = '{i}'" for i in tasks])
             conditions.append(f"({task_condition})")
-            
+
         if variants:
             variant_condition = " OR ".join([f"variant = '{i}'" for i in variants])
             conditions.append(f"({variant_condition})")
+
+        if mods:  # <-- 수정된 부분
+            mod_condition = " OR ".join([f"mod = '{i}'" for i in mods])
+            conditions.append(f"({mod_condition})")
 
         try:
             # 테이블 스키마 확인
@@ -293,9 +303,8 @@ class DuckDBClient:
             if limit is not None:
                 sql += f" LIMIT {limit}"
             
-            return self.execute_query(
-                sql,
-            )
+            return self.execute_query(sql)
+
         except Exception as e:
             print(f"컬럼 조회 실패: {str(e)}")
             return pd.DataFrame()
